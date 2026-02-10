@@ -58,7 +58,7 @@ itertools = "0.14.0"
 # Feature de timezone é temporário até corrigirem a issue abaixo
 # https://github.com/pola-rs/polars/issues/25148
 polars = { version = "0.52.0", features = ["lazy", "parquet", "timezones"], optional = true }
-regex = "1.11.1"
+regex = "1.12.3"
 unicode-normalization = "0.1.25"
 
 # Perfil de release mais otimizado, porém muito mais lento de compilar.
