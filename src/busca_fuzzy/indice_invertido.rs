@@ -1,76 +1,9 @@
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
-pub type Token = u16;
+use crate::busca_fuzzy::tokenizer::Token;
+
 pub type Doc = u32;
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct NgramTokenizer {
-    pub ngram_size: usize,
-    pub token_map: FxHashMap<String, Token>,
-}
-
-impl NgramTokenizer {
-    pub fn new(ngram_size: usize) -> Self {
-        NgramTokenizer {
-            ngram_size,
-            token_map: FxHashMap::default(),
-        }
-    }
-    pub fn tokenize_search<'a>(&'a self, text: &'a str) -> impl Iterator<Item = Token> + 'a {
-        NgramIter::new(text, self.ngram_size).filter_map(|x| self.token_map.get(x).copied())
-    }
-
-    pub fn tokenize_index<'a>(&'a mut self, text: &'a str) -> impl Iterator<Item = Token> + 'a {
-        NgramIter::new(text, self.ngram_size).map(|x| self.intern(x))
-    }
-
-    pub fn intern(&mut self, s: &str) -> Token {
-        if let Some(&id) = self.token_map.get(s) {
-            return id;
-        }
-
-        let id = self.token_map.len() as Token;
-        let owned = s.to_owned();
-
-        self.token_map.insert(owned, id);
-        id
-    }
-}
-
-pub struct NgramIter<'a> {
-    string: &'a str,
-    ultima_pos: usize,
-    tam_ngram: usize,
-}
-
-impl<'a> NgramIter<'a> {
-    fn new(string: &'a str, tam_ngram: usize) -> Self {
-        Self {
-            string,
-            ultima_pos: 0,
-            tam_ngram,
-        }
-    }
-}
-
-impl<'a> Iterator for NgramIter<'a> {
-    type Item = &'a str;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.ultima_pos + self.tam_ngram > self.string.len() {
-            return None;
-        }
-
-        let start = self.ultima_pos;
-        let end = start + self.tam_ngram;
-        self.ultima_pos += 1;
-        Some(&self.string[start..end])
-    }
-}
-
-/////////////////////
-
 type Contagem = u16;
 
 pub struct SearchIterator<'a> {
@@ -249,58 +182,5 @@ impl InvertedIndex {
         }
 
         resultado
-    }
-}
-
-///////////////////////
-
-#[derive(Serialize, Deserialize, Default, Clone)]
-pub struct StringPool {
-    #[serde(with = "serde_bytes")]
-    blob: Vec<u8>,
-
-    offsets: Vec<(u32, u32)>,
-
-    #[serde(skip)] // não vale serializar
-    pub inverso: FxHashMap<String, u32>,
-}
-
-impl StringPool {
-    pub fn shrink_to_fit(&mut self) {
-        self.blob.shrink_to_fit();
-        self.offsets.shrink_to_fit();
-        self.inverso.shrink_to_fit();
-    }
-
-    pub fn push(&mut self, s: &str) -> u32 {
-        if let Some(&id) = self.inverso.get(s) {
-            return id;
-        }
-
-        let id = self.offsets.len() as u32;
-
-        let start = self.blob.len() as u32;
-        let len = s.len() as u32;
-
-        self.blob.extend_from_slice(s.as_bytes());
-        self.offsets.push((start, len));
-
-        self.inverso.insert(s.to_string(), id);
-
-        id
-    }
-    pub fn get(&self, id: u32) -> &str {
-        let (start, len) = self.offsets[id as usize];
-        unsafe { std::str::from_utf8_unchecked(&self.blob[start as usize..(start + len) as usize]) }
-    }
-    pub fn get_str(&self, s: &str) -> Option<u32> {
-        self.inverso.get(s).copied()
-    }
-    pub fn popular_inverso(&mut self) {
-        self.inverso.clear();
-        for (id, _) in self.offsets.iter().enumerate() {
-            let s = self.get(id as u32);
-            self.inverso.insert(s.to_string(), id as u32);
-        }
     }
 }

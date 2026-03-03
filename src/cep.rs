@@ -60,6 +60,12 @@ pub fn padronizar_cep(valor: &str) -> Result<String, String> {
     Ok(format!("{}-{}", &cep[0..5], &cep[5..8]))
 }
 
+// TODO: Documentação
+pub fn cep_para_numero(cep: &str) -> Option<u32> {
+    let cep_num: String = cep.chars().filter(|c| c.is_numeric()).take(8).collect();
+    cep_num.parse().ok()
+}
+
 /// Padroniza CEPs em formato textual para uma string formatada, tentando corrigir possíveis erros.
 ///
 /// Esta função ignora quaisquer caracteres não numéricos, além de remover números extras e completar com zeros à

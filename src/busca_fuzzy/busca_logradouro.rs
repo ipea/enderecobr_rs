@@ -1,7 +1,11 @@
 use std::io;
 use std::{cmp::Ordering, f32, fs::File, io::BufWriter};
 
-use crate::busca_fuzzy::indice_invertido::{Doc, InvertedIndex, NgramTokenizer, StringPool, Token};
+use crate::busca_fuzzy::indice_invertido::{Doc, InvertedIndex};
+use crate::busca_fuzzy::string_pool::StringPool;
+use crate::busca_fuzzy::tokenizer::{NgramTokenizer, Token};
+use crate::busca_fuzzy::utils::intersect_sorted;
+use crate::cep::cep_para_numero;
 use crate::{padronizar_bairros, padronizar_logradouros};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
@@ -10,11 +14,6 @@ use serde::{Deserialize, Serialize};
 
 type Cep = u32;
 type LocalidadeId = u32;
-
-fn cep_para_numero(cep: &str) -> Option<Cep> {
-    let cep_num: String = cep.chars().filter(|c| c.is_numeric()).take(8).collect();
-    cep_num.parse().ok()
-}
 
 #[derive(Serialize, Deserialize, Clone)]
 struct IndiceMunicipio {
@@ -134,25 +133,6 @@ impl Default for SearchParams {
             min_qnt_index_scan: Some(50),
         }
     }
-}
-
-fn intersect_sorted(a: &[u32], b: &[u32]) -> Vec<u32> {
-    let mut i = 0;
-    let mut j = 0;
-    let mut out = Vec::with_capacity(a.len().min(b.len()));
-
-    while i < a.len() && j < b.len() {
-        match a[i].cmp(&b[j]) {
-            std::cmp::Ordering::Less => i += 1,
-            std::cmp::Ordering::Greater => j += 1,
-            std::cmp::Ordering::Equal => {
-                out.push(a[i]);
-                i += 1;
-                j += 1;
-            }
-        }
-    }
-    out
 }
 
 /// Estrutura usada na resposta do motor de busca com
