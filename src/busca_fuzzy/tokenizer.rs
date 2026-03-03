@@ -6,7 +6,7 @@ pub type Token = u16;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct NgramTokenizer {
     pub ngram_size: usize,
-    pub token_map: FxHashMap<String, Token>,
+    token_map: FxHashMap<String, Token>,
 }
 
 impl NgramTokenizer {
@@ -24,7 +24,11 @@ impl NgramTokenizer {
         NgramIter::new(text, self.ngram_size).map(|x| self.intern(x))
     }
 
-    pub fn intern(&mut self, s: &str) -> Token {
+    pub fn shrink_to_fit(&mut self) {
+        self.token_map.shrink_to_fit();
+    }
+
+    fn intern(&mut self, s: &str) -> Token {
         if let Some(&id) = self.token_map.get(s) {
             return id;
         }
@@ -65,5 +69,69 @@ impl<'a> Iterator for NgramIter<'a> {
         let end = start + self.tam_ngram;
         self.ultima_pos += 1;
         Some(&self.string[start..end])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ngram_iter_basico() {
+        let grams: Vec<&str> = NgramIter::new("abcd", 3).collect();
+        assert_eq!(grams, vec!["abc", "bcd"]);
+    }
+
+    #[test]
+    fn ngram_iter_texto_curto() {
+        let grams: Vec<&str> = NgramIter::new("ab", 3).collect();
+        assert!(grams.is_empty());
+    }
+
+    #[test]
+    fn tokenize_index_interna_tokens_unicos() {
+        let mut tok = NgramTokenizer::new(3);
+
+        let t1: Vec<Token> = tok.tokenize_index("abcd").collect();
+        let t2: Vec<Token> = tok.tokenize_index("abcd").collect();
+
+        // mesma sequência
+        assert_eq!(t1, t2);
+
+        // ids distintos para ngrams distintos
+        assert_ne!(t1[0], t1[1]);
+    }
+
+    #[test]
+    fn tokenize_search_so_retorna_tokens_existentes() {
+        let mut tok = NgramTokenizer::new(3);
+
+        // indexa apenas "abc"
+        tok.tokenize_index("abc").for_each(drop);
+
+        // busca tem um ngram desconhecido
+        let res: Vec<Token> = tok.tokenize_search("abcd").collect();
+
+        // apenas "abc" deve existir
+        assert_eq!(res.len(), 1);
+    }
+
+    #[test]
+    fn tokenize_search_vazio_sem_indexacao() {
+        let tok = NgramTokenizer::new(3);
+
+        let res: Vec<Token> = tok.tokenize_search("abcd").collect();
+        assert!(res.is_empty());
+    }
+
+    #[test]
+    fn shrink_to_fit_nao_afeta_resultado() {
+        let mut tok = NgramTokenizer::new(3);
+
+        let antes: Vec<Token> = tok.tokenize_index("abcd").collect();
+        tok.shrink_to_fit();
+        let depois: Vec<Token> = tok.tokenize_search("abcd").collect();
+
+        assert_eq!(antes, depois);
     }
 }

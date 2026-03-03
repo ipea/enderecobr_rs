@@ -100,7 +100,7 @@ impl GeocodeBrIndexer {
         self.logr_pool.shrink_to_fit();
 
         self.municipios.shrink_to_fit();
-        self.tokenizer.token_map.shrink_to_fit();
+        self.tokenizer.shrink_to_fit();
 
         for municipio in self.municipios.values_mut() {
             municipio.idx_logradouro.finalizar();

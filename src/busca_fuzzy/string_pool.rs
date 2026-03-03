@@ -51,3 +51,94 @@ impl StringPool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_string_pool_empty() {
+        let pool = StringPool::default();
+        assert_eq!(pool.blob.len(), 0);
+        assert_eq!(pool.offsets.len(), 0);
+        assert_eq!(pool.inverso.len(), 0);
+    }
+
+    #[test]
+    fn test_string_pool_push_get_roundtrip() {
+        let mut pool = StringPool::default();
+        let id1 = pool.push("hello");
+        let id2 = pool.push("world");
+        let id3 = pool.push("hello"); // duplicado
+
+        assert_eq!(id1, 0);
+        assert_eq!(id2, 1);
+        assert_eq!(id3, 0); // mesmo ID para string duplicada
+        assert_eq!(pool.get(id1), "hello");
+        assert_eq!(pool.get(id2), "world");
+    }
+
+    #[test]
+    fn test_string_pool_get_str_existing() {
+        let mut pool = StringPool::default();
+        pool.push("test");
+        pool.push("rust");
+
+        assert_eq!(pool.get_str("test"), Some(0));
+        assert_eq!(pool.get_str("rust"), Some(1));
+        assert_eq!(pool.get_str("unknown"), None);
+    }
+
+    #[test]
+    fn test_string_pool_no_duplicates_in_blob() {
+        let mut pool = StringPool::default();
+        let id1 = pool.push("abc");
+        let id2 = pool.push("abc");
+
+        assert_eq!(id1, id2);
+        assert_eq!(pool.offsets.len(), 1);
+        assert_eq!(pool.blob.len(), 3);
+    }
+
+    #[test]
+    fn test_string_pool_push_long_string() {
+        let mut pool = StringPool::default();
+        let long_str = "a".repeat(1000);
+        let id = pool.push(&long_str);
+
+        assert_eq!(pool.get(id), long_str.as_str());
+        assert_eq!(pool.blob.len(), 1000);
+        assert_eq!(pool.offsets.len(), 1);
+    }
+
+    #[test]
+    fn test_string_pool_popular_inverso() {
+        let mut pool = StringPool::default();
+        pool.push("first");
+        pool.push("second");
+        // inverso está vazio
+        assert_eq!(pool.inverso.len(), 2);
+
+        pool.inverso.clear();
+        assert_eq!(pool.inverso.len(), 0);
+
+        pool.popular_inverso();
+        assert_eq!(pool.inverso.len(), 2);
+        assert_eq!(pool.get_str("first"), Some(0));
+        assert_eq!(pool.get_str("second"), Some(1));
+    }
+
+    #[test]
+    fn test_string_pool_shrink_to_fit() {
+        let mut pool = StringPool::default();
+        pool.push("small");
+        pool.inverso.reserve(1000);
+        pool.inverso.shrink_to_fit(); // força redução após alocação
+        pool.shrink_to_fit();
+
+        let capacity_after = pool.blob.capacity();
+        pool.blob.reserve(100);
+        pool.shrink_to_fit();
+        assert_eq!(pool.blob.capacity(), capacity_after);
+    }
+}

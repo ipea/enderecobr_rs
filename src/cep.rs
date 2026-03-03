@@ -60,7 +60,20 @@ pub fn padronizar_cep(valor: &str) -> Result<String, String> {
     Ok(format!("{}-{}", &cep[0..5], &cep[5..8]))
 }
 
-// TODO: Documentação
+/// Converte uma string de CEP em um número inteiro, removendo caracteres não numéricos.
+///
+/// Extrai até 8 dígitos numéricos consecutivos do início da string fornecida e tenta
+/// convertê-los em um valor `u32`. Retorna `None` se a string não contiver dígitos
+/// suficientes ou se a conversão falhar.
+///
+/// # Exemplo
+/// ```
+/// use enderecobr_rs::cep::cep_para_numero;
+/// assert_eq!(cep_para_numero("01234567"), Some(1234567));
+/// assert_eq!(cep_para_numero("01.234-567"), Some(1234567));
+/// assert_eq!(cep_para_numero("abc"), None);
+/// assert_eq!(cep_para_numero("000000"), Some(0));
+/// ```
 pub fn cep_para_numero(cep: &str) -> Option<u32> {
     let cep_num: String = cep.chars().filter(|c| c.is_numeric()).take(8).collect();
     cep_num.parse().ok()
@@ -124,5 +137,15 @@ mod tests {
 
         // Teste novo
         assert_eq!(padronizar_cep("   ").unwrap(), "");
+    }
+
+    #[test]
+    fn testa_cep_para_numero() {
+        assert_eq!(cep_para_numero("12345678"), Some(12345678));
+        assert_eq!(cep_para_numero("12345"), Some(12345));
+        assert_eq!(cep_para_numero("12-345.678"), Some(12345678));
+        assert_eq!(cep_para_numero(""), None);
+        assert_eq!(cep_para_numero("abcdefg"), None);
+        assert_eq!(cep_para_numero("00000000"), Some(0));
     }
 }
