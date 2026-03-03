@@ -93,3 +93,7 @@ snapshot-download: $(SNAPSHOT_FILES:%=$(DIR_SNAPSHOTS)/%)
 snapshot-criar-bruto:
 	duckdb < $(DIR_SQLS)/snapshot_test_bruto.sql
 
+### Datasets do CNEFE do Geocodebr
+
+$(DIR_BRUTOS)/logr_cep_loc.parquet:
+	curl --location -o $@ "https://github.com/ipeaGIT/padronizacao_cnefe/releases/download/v0.4.1/municipio_logradouro_cep_localidade.parquet"

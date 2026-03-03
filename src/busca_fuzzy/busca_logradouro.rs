@@ -6,7 +6,10 @@ use crate::busca_fuzzy::string_pool::StringPool;
 use crate::busca_fuzzy::tokenizer::{NgramTokenizer, Token};
 use crate::busca_fuzzy::utils::intersect_sorted;
 use crate::cep::cep_para_numero;
-use crate::{padronizar_bairros, padronizar_logradouros};
+use crate::{
+    padronizar_bairros, padronizar_estados_para_sigla, padronizar_logradouros,
+    padronizar_municipios,
+};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
@@ -179,8 +182,9 @@ impl GeocodeBrIndexer {
         //
 
         let indice = self.municipios.get(&(
-            self.mun_pool.get_str(municipio)?,
-            self.est_pool.get_str(estado)?,
+            self.mun_pool.get_str(&padronizar_municipios(municipio))?,
+            self.est_pool
+                .get_str(padronizar_estados_para_sigla(estado))?,
         ))?;
 
         let ids_ceps = cep
