@@ -1,4 +1,6 @@
-use std::{collections::HashMap, sync::LazyLock};
+use std::sync::LazyLock;
+
+use rustc_hash::FxHashMap;
 
 use crate::{normalizar, Padronizador};
 
@@ -15,13 +17,13 @@ struct Estado {
 // quando uso `const`. Nesse caso, como tenho uma construção complexa da struct `Padronizador`,
 // tenho que usar static com inicialização Lazy (o LazyLock aqui previne condições de corrida).
 
-static ESTADOS_MAP: LazyLock<HashMap<String, &'static Estado>> = LazyLock::new(criar_estado_map);
+static ESTADOS_MAP: LazyLock<FxHashMap<String, &'static Estado>> = LazyLock::new(criar_estado_map);
 
 // O trecho &'static indica que estou referenciando uma posição de memória estática,
 // o que evita cópias desnecessárias.
 
-fn criar_estado_map() -> HashMap<String, &'static Estado> {
-    let mut estados = HashMap::<String, &'static Estado>::with_capacity(ESTADOS.len());
+fn criar_estado_map() -> FxHashMap<String, &'static Estado> {
+    let mut estados = FxHashMap::<String, &'static Estado>::default();
     ESTADOS.iter().for_each(|e| {
         estados.insert(e.sigla.to_string(), e);
         estados.insert(e.codigo.to_string(), e);

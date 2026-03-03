@@ -1,10 +1,12 @@
-use std::{collections::HashMap, sync::LazyLock};
+use std::sync::LazyLock;
+
+use rustc_hash::FxHashMap;
 
 use crate::{normalizar, Padronizador};
 
 static PADRONIZADOR: LazyLock<Padronizador> = LazyLock::new(criar_padronizador);
 
-static MUNICIPIOS_MAP: LazyLock<HashMap<String, String>> = LazyLock::new(criar_municipio_map);
+static MUNICIPIOS_MAP: LazyLock<FxHashMap<String, String>> = LazyLock::new(criar_municipio_map);
 
 pub fn criar_padronizador() -> Padronizador {
     let mut padronizador = Padronizador::default();
@@ -43,10 +45,10 @@ pub fn criar_padronizador() -> Padronizador {
     padronizador
 }
 
-pub fn criar_municipio_map() -> HashMap<String, String> {
+pub fn criar_municipio_map() -> FxHashMap<String, String> {
     // a include_str! embute a string no código em tempo de compilação.
     let municipios_csv: &str = include_str!("data/municipios.csv");
-    let mut mapa = HashMap::<String, String>::new();
+    let mut mapa = FxHashMap::<String, String>::default();
 
     for linha in municipios_csv.lines().skip(1) {
         let cols: Vec<&str> = linha.split(",").collect();
