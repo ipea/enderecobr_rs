@@ -7,6 +7,7 @@ use itertools::Itertools;
 use regex::{Regex, RegexSet};
 
 pub mod bairro;
+pub mod busca_fuzzy;
 pub mod cep;
 pub mod complemento;
 pub mod estado;
