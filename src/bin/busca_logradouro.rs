@@ -28,6 +28,12 @@ struct Args {
     #[arg(short('c'), long)]
     cep: Option<String>,
 
+    #[arg(short('s'), long)]
+    min_sim: Option<f32>,
+
+    #[arg(short('o'), long)]
+    min_overlap: Option<f32>,
+
     logradouro: Option<String>,
 }
 
@@ -103,6 +109,16 @@ fn create_ngram_index() -> Result<GeocodeBrIndexer, ErroSerdeIndice> {
 }
 
 fn realizar_busca(trig: &GeocodeBrIndexer, args: &Args, logradouro: Option<String>) {
+    let mut params = SearchParams::default();
+
+    if let Some(v) = args.min_overlap {
+        params.sobreposicao_min_tokens = Some(v);
+    }
+
+    if let Some(v) = args.min_sim {
+        params.similaridade_min = Some(v);
+    }
+
     let inicio = Instant::now(); // Marca o início do tempo
     let sims = trig.busca(
         &args.estado,
@@ -110,10 +126,7 @@ fn realizar_busca(trig: &GeocodeBrIndexer, args: &Args, logradouro: Option<Strin
         logradouro.as_deref().unwrap_or(""),
         args.localidade.as_deref(),
         args.cep.as_deref(),
-        &SearchParams {
-            min_qnt_index_scan: Some(50usize),
-            ..SearchParams::default()
-        },
+        &params,
     );
     let duracao = inicio.elapsed().as_micros();
 

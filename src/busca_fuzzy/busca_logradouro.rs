@@ -120,7 +120,7 @@ impl GeocodeBrIndexer {
 
 pub struct SearchParams {
     pub sobreposicao_min_tokens: Option<f32>,
-    pub similaridade_min: f32,
+    pub similaridade_min: Option<f32>,
     pub max_df_freq: Option<f32>,
     pub similaridade_fun: fn(&str, &str) -> f32,
     pub min_qnt_index_scan: Option<usize>,
@@ -130,7 +130,7 @@ impl Default for SearchParams {
     fn default() -> Self {
         SearchParams {
             sobreposicao_min_tokens: Some(0.5),
-            similaridade_min: 0.8,
+            similaridade_min: Some(0.8),
             max_df_freq: Some(0.1),
             similaridade_fun: |a, b| strsim::jaro(a, b) as f32,
             min_qnt_index_scan: Some(50),
@@ -254,7 +254,9 @@ impl GeocodeBrIndexer {
     ) -> Option<ScoredDoc<'_>> {
         let doc = self.logr_pool.get(doc_id);
         let sim = (params.similaridade_fun)(logradouro, doc);
-        (sim >= params.similaridade_min).then_some(ScoredDoc {
+
+        let min_sim = params.similaridade_min.unwrap_or(0.0);
+        (sim >= min_sim).then_some(ScoredDoc {
             texto: doc,
             score: sim,
             doc: doc_id,
