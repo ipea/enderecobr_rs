@@ -1102,6 +1102,7 @@ dependencies = [
  "serde_bytes",
  "strsim",
  "unicode-normalization",
+ "zstd",
 ]
 
 [[package]]

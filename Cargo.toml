@@ -54,7 +54,7 @@ required-features = ["cli_busca_fuzzy", "busca_fuzzy"]
 default = []
 experimental = ["crfsuite"]
 cli = ["polars", "clap"]
-busca_fuzzy = ["serde", "serde_bytes", "strsim", "rmp-serde", "postcard"]
+busca_fuzzy = ["serde", "serde_bytes", "strsim", "rmp-serde", "postcard", "zstd"]
 cli_busca_fuzzy = ["arrow", "clap", "parquet"]
 
 [dependencies]
@@ -67,7 +67,7 @@ parquet = { version = "55.2.0", optional = true }
 # Feature de timezone é temporário até corrigirem a issue abaixo
 # https://github.com/pola-rs/polars/issues/25148
 polars = { version = "0.52.0", features = ["lazy", "parquet", "timezones"], optional = true }
-postcard = { version = "1.1.3", optional = true, features = ["alloc"]}
+postcard = { version = "1.1.3", optional = true, features = ["alloc", "use-std"]}
 regex = "1.11.1"
 rmp-serde = { version = "1.3.0", optional = true }
 rustc-hash = {version = "2.1.1" }
@@ -75,6 +75,7 @@ serde = {version = "1.0.228", features = ["derive"], optional = true }
 serde_bytes = { version = "0.11.19", optional = true }
 strsim = { version = "0.11.1", optional = true }
 unicode-normalization = "0.1.25"
+zstd = { version = "0.13.3", optional = true }
 
 # Perfil de release mais otimizado, porém muito mais lento de compilar.
 # https://doc.rust-lang.org/cargo/reference/profiles.html
