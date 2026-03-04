@@ -1,5 +1,5 @@
-use std::fs;
-use std::io::{self, BufReader, BufWriter, Write};
+use std::borrow::Cow;
+use std::io::{self, BufReader, BufWriter};
 use std::{cmp::Ordering, f32, fs::File};
 
 use crate::busca_fuzzy::indice_invertido::{Doc, InvertedIndex};
@@ -180,48 +180,35 @@ impl GeocodeBrIndexer {
         cep: Option<&str>,
         params: &SearchParams,
     ) -> Option<ScoredDoc<'_>> {
-        //
-
-        let indice = self.municipios.get(&(
+        // Pego o índice refente ao município em questão.
+        let par_municipio_uf = (
             self.mun_pool.get_str(&padronizar_municipios(municipio))?,
             self.est_pool
                 .get_str(padronizar_estados_para_sigla(estado))?,
-        ))?;
+        );
+        let indice_municipio = self.municipios.get(&par_municipio_uf)?;
 
-        let ids_ceps = cep
-            .and_then(cep_para_numero)
-            .and_then(|x| indice.por_cep.get(&x));
-
-        let id_localidade = localidade
-            .map(padronizar_bairros)
-            .and_then(|l| self.loc_pool.get_str(l.as_str()));
-
-        let ids_localidades = id_localidade.and_then(|id| indice.por_localidade.get(&id));
-
-        let ids_filtro: Option<&Vec<Doc>> = match (ids_ceps, ids_localidades) {
-            (Some(a), Some(b)) => Some(&intersect_sorted(a, b)),
-            (Some(a), None) => Some(a),
-            (None, Some(b)) => Some(b),
-            (None, None) => None,
-        };
+        let ids_filtro = self.obter_ids_válidos(localidade, cep, indice_municipio);
 
         // Se existem ids de localidade ou CEP, e a entre eles intercessão é vazia,
         // então o resultado do algoritmo é vazio.
-        if ids_filtro.is_some_and(|ids| ids.is_empty()) {
+        if ids_filtro.as_ref().is_some_and(|ids| ids.is_empty()) {
             return None;
         }
 
         let logradouro = padronizar_logradouros(logradouro);
 
-        // Caso existam alguma limitação de CEP ou Bairro, uso a intercessão aqui.
+        // Caso existam alguma limitação de CEP ou Bairro, considero eles aqui.
         // Senão uso todos os endereços do município.
-        let ids_seq_scan = ids_filtro.unwrap_or(&indice.idx_logradouro.docs);
+        let ids_slice = ids_filtro
+            .as_deref()
+            .unwrap_or(&indice_municipio.idx_logradouro.docs);
 
         // Caso tenho poucos valores para checar,
         // faço uma consulta sequencial em vez de usar o índice
         if let Some(qtd_index_scan) = params.min_qnt_index_scan {
-            if qtd_index_scan >= ids_seq_scan.len() {
-                let res = ids_seq_scan
+            if qtd_index_scan >= ids_slice.len() {
+                let res = ids_slice
                     .iter()
                     // Trecho comum para localizar o logradouro mais similar
                     .flat_map(|doc_id| self.score_doc(logradouro.as_str(), *doc_id, params))
@@ -233,18 +220,45 @@ impl GeocodeBrIndexer {
 
         // Se tenho muitos valores, uso o índice já construído e só mantenho só
         // os endereços solicitados.
+
+        let pular_filtragem = ids_filtro.is_none(); // ignoro o filtro se nem CEP ou Localidade foi
+                                                    // informado
+
         let query: Vec<Token> = self.tokenizer.tokenize_search(&logradouro).collect();
-        indice
+        indice_municipio
             .idx_logradouro
             .buscar(&query, params.sobreposicao_min_tokens, params.max_df_freq)
-            .filter(|doc_id| {
-                ids_filtro
-                    .as_ref()
-                    .map_or(true, |ids| ids.binary_search(doc_id).is_ok())
-            })
+            .filter(|doc_id| pular_filtragem || ids_slice.binary_search(doc_id).is_ok())
             // Trecho comum para localizar o logradouro mais similar
             .flat_map(|doc_id| self.score_doc(logradouro.as_str(), doc_id, params))
             .max()
+    }
+
+    /// Coleta os ids válidos para o par de localidade e CEP de
+    /// um dad município.
+    /// Retorna None quando não existe nem localidade e nem CEP.
+    fn obter_ids_válidos<'a>(
+        &'a self,
+        localidade: Option<&str>,
+        cep: Option<&str>,
+        indice_municipio: &'a IndiceMunicipio,
+    ) -> Option<Cow<'a, [u32]>> {
+        let ids_ceps = cep
+            .and_then(cep_para_numero)
+            .and_then(|x| indice_municipio.por_cep.get(&x));
+
+        let id_localidade = localidade
+            .map(padronizar_bairros)
+            .and_then(|l| self.loc_pool.get_str(l.as_str()));
+
+        let ids_localidades = id_localidade.and_then(|id| indice_municipio.por_localidade.get(&id));
+
+        match (ids_ceps, ids_localidades) {
+            (Some(a), Some(b)) => Some(Cow::Owned(intersect_sorted(a, b))),
+            (Some(a), None) => Some(Cow::Borrowed(a)),
+            (None, Some(b)) => Some(Cow::Borrowed(b)),
+            (None, None) => None,
+        }
     }
 
     fn score_doc(
@@ -264,8 +278,9 @@ impl GeocodeBrIndexer {
         })
     }
 
+    // TODO: tratamento de erro!
     pub fn salvar(&self, file_path: &str) -> Result<(), ErroSerdeIndice> {
-        let mut file = File::create(file_path)?;
+        let file = File::create(file_path)?;
         let writer = BufWriter::new(file);
 
         let mut encoder = zstd::Encoder::new(writer, 6)?; // nível 1–22
@@ -275,6 +290,7 @@ impl GeocodeBrIndexer {
         Ok(())
     }
 
+    // TODO: tratamento de erro!
     pub fn carregar(file_path: &str) -> Result<Self, ErroSerdeIndice> {
         let file = File::open(file_path)?;
         let reader = BufReader::new(file);
@@ -292,6 +308,7 @@ impl GeocodeBrIndexer {
     }
 }
 
+// TODO: Tratamento de erro!
 #[derive(Debug)]
 pub enum ErroSerdeIndice {
     Io(io::Error),
@@ -315,4 +332,186 @@ impl From<rmp_serde::decode::Error> for ErroSerdeIndice {
     fn from(e: rmp_serde::decode::Error) -> Self {
         Self::Decode(e)
     }
+}
+
+// Testes
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn params() -> SearchParams {
+        SearchParams {
+            similaridade_min: Some(0.0), // facilita match
+            ..Default::default()
+        }
+    }
+
+    fn build_index() -> GeocodeBrIndexer {
+        let mut idx = GeocodeBrIndexer::new(3);
+
+        idx.add(
+            "DF",
+            "BRASILIA",
+            "RUA DAS FLORES",
+            Some("CENTRO"),
+            Some("70000000"),
+        );
+
+        idx.add(
+            "DF",
+            "BRASILIA",
+            "AVENIDA PAULISTA",
+            Some("CENTRO"),
+            Some("70000001"),
+        );
+
+        idx.add(
+            "DF",
+            "BRASILIA",
+            "RUA DAS ACACIAS",
+            Some("SUL"),
+            Some("70000002"),
+        );
+
+        idx.finalizar();
+        idx
+    }
+
+    fn assert_texto_busca(scored: Option<ScoredDoc>, esperado: &str) {
+        assert_eq!(scored.map(|x| x.texto), Some(esperado));
+    }
+
+    #[test]
+    fn busca_basica_sem_filtros() {
+        let idx = build_index();
+
+        let res = idx.busca("DF", "BRASILIA", "RUA DAS FLORES", None, None, &params());
+        assert_texto_busca(res, "RUA DAS FLORES");
+    }
+
+    #[test]
+    fn busca_filtrando_por_cep() {
+        let idx = build_index();
+
+        let res = idx.busca(
+            "DF",
+            "BRASILIA",
+            "RUA DAS FLORES",
+            None,
+            Some("70000000"),
+            &params(),
+        );
+        assert_texto_busca(res, "RUA DAS FLORES");
+    }
+
+    #[test]
+    fn busca_filtrando_por_localidade() {
+        let idx = build_index();
+
+        let res = idx.busca(
+            "DF",
+            "BRASILIA",
+            "RUA DAS FLORES",
+            Some("CENTRO"),
+            None,
+            &params(),
+        );
+
+        assert_texto_busca(res, "RUA DAS FLORES");
+    }
+
+    #[test]
+    fn busca_intersecao_vazia_retorna_none() {
+        let idx = build_index();
+
+        // CEP de um bairro + localidade de outro
+        let res = idx.busca(
+            "DF",
+            "BRASILIA",
+            "RUA DAS FLORES",
+            Some("Sul"),
+            Some("70000000"),
+            &params(),
+        );
+
+        assert!(res.is_none());
+    }
+
+    #[test]
+    fn busca_municipio_inexistente() {
+        let idx = build_index();
+
+        let res = idx.busca(
+            "DF",
+            "CIDADE INEXISTENTE",
+            "RUA DAS FLORES",
+            None,
+            None,
+            &params(),
+        );
+
+        assert!(res.is_none());
+    }
+
+    #[test]
+    fn scored_doc_ordena_por_score_depois_doc() {
+        let a = ScoredDoc {
+            texto: "A",
+            score: 0.9,
+            doc: 1,
+        };
+
+        let b = ScoredDoc {
+            texto: "B",
+            score: 0.9,
+            doc: 2,
+        };
+
+        assert!(a < b);
+    }
+
+    #[test]
+    fn obter_ids_validos_sem_filtros() {
+        let idx = build_index();
+
+        let key = (
+            idx.mun_pool.get_str("BRASILIA").unwrap(),
+            idx.est_pool.get_str("DF").unwrap(),
+        );
+
+        let mun = idx.municipios.get(&key).unwrap();
+
+        let res = idx.obter_ids_válidos(None, None, mun);
+        assert!(res.is_none());
+    }
+
+    #[test]
+    fn salvar_e_carregar_roundtrip() {
+        let idx = build_index();
+
+        let path = "/tmp/geocode_test.idx";
+
+        idx.salvar(path).unwrap();
+        let mut loaded = GeocodeBrIndexer::carregar(path).unwrap();
+        loaded.preparar_pools();
+
+        let res = loaded.busca("DF", "BRASILIA", "RUA DAS FLORES", None, None, &params());
+
+        assert_texto_busca(res, "RUA DAS FLORES");
+    }
+
+    #[test]
+    fn caminho_sequencial_quando_slice_pequeno() {
+        let idx = build_index();
+
+        let mut p = params();
+        p.min_qnt_index_scan = Some(usize::MAX); // força caminho sequencial
+
+        let res = idx.busca("DF", "BRASILIA", "AVENIDA PAULISTA", None, None, &p);
+
+        assert_texto_busca(res, "AVENIDA PAULISTA");
+    }
+
+    // TODO: MOAR TESTES!
 }
