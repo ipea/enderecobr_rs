@@ -38,13 +38,14 @@ struct Args {
 }
 
 fn create_ngram_index() -> Result<GeocodeBrIndexer, ErroSerdeIndice> {
-    let file_name = "datasets/dados/indice.msgpack";
+    let file_name = "datasets/dados/indice.bin";
 
     if let Ok(mut indice) = GeocodeBrIndexer::carregar(file_name) {
         indice.preparar_pools();
         return Ok(indice);
     }
 
+    println!("Indexando...");
     let file = File::open("datasets/dados/brutos/logr_cep_loc.parquet")?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
 

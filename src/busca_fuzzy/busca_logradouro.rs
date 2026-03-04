@@ -1,5 +1,6 @@
-use std::io;
-use std::{cmp::Ordering, f32, fs::File, io::BufWriter};
+use std::fs;
+use std::io::{self, Write};
+use std::{cmp::Ordering, f32, fs::File};
 
 use crate::busca_fuzzy::indice_invertido::{Doc, InvertedIndex};
 use crate::busca_fuzzy::string_pool::StringPool;
@@ -264,17 +265,17 @@ impl GeocodeBrIndexer {
     }
 
     pub fn salvar(&self, file_path: &str) -> Result<(), ErroSerdeIndice> {
-        let file = File::create(file_path)?;
-        let mut writer = BufWriter::with_capacity(10 * 1024 * 1024, file);
-        rmp_serde::encode::write_named(writer.get_mut(), self)?;
+        let mut file = File::create(file_path)?;
+        let bytes = postcard::to_allocvec(self).unwrap();
+        file.write_all(&bytes).unwrap();
+
         Ok(())
     }
 
     pub fn carregar(file_path: &str) -> Result<Self, ErroSerdeIndice> {
-        let file = File::open(file_path)?;
-        let reader = std::io::BufReader::with_capacity(10 * 1024 * 1024, file);
-        let res = rmp_serde::decode::from_read(reader)?;
-        Ok(res)
+        let bytes = fs::read(file_path)?;
+        let obj = postcard::from_bytes(&bytes).unwrap();
+        Ok(obj)
     }
 
     pub fn preparar_pools(&mut self) {
