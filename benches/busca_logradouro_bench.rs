@@ -10,7 +10,7 @@ use enderecobr_rs::busca_fuzzy::busca_logradouro::{
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 fn create_ngram_index() -> Result<GeocodeBrIndexer, ErroSerdeIndice> {
-    let file_name = "datasets/dados/indice.msgpack";
+    let file_name = "datasets/dados/indice.bin";
 
     let mut index = GeocodeBrIndexer::carregar(file_name)?;
     index.preparar_pools();

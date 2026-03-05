@@ -188,7 +188,7 @@ impl GeocodeBrIndexer {
         );
         let indice_municipio = self.municipios.get(&par_municipio_uf)?;
 
-        let ids_filtro = self.obter_ids_válidos(localidade, cep, indice_municipio);
+        let ids_filtro = self.obter_ids_validos(localidade, cep, indice_municipio);
 
         // Se existem ids de localidade ou CEP, e a entre eles intercessão é vazia,
         // então o resultado do algoritmo é vazio.
@@ -237,7 +237,7 @@ impl GeocodeBrIndexer {
     /// Coleta os ids válidos para o par de localidade e CEP de
     /// um dad município.
     /// Retorna None quando não existe nem localidade e nem CEP.
-    fn obter_ids_válidos<'a>(
+    fn obter_ids_validos<'a>(
         &'a self,
         localidade: Option<&str>,
         cep: Option<&str>,
@@ -351,24 +351,24 @@ mod tests {
         let mut idx = GeocodeBrIndexer::new(3);
 
         idx.add(
-            "DF",
-            "BRASILIA",
+            "SP",
+            "SAO PAULO",
             "RUA DAS FLORES",
             Some("CENTRO"),
             Some("70000000"),
         );
 
         idx.add(
-            "DF",
-            "BRASILIA",
+            "SP",
+            "SAO PAULO",
             "AVENIDA PAULISTA",
             Some("CENTRO"),
             Some("70000001"),
         );
 
         idx.add(
-            "DF",
-            "BRASILIA",
+            "SP",
+            "SAO PAULO",
             "RUA DAS ACACIAS",
             Some("SUL"),
             Some("70000002"),
@@ -386,7 +386,7 @@ mod tests {
     fn busca_basica_sem_filtros() {
         let idx = build_index();
 
-        let res = idx.busca("DF", "BRASILIA", "RUA DAS FLORES", None, None, &params());
+        let res = idx.busca("SP", "SAO PAULO", "RUA DAS FLORES", None, None, &params());
         assert_texto_busca(res, "RUA DAS FLORES");
     }
 
@@ -395,8 +395,8 @@ mod tests {
         let idx = build_index();
 
         let res = idx.busca(
-            "DF",
-            "BRASILIA",
+            "SP",
+            "SAO PAULO",
             "RUA DAS FLORES",
             None,
             Some("70000000"),
@@ -410,8 +410,8 @@ mod tests {
         let idx = build_index();
 
         let res = idx.busca(
-            "DF",
-            "BRASILIA",
+            "SP",
+            "SAO PAULO",
             "RUA DAS FLORES",
             Some("CENTRO"),
             None,
@@ -427,8 +427,8 @@ mod tests {
 
         // CEP de um bairro + localidade de outro
         let res = idx.busca(
-            "DF",
-            "BRASILIA",
+            "SP",
+            "SAO PAULO",
             "RUA DAS FLORES",
             Some("Sul"),
             Some("70000000"),
@@ -443,7 +443,7 @@ mod tests {
         let idx = build_index();
 
         let res = idx.busca(
-            "DF",
+            "SP",
             "CIDADE INEXISTENTE",
             "RUA DAS FLORES",
             None,
@@ -476,13 +476,13 @@ mod tests {
         let idx = build_index();
 
         let key = (
-            idx.mun_pool.get_str("BRASILIA").unwrap(),
-            idx.est_pool.get_str("DF").unwrap(),
+            idx.mun_pool.get_str("SAO PAULO").unwrap(),
+            idx.est_pool.get_str("SP").unwrap(),
         );
 
         let mun = idx.municipios.get(&key).unwrap();
 
-        let res = idx.obter_ids_válidos(None, None, mun);
+        let res = idx.obter_ids_validos(None, None, mun);
         assert!(res.is_none());
     }
 
@@ -496,7 +496,7 @@ mod tests {
         let mut loaded = GeocodeBrIndexer::carregar(path).unwrap();
         loaded.preparar_pools();
 
-        let res = loaded.busca("DF", "BRASILIA", "RUA DAS FLORES", None, None, &params());
+        let res = loaded.busca("SP", "SAO PAULO", "RUA DAS FLORES", None, None, &params());
 
         assert_texto_busca(res, "RUA DAS FLORES");
     }
@@ -508,7 +508,7 @@ mod tests {
         let mut p = params();
         p.min_qnt_index_scan = Some(usize::MAX); // força caminho sequencial
 
-        let res = idx.busca("DF", "BRASILIA", "AVENIDA PAULISTA", None, None, &p);
+        let res = idx.busca("SP", "SAO PAULO", "AVENIDA PAULISTA", None, None, &p);
 
         assert_texto_busca(res, "AVENIDA PAULISTA");
     }
