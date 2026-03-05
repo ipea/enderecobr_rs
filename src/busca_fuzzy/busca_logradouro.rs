@@ -170,6 +170,76 @@ impl<'a> Ord for ScoredDoc<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NivelPrecisao {
+    Municipio,
+    Localidade,
+    Cep,
+    CepLocalidade,
+    Logradouro,
+    LogradouroLocalidade,
+    LogradouroCep,
+    LogradouroCepLocalidade,
+}
+
+struct CandidatoGeocode {
+    logradouro: u32,
+    mesmo_cep: bool,
+    mesma_localidade: bool,
+    similaridade_logradouro: f32,
+}
+
+impl CandidatoGeocode {
+    fn nivel_completude(&self) -> u8 {
+        match (self.mesmo_cep, self.mesma_localidade) {
+            (true, true) => 3,
+            (true, false) => 2,
+            (false, true) => 1,
+            (false, false) => 0,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ResultadoGeocode {
+    pub estado: String,
+    pub municipio: String,
+    pub logradouro: Option<String>,
+    pub cep: Option<String>,
+    pub localidade: Option<String>,
+    pub similaridade_logradouro: Option<f32>,
+}
+
+// pub struct ResultadoGeocode<'a> {
+//     pub estado: &'a str,
+//     pub municipio: &'a str,
+//     pub logradouro: Option<String>,
+//     pub cep: Option<&'a str>,
+//     pub localidade: Option<&'a str>,
+//
+//     pub similaridade_logradouro: Option<f32>,
+//     pub precisao: NivelPrecisao,
+// }
+//
+// impl<'a> ResultadoGeocode<'a> {
+//     pub fn nivel_precisao(&self) -> NivelPrecisao {
+//         match (
+//             self.logradouro.is_some(),
+//             self.cep.is_some(),
+//             self.localidade.is_some(),
+//         ) {
+//             (true, true, true) => NivelPrecisao::LogradouroCepLocalidade,
+//             (true, true, false) => NivelPrecisao::LogradouroCep,
+//             (true, false, true) => NivelPrecisao::LogradouroLocalidade,
+//             (true, false, false) => NivelPrecisao::Logradouro,
+//             (false, true, true) => NivelPrecisao::CepLocalidade,
+//             (false, true, false) => NivelPrecisao::Cep,
+//             (false, false, true) => NivelPrecisao::Localidade,
+//             (false, false, false) => NivelPrecisao::Municipio,
+//         }
+//     }
+// }
+
 impl GeocodeBrIndexer {
     pub fn busca(
         &self,
@@ -261,6 +331,157 @@ impl GeocodeBrIndexer {
         }
     }
 
+    pub fn busca_geocode(
+        &self,
+        estado: &str,
+        municipio: &str,
+        logradouro: &str,
+        localidade: Option<&str>,
+        cep: Option<&str>,
+        params: &SearchParams,
+    ) -> Option<ResultadoGeocode> {
+        // Pego o índice refente ao município em questão.
+        let par_municipio_uf = (
+            self.mun_pool.get_str(&padronizar_municipios(municipio))?,
+            self.est_pool
+                .get_str(padronizar_estados_para_sigla(estado))?,
+        );
+        let indice_municipio = self.municipios.get(&par_municipio_uf)?;
+
+        let ids_ceps = cep
+            .and_then(cep_para_numero)
+            .and_then(|c| indice_municipio.por_cep.get(&c));
+
+        let id_localidades = localidade
+            .map(padronizar_bairros)
+            .and_then(|l| self.loc_pool.get_str(l.as_str()))
+            .and_then(|l| indice_municipio.por_localidade.get(&l));
+
+        let logradouro = padronizar_logradouros(logradouro);
+
+        let mut melhor: Option<CandidatoGeocode> = None;
+
+        let is_index_scan =
+            params.min_qnt_index_scan.unwrap_or(0) <= indice_municipio.idx_logradouro.docs.len();
+
+        if is_index_scan {
+            let query: Vec<Token> = self.tokenizer.tokenize_search(&logradouro).collect();
+            for doc_id in indice_municipio.idx_logradouro.buscar(
+                &query,
+                params.sobreposicao_min_tokens,
+                params.max_df_freq,
+            ) {
+                let atual = CandidatoGeocode {
+                    logradouro: doc_id,
+                    mesmo_cep: ids_ceps
+                        .map(|ceps| ceps.binary_search(&doc_id).is_ok())
+                        .unwrap_or(false),
+                    mesma_localidade: id_localidades
+                        .map(|locs| locs.binary_search(&doc_id).is_ok())
+                        .unwrap_or(false),
+                    similaridade_logradouro: -1.0,
+                };
+
+                melhor = self.obter_melhor(atual, melhor, &logradouro, params);
+            }
+        } else {
+            for doc_id in indice_municipio.idx_logradouro.docs.iter() {
+                let atual = CandidatoGeocode {
+                    logradouro: *doc_id,
+                    mesmo_cep: ids_ceps
+                        .map(|ceps| ceps.binary_search(doc_id).is_ok())
+                        .unwrap_or(false),
+                    mesma_localidade: id_localidades
+                        .map(|locs| locs.binary_search(doc_id).is_ok())
+                        .unwrap_or(false),
+                    similaridade_logradouro: -1.0,
+                };
+
+                melhor = self.obter_melhor(atual, melhor, &logradouro, params);
+            }
+        }
+
+        // FIX: melhorar essa struct para evitar alocações de strings
+        melhor.map(|m| ResultadoGeocode {
+            municipio: municipio.to_string(),
+            estado: estado.to_string(),
+            logradouro: Some(self.logr_pool.get(m.logradouro).to_string()),
+            cep: if m.mesmo_cep {
+                cep.map(|x| x.to_string())
+            } else {
+                None
+            },
+            localidade: if m.mesma_localidade {
+                localidade.map(|x| x.to_string())
+            } else {
+                None
+            },
+            similaridade_logradouro: Some(m.similaridade_logradouro),
+        })
+    }
+
+    fn obter_melhor(
+        &self,
+        mut atual: CandidatoGeocode,
+        mut melhor: Option<CandidatoGeocode>,
+        logradouro: &str,
+        params: &SearchParams,
+    ) -> Option<CandidatoGeocode> {
+        match melhor.as_mut() {
+            None => {
+                if atual.similaridade_logradouro == -1.0 {
+                    atual.similaridade_logradouro =
+                        self.calcular_similaridade(logradouro, atual.logradouro, params);
+                }
+
+                if let Some(min_sim) = params.similaridade_min {
+                    if atual.similaridade_logradouro < min_sim {
+                        return None;
+                    }
+                }
+
+                Some(atual)
+            }
+
+            Some(best) => {
+                if atual.nivel_completude() < best.nivel_completude() {
+                    return melhor;
+                }
+
+                if atual.similaridade_logradouro == -1.0 {
+                    atual.similaridade_logradouro =
+                        self.calcular_similaridade(logradouro, atual.logradouro, params);
+                }
+
+                if let Some(min_sim) = params.similaridade_min {
+                    if atual.similaridade_logradouro < min_sim {
+                        return melhor;
+                    }
+                }
+
+                if best.similaridade_logradouro == -1.0 {
+                    best.similaridade_logradouro =
+                        self.calcular_similaridade(logradouro, best.logradouro, params);
+                }
+
+                if atual.similaridade_logradouro > best.similaridade_logradouro {
+                    Some(atual)
+                } else {
+                    melhor
+                }
+            }
+        }
+    }
+
+    fn calcular_similaridade(&self, logradouro: &str, logr_id: u32, params: &SearchParams) -> f32 {
+        let logr = self.logr_pool.get(logr_id);
+        if logr == logradouro {
+            return 10.0;
+        }
+
+        (params.similaridade_fun)(logradouro, logr)
+    }
+
     fn score_doc(
         &self,
         logradouro: &str,
@@ -276,6 +497,32 @@ impl GeocodeBrIndexer {
             score: sim,
             doc: doc_id,
         })
+    }
+
+    pub fn simular_geocodebr(
+        &self,
+        estado: &str,
+        municipio: &str,
+        logradouro: &str,
+        localidade: Option<&str>,
+        cep: Option<&str>,
+        params: &SearchParams,
+    ) -> Option<ScoredDoc<'_>> {
+        let mut res = self.busca(estado, municipio, logradouro, localidade, cep, params);
+
+        if res.is_none() {
+            res = self.busca(estado, municipio, logradouro, None, cep, params);
+        }
+
+        if res.is_none() {
+            res = self.busca(estado, municipio, logradouro, localidade, None, params);
+        }
+
+        if res.is_none() {
+            res = self.busca(estado, municipio, logradouro, None, None, params);
+        }
+
+        res
     }
 
     // TODO: tratamento de erro!
