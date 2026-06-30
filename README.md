@@ -34,7 +34,7 @@ linguagens de programação, por favor abrir uma Issue ou Pull request neste rep
 
 ## Documentação:
 
-- [R](https://ipeagit.github.io/enderecobr/)
+- [R](https://ipea.github.io/enderecobr/)
 - [Rust](https://docs.rs/enderecobr_rs/)
 - [Python](https://enderecobr-py.readthedocs.io)
 
