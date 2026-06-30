@@ -2,7 +2,7 @@
 
 | ***Rust*** | ***Python*** | ***R*** |
 |-----|-----|-----|
-| [![crates.io Latest Release](https://img.shields.io/crates/v/enderecobr_rs.svg)](https://crates.io/crates/enderecobr_rs) <br /> [![docs.rs Rust](https://docs.rs/enderecobr_rs/badge.svg)](https://docs.rs/enderecobr_rs/) <br /> [![codecov](https://codecov.io/gh/ipeaGIT/enderecobr_rs/graph/badge.svg?token=ckgU5oGbxf)](https://codecov.io/gh/ipeaGIT/enderecobr_rs) <br /> [![CI](https://github.com/ipeaGIT/enderecobr_rs/workflows/CI/badge.svg)](https://github.com/ipeaGIT/enderecobr_rs/actions) <br /> ![Crates.io Downloads (latest version)](https://img.shields.io/crates/dv/enderecobr_rs) | [![PyPi Latest Release](https://img.shields.io/pypi/v/enderecobr.svg)](https://pypi.org/project/enderecobr) <br /> [![readthedocs Python](https://app.readthedocs.org/projects/enderecobr-py/badge)](https://enderecobr-py.readthedocs.io) | [![R-repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/ipeaGIT/enderecobr) <br /> [![CRAN status](https://www.r-pkg.org/badges/version/enderecobr)](https://CRAN.R-project.org/package=enderecobr) <br /> [![CRAN/METACRAN Total downloads](https://cranlogs.r-pkg.org/badges/grand-total/enderecobr?color=blue)](https://CRAN.R-project.org/package=enderecobr) |
+| [![crates.io Latest Release](https://img.shields.io/crates/v/enderecobr_rs.svg)](https://crates.io/crates/enderecobr_rs) <br /> [![docs.rs Rust](https://docs.rs/enderecobr_rs/badge.svg)](https://docs.rs/enderecobr_rs/) <br /> [![codecov](https://codecov.io/gh/ipea/enderecobr_rs/graph/badge.svg?token=ckgU5oGbxf)](https://codecov.io/gh/ipea/enderecobr_rs) <br /> [![CI](https://github.com/ipea/enderecobr_rs/workflows/CI/badge.svg)](https://github.com/ipea/enderecobr_rs/actions) <br /> ![Crates.io Downloads (latest version)](https://img.shields.io/crates/dv/enderecobr_rs) | [![PyPi Latest Release](https://img.shields.io/pypi/v/enderecobr.svg)](https://pypi.org/project/enderecobr) <br /> [![readthedocs Python](https://app.readthedocs.org/projects/enderecobr-py/badge)](https://enderecobr-py.readthedocs.io) | [![R-repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/ipea/enderecobr) <br /> [![CRAN status](https://www.r-pkg.org/badges/version/enderecobr)](https://CRAN.R-project.org/package=enderecobr) <br /> [![CRAN/METACRAN Total downloads](https://cranlogs.r-pkg.org/badges/grand-total/enderecobr?color=blue)](https://CRAN.R-project.org/package=enderecobr) |
 
 
 
@@ -18,7 +18,7 @@ majoritariamente expressões regulares nas padronizações, com exceção do mó
 de endereços, que utiliza um modelo probabilístico de [Conditional Random Field](https://en.wikipedia.org/wiki/Conditional_random_field) já embutido na bilioteca.
 
 Obs. Esta biblioteca é uma adaptação e expansão para Rust da versão original em R 
-do [enderecobr](https://github.com/ipeaGIT/enderecobr) visando ganho de eficiência e 
+do [enderecobr](https://github.com/ipea/enderecobr) visando ganho de eficiência e 
 expandir a implementação do pacote **endereçobr** em diferentes linguagens usando a 
 versão em Rust como base.
 
@@ -26,7 +26,7 @@ versão em Rust como base.
 ## Bindings
 
 Este é o repositório do enderecobr em Rust e em Python. A versão em Python é feita no subdiretório 
-`bindings/python` deste projeto. O repositório da versão em R se mantém em [enderecobr](https://github.com/ipeaGIT/enderecobr), 
+`bindings/python` deste projeto. O repositório da versão em R se mantém em [enderecobr](https://github.com/ipea/enderecobr), 
 utilizando internamente as funções desta lib. Algumas funções ou classes/structs da implementação em 
 Rust podem não estar expostas em outras linguagens. Vide [documentação](https://docs.rs/enderecobr_rs) 
 do Rust para identificar tais situações. Para solicitar esse tipo de mudança ou bindings em outras 
