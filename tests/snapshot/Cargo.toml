@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.5.54", features = ["derive"] }
 enderecobr_rs = { path = "../.."}
-tabled = "0.21.0"
+tabled = "0.22.0"
