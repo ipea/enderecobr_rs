@@ -52,7 +52,7 @@ cli = ["clap"]
 polars_cli = ["clap", "polars"]
 
 [dependencies]
-clap = { version = "4.6.6", features = ["derive"], optional = true }
+clap = { version = "4.6.7", features = ["derive"], optional = true }
 crfsuite = { version = "0.3.2", optional = true}
 diacritics = "0.2.2"
 itertools = "0.15.0"
