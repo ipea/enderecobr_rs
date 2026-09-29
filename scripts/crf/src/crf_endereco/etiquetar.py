@@ -13,38 +13,45 @@ API_KEY = os.environ.get("API_KEY")
 API_URL = os.environ.get("API_URL")
 API_MODEL = os.environ.get("API_MODEL")
 
-if not API_MODEL or not API_MODEL or not API_URL:
+if not API_KEY or not API_MODEL or not API_URL:
     raise Exception(
         "As variáveis de ambiente API_MODEL, API_MODEL, API_URL devem ser fornecidas."
     )
 
 tool = {
     "type": "function",
-    "name": "responder",
-    "description": "Responde ao solicitado",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "valor": {
-                "type": "string",
-                "description": "Valor da resposta",
+    "function": {
+        "name": "responder",
+        "description": "Responde ao solicitado",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "valor": {
+                    "type": "string",
+                    "description": "Valor da resposta",
+                },
             },
+            "required": ["valor"],
+            "additionalProperties": False,
         },
-        "required": ["valor"],
-        "additionalProperties": False,
+        "strict": True,
     },
-    "strict": True,
 }
 
 response = requests.post(
-    API_URL,
+    f"{API_URL}/v1/chat/completions",
     headers={
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
     },
     json={
         "model": API_MODEL,
-        "input": "quanto é 1+1? Use a ferramenta para responder.",
+        "messages": [
+            {
+                "role": "user",
+                "content": "Quanto é 1+1? Use a ferramenta `responder`.",
+            }
+        ],
         "tools": [tool],
     },
 )
