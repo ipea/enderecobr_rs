@@ -37,93 +37,113 @@ if not SEARX_URL:
 def renderizar_prompt(n_rodadas: int, endereco: str, extras: str):
     return f"""Me ajude a segmentar endereços brasileiros para que eu seja capaz de treinar um modelo de CRF em cima deste dado.
 
-Use as ferramentas que você tem acesso para auxiliar na sua resposta. Para casos simples, você pode dar a resposta diretamente.
+Quando for um caso ambíguo, use as ferramentas que você tem acesso para auxiliar na sua resposta. Para casos simples, você pode dar a resposta diretamente.
 Quando tiver tomado uma decisão, use a ferramenta `responder`.
 Copie os campos de forma verbatim como está no valor bruto. Não normalize, nem expanda abreviações etc.
 Use o campo de comentário livre para fazer obervações sobre seus achados, quando buscar informações externas ou ficar em dúvida. Você não deve usa-lo para explicar coisas óbvias.
-Se um campo não aparece no endereço, deixe-o vazio. Não enriqueça os dados se algo não existir. Não valide-o também, se os campos estão claros o suficiente, você já deve responder, mesmo que você não conheça o endereço.
+Se um campo não aparece no endereço, deixe-o vazio. Não enriqueça os dados se algo não existir. Não valide-o também, se os campos estão claros o suficiente, você já deve responder, mesmo que você não conheça o endereço. Não corrija typos ou qualquer coisa, eu quero uma cópia exata de trechos do endereço bruto realmente. Na sua resposta, use somente o texto do endereço como base, não use as informações extras para popular nada da resposta, elas só servem para dar um contexto extra e facilitar o uso de ferramentas disponibilizadas. Dê os segmentos na ordem em que aparecem no texto.
+
+Seja sucinto na sua resposta.
 
 ## Schema do CNEFE:
 
-Os dados parecem estar todos em maiúsculo. Procure limitar por municipio e/ou uf suas consultas, além de usar sempre um LIMIT.
+Os dados parecem estar todos em maiúsculo. Procure limitar por municipio e/ou uf suas consultas, além de usar sempre um LIMIT e evitar SELECT *.
 
 ### Tabela 'cnefe':
 
-column_name|column_type|null|key|default|extra
+column_name|column_type
 -------------
-code_address|INTEGER|YES|NULL|NULL|NULL
-code_state|INTEGER|YES|NULL|NULL|NULL
-code_muni|INTEGER|YES|NULL|NULL|NULL
-code_district|INTEGER|YES|NULL|NULL|NULL
-code_sub_district|BIGINT|YES|NULL|NULL|NULL
-code_sector|VARCHAR|YES|NULL|NULL|NULL
-num_quadra|INTEGER|YES|NULL|NULL|NULL
-num_face|INTEGER|YES|NULL|NULL|NULL
-cep|INTEGER|YES|NULL|NULL|NULL
-desc_localidade|VARCHAR|YES|NULL|NULL|NULL
-nom_tipo_seglogr|VARCHAR|YES|NULL|NULL|NULL
-nom_titulo_seglogr|VARCHAR|YES|NULL|NULL|NULL
-nom_seglogr|VARCHAR|YES|NULL|NULL|NULL
-num_adress|INTEGER|YES|NULL|NULL|NULL
-dsc_modificador|VARCHAR|YES|NULL|NULL|NULL
-nom_comp_elem1|VARCHAR|YES|NULL|NULL|NULL
-val_comp_elem1|VARCHAR|YES|NULL|NULL|NULL
-nom_comp_elem2|VARCHAR|YES|NULL|NULL|NULL
-val_comp_elem2|VARCHAR|YES|NULL|NULL|NULL
-nom_comp_elem3|VARCHAR|YES|NULL|NULL|NULL
-val_comp_elem3|VARCHAR|YES|NULL|NULL|NULL
-nom_comp_elem4|VARCHAR|YES|NULL|NULL|NULL
-val_comp_elem4|VARCHAR|YES|NULL|NULL|NULL
-nom_comp_elem5|VARCHAR|YES|NULL|NULL|NULL
-val_comp_elem5|VARCHAR|YES|NULL|NULL|NULL
-lat|DOUBLE|YES|NULL|NULL|NULL
-lon|DOUBLE|YES|NULL|NULL|NULL
-nv_geo_coord|INTEGER|YES|NULL|NULL|NULL
-cod_especie|INTEGER|YES|NULL|NULL|NULL
-dsc_estabelecimento|VARCHAR|YES|NULL|NULL|NULL
-cod_indicador_estab_endereco|INTEGER|YES|NULL|NULL|NULL
-cod_indicador_const_endereco|INTEGER|YES|NULL|NULL|NULL
-cod_indicador_finalidade_const|INTEGER|YES|NULL|NULL|NULL
-cod_tipo_especi|INTEGER|YES|NULL|NULL|NULL
+code_address|INTEGER
+code_state|INTEGER
+code_muni|INTEGER
+code_district|INTEGER
+code_sub_district|BIGINT
+code_sector|VARCHAR
+num_quadra|INTEGER
+num_face|INTEGER
+cep|INTEGER
+desc_localidade|VARCHAR
+nom_tipo_seglogr|VARCHAR
+nom_titulo_seglogr|VARCHAR
+nom_seglogr|VARCHAR
+num_adress|INTEGER
+dsc_modificador|VARCHAR
+nom_comp_elem1|VARCHAR
+val_comp_elem1|VARCHAR
+nom_comp_elem2|VARCHAR
+val_comp_elem2|VARCHAR
+nom_comp_elem3|VARCHAR
+val_comp_elem3|VARCHAR
+nom_comp_elem4|VARCHAR
+val_comp_elem4|VARCHAR
+nom_comp_elem5|VARCHAR
+val_comp_elem5|VARCHAR
+lat|DOUBLE
+lon|DOUBLE
+nv_geo_coord|INTEGER
+cod_especie|INTEGER
+dsc_estabelecimento|VARCHAR
+cod_indicador_estab_endereco|INTEGER
+cod_indicador_const_endereco|INTEGER
+cod_indicador_finalidade_const|INTEGER
+cod_tipo_especi|INTEGER
 
 ### Tabela 'municipio':
-column_name|column_type|null|key|default|extra
+
+column_name|column_type
 -------------
-cod_ibge|BIGINT|YES|NULL|NULL|NULL
-municipio|VARCHAR|YES|NULL|NULL|NULL
-uf|VARCHAR|YES|NULL|NULL|NULL
+cod_ibge|BIGINT
+municipio|VARCHAR
+uf|VARCHAR
 
 ### Tabela de refência de Estados (não está no banco):
 
-| codigo | nome |
-|---|---|---|
-| 11 | RONDONIA |
-| 12 | ACRE |
-| 13 | AMAZONAS |
-| 14 | RORAIMA |
-| 15 | PARA |
-| 16 | AMAPA |
-| 17 | TOCANTINS |
-| 21 | MARANHAO |
-| 22 | PIAUI |
-| 23 | CEARA |
-| 24 | RIO GRANDE DO NORTE |
-| 25 | PARAIBA |
-| 26 | PERNAMBUCO |
-| 27 | ALAGOAS |
-| 28 | SERGIPE |
-| 29 | BAHIA |
-| 31 | MINAS GERAIS |
-| 32 | ESPIRITO SANTO |
-| 33 | RIO DE JANEIRO |
-| 35 | SAO PAULO |
-| 41 | PARANA |
-| 42 | SANTA CATARINA |
-| 43 | RIO GRANDE DO SUL |
-| 50 | MATO GROSSO DO SUL |
-| 51 | MATO GROSSO |
-| 52 | GOIAS |
-| 53 | DISTRITO FEDERAL |
+codigo|nome
+-----
+11|RONDONIA
+12|ACRE
+13|AMAZONAS
+14|RORAIMA
+15|PARA
+16|AMAPA
+17|TOCANTINS
+21|MARANHAO
+22|PIAUI
+23|CEARA
+24|RIO GRANDE DO NORTE
+25|PARAIBA
+26|PERNAMBUCO
+27|ALAGOAS
+28|SERGIPE
+29|BAHIA
+31|MINAS GERAIS
+32|ESPIRITO SANTO
+33|RIO DE JANEIRO
+35|SAO PAULO
+41|PARANA
+42|SANTA CATARINA
+43|RIO GRANDE DO SUL
+50|MATO GROSSO DO SUL
+51|MATO GROSSO
+52|GOIAS
+53|DISTRITO FEDERAL
+
+# Funções úteis DuckDB
+
+concat(value, ...) ou concat_ws(separator, string, ...) - Nulos são ignorados
+ends_with(string, search_string) ou starts_with(string, search_string)
+contains(string, search_string)
+lower(string) ou upper()
+len(string)
+strip_accents(string)
+regexp_matches(string, regex[, options])
+
+levenshtein(s1, s2)
+damerau_levenshtein(s1, s2)
+jaccard(s1, s2)
+jaro_winkler_similarity(s1, s2[, score_cutoff])
+jaro_similarity(s1, s2[, score_cutoff])
+
 
 Você tem {n_rodadas} rodadas para responder.
 
@@ -146,32 +166,39 @@ def criar_ferramentas():
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "logradouro": {
-                            "type": "string",
+                        "segmentos": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "valor": {"type": "string"},
+                                    "tipo": {
+                                        "type": "string",
+                                        "enum": [
+                                            "logradouro",
+                                            "numero",
+                                            "complemento",
+                                            "referencia",
+                                            "nome_antigo",
+                                            "logradouro_interno",
+                                            "nome_edificacao",
+                                            "bairro",
+                                            "cep",
+                                            "municipio",
+                                            "uf",
+                                        ],
+                                    },
+                                },
+                                "required": ["valor", "tipo"],
+                                "additionalProperties": False,
+                            },
+                            "minItems": 1,
                         },
-                        "numero": {
-                            "type": "string",
-                        },
-                        "complemento": {
-                            "type": "string",
-                        },
-                        "localidade": {
-                            "type": "string",
-                        },
-                        "cep": {
-                            "type": "string",
-                        },
-                        "municipio": {
-                            "type": "string",
-                        },
-                        "uf": {
-                            "type": "string",
-                        },
-                        "observacoes": {
+                        "comentario": {
                             "type": "string",
                         },
                     },
-                    "required": [],
+                    "required": ["segmentos"],
                     "additionalProperties": False,
                 },
                 "strict": True,
@@ -327,15 +354,15 @@ class ToolCall:
 
 
 @dataclass()
+class Segmento:
+    valor: str
+    tipo: str
+
+
+@dataclass()
 class RespostaFinal:
-    logradouro: str
-    numero: str
-    complemento: str
-    localidade: str
-    cep: str
-    municipio: str
-    uf: str
-    observacoes: str
+    segmentos: list[Segmento]
+    comentario: str | None
 
 
 @dataclass()
@@ -385,27 +412,57 @@ def despachar_ferramenta(call: ToolCall):
     return f"Ferramenta {call.nome} solicitada não existe"
 
 
-def processar_resultado_final(resposta: ToolCall) -> RespostaFinal | str:
+def processar_resultado_final(resposta: ToolCall) -> RespostaFinal:
+    segmentos = resposta.argumentos.get("segmentos", [])
+    comentario = resposta.argumentos.get("comentario")
 
-    logradouro = resposta.argumentos.get("logradouro")
-    numero = resposta.argumentos.get("numero")
-    complemento = resposta.argumentos.get("complemento")
-    localidade = resposta.argumentos.get("localidade")
-    cep = resposta.argumentos.get("cep")
-    municipio = resposta.argumentos.get("municipio")
-    uf = resposta.argumentos.get("uf")
-    observacoes = resposta.argumentos.get("observacoes")
+    resposta_final = RespostaFinal(segmentos=[], comentario=comentario)
 
-    return RespostaFinal(
-        logradouro=logradouro,
-        numero=numero,
-        complemento=complemento,
-        localidade=localidade,
-        cep=cep,
-        municipio=municipio,
-        uf=uf,
-        observacoes=observacoes,
-    )
+    for seg in segmentos:
+        tipo = str(seg.get("tipo", ""))
+        valor = str(seg.get("valor", ""))
+        resposta_final.segmentos.append(Segmento(valor=valor, tipo=tipo))
+
+    return resposta_final
+
+
+def validar_resposta_final(
+    endereco: str, resposta: RespostaFinal
+) -> tuple[str, str | None]:
+    ultima_pos = 0
+
+    problemas: list[str] = []
+    visualizacao_segmentos: list[str] = []
+
+    for i, seg in enumerate(resposta.segmentos):
+        posicao_segmento = endereco.find(seg.valor, ultima_pos)
+
+        if posicao_segmento == -1:
+            problemas.append(
+                f"Não foi possível localizar o {i + 1}º segmento: {seg.valor} ({seg.tipo}) "
+            )
+            continue
+
+        if posicao_segmento != ultima_pos:
+            visualizacao_segmentos.append(endereco[ultima_pos:posicao_segmento])
+
+        nova_posicao = posicao_segmento + len(seg.valor)
+
+        visualizacao_segmentos.append(
+            f"{endereco[posicao_segmento:nova_posicao]} [{seg.tipo}]"
+        )
+
+        ultima_pos = nova_posicao
+
+    if ultima_pos != len(endereco):
+        visualizacao_segmentos.append(endereco[ultima_pos:])
+
+    problemas_str = None
+    if len(problemas):
+        problemas_str = "\n".join(problemas)
+
+    vis = "\n".join(visualizacao_segmentos)
+    return (vis, problemas_str)
 
 
 def realizar_requisicao(messages):
@@ -428,19 +485,26 @@ def realizar_requisicao(messages):
     return data
 
 
-def react_loop(n_iter: int = 10):
+def react_loop(n_iter: int = 10, n_paciencia_erro: int = 2):
+    # "FAZ ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO BARRA DO BEBEDOURO 0 BARRA DO BEBEDOURO",
+    # "R ALCIDES CARNEIRO LEAL 71 APTO 104 ED MANAGUA CONJ RES NICARAGUA",
+    # "Municipio: Recife/PE\nBairro: PINA\nBanco de Dados: Imóveis da União",
+
+    endereco = "Av Atlântica 123 apt 321"
+    extras = "Municipio: Rio de Janeiro/RJ\nBairro: Copacabana\nBanco de Dados: Imóveis da União"
+
+    n_erros = n_paciencia_erro
+
     messages = [
         {
             "role": "user",
-            "content": renderizar_prompt(
-                n_iter,
-                "FAZ ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO BARRA DO BEBEDOURO 0 BARRA DO BEBEDOURO",
-                "Municipio: Petrolina/PE\nLocalidade: ZONA RURAL\nBanco de Dados: Imóveis da União",
-            ),
+            "content": renderizar_prompt(n_iter, endereco, extras),
         }
     ]
 
     for i in range(n_iter):
+        print(f"Iteração #{i + 1}")
+
         resposta_bruta = realizar_requisicao(messages)
         resposta = estruturar_resposta_modelo(resposta_bruta)
 
@@ -450,15 +514,37 @@ def react_loop(n_iter: int = 10):
         print(f"# Raciociono:\n{resposta.raciociono}")
         print("========================")
         print()
-        print(resposta.resposta)
+
+        if resposta.resposta:
+            print(resposta.resposta)
 
         resposta_final = resposta.obter_resposta_final()
 
         if resposta_final:
             resultado_final = processar_resultado_final(resposta_final)
+            vis, erro = validar_resposta_final(endereco, resultado_final)
+
             print()
             pprint(resultado_final)
-            break
+            print("Visualizacao:")
+            print(vis)
+            print("-------------")
+            if erro:
+                print("Erro:", erro)
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"Ocorreu um erro ao validar sua segmentação. Corrija e submeta novamente.\n{erro}",
+                    }
+                )
+
+                if n_erros == 0:
+                    n_erros -= 1
+                    i -= 1
+                    continue
+
+            else:
+                break
 
         if not resposta_final:
             for c in resposta.tool_calls:
@@ -474,6 +560,14 @@ def react_loop(n_iter: int = 10):
                         "content": resposta_ferramenta,
                     }
                 )
+
+        if i == n_iter - 1:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"Iteração {i + 1} de {n_iter}",
+                }
+            )
 
         if i == n_iter - 1:
             print("ÚLTIMA ITERACAO")
