@@ -41,13 +41,30 @@ Quando for um caso ambíguo, use as ferramentas que você tem acesso para auxili
 Quando tiver tomado uma decisão, use a ferramenta `responder`.
 Copie os campos de forma verbatim como está no valor bruto. Não normalize, nem expanda abreviações etc.
 Use o campo de comentário livre para fazer obervações sobre seus achados, quando buscar informações externas ou ficar em dúvida. Você não deve usa-lo para explicar coisas óbvias.
-Se um campo não aparece no endereço, deixe-o vazio. Não enriqueça os dados se algo não existir. Não valide-o também, se os campos estão claros o suficiente, você já deve responder, mesmo que você não conheça o endereço. Não corrija typos ou qualquer coisa, eu quero uma cópia exata de trechos do endereço bruto realmente. Na sua resposta, use somente o texto do endereço como base, não use as informações extras para popular nada da resposta, elas só servem para dar um contexto extra e facilitar o uso de ferramentas disponibilizadas. Dê os segmentos na ordem em que aparecem no texto.
+Se um campo não aparece no endereço, deixe-o vazio. Não enriqueça os dados se algo não existir. Não valide-o também, se os campos estão claros o suficiente, você já deve responder, mesmo que você não conheça o endereço. Não corrija typos ou qualquer coisa, eu quero uma cópia exata de trechos do endereço bruto realmente. Na sua resposta, use somente o texto do endereço como base, não use as informações extras para popular nada da resposta, elas só servem para dar um contexto extra e facilitar o uso de ferramentas disponibilizadas. Dê os segmentos na ordem em que aparecem no texto. Use o tipo 'outros' para identificar trechos relevantes que não são ambrangidos pelos demais tipos, e sempre que usá-lo, comente sobre o motivo e dê uma sugestão para um novo tipo específico. Não categorize conectivos, conjunções e afins. Crie mais de um complemento quando se referirem a duas unidades distintas.
+
+Por "Empreendimento", entenda "Ponto de Interesse".
+
+Quando notar um trecho que é uma referencia do endereço principal, mantenha endereços e empreendimentos distintos em segmentos separados, e restante das informações em 'referencia_outros', mesmo que elas possam ser encaixadas em categorias gerais mais específicas (ex: quilometragem de estrada).
 
 Seja sucinto na sua resposta.
 
 ## Schema do CNEFE:
 
-Os dados parecem estar todos em maiúsculo. Procure limitar por municipio e/ou uf suas consultas, além de usar sempre um LIMIT e evitar SELECT *.
+Base com ~110,6 milhões de linhas e ~106,4 milhões de endereços únicos (code_address). Cada linha é uma espécie presente no endereço (domicílio, estabelecimento etc.), logo um mesmo endereço aparece em várias linhas.
+
+- Todo o texto está em MAIÚSCULAS e SEM ACENTOS.
+- Texto vazio é '' (não NULL) e números ausentes são 0 (não NULL).
+- Endereço sem número: num_adress = 0 com dsc_modificador = 'SN' (26 milhões de linhas). Quando dsc_modificador = 'KM', num_adress é a quilometragem (rodovias/estradas). O modificador também guarda sufixos de número (A, B, CASA 2...) e marcos (POSTE, SUCAM): é texto livre com ~157 mil valores distintos.
+- NÃO existe coluna de bairro. desc_localidade é a localidade (sede de distrito, povoado, 'ZONA RURAL', 'CENTRO', até nomes de BRs), não um bairro.
+- nom_tipo_seglogr tem 390 valores distintos. Mais comuns: RUA (73 mi), AVENIDA, ESTRADA, TRAVESSA, RODOVIA, FAZENDA, SITIO, EDF, POVOADO, ALAMEDA, BECO. Tipos rurais típicos: CORREGO, RAMAL, LINHA, COMUNIDADE, IGARAPE, ASSENTAMENTO, VIELA.
+- nom_titulo_seglogr é vazio em 86% das linhas; quando preenchido é o título do logradouro (SAO, DOUTOR, SANTA, PADRE, CORONEL, PRESIDENTE...), separado do nome.
+- nom_seglogr tem ~1,28 milhão de valores distintos e pode ser literalmente 'SEM DENOMINACAO' (1,2 milhão de linhas).
+- Complementos vêm em pares nom_comp_elemN/val_comp_elemN (N=1 a 5; 1 e 2 são comuns, 3+ é raro). nom é a categoria (CASA, APARTAMENTO, BLOCO, QUADRA, FUNDOS, FRENTE, TERREO, ANDAR, LOTE, LOJA, TORRE, EDIFICIO, CONJUNTO...) e val é o valor, frequentemente vazio no elem1.
+- cod_especie: 1=domicílio particular (82% das linhas), 3=estabelecimento agropecuário, 6=estabelecimento de outras finalidades, 7=edificação em construção. dsc_estabelecimento é o nome do estabelecimento (BAR, IGREJA, 'VAGO', 'SEM NOME'...), não do logradouro.
+- code_muni é o código IBGE de 7 dígitos.
+
+Procure limitar por municipio e/ou uf suas consultas, além de usar sempre um LIMIT e evitar SELECT *.
 
 ### Tabela 'cnefe':
 
@@ -178,14 +195,20 @@ def criar_ferramentas():
                                             "logradouro",
                                             "numero",
                                             "complemento",
-                                            "referencia",
+                                            "referencia_endereco",
+                                            "referencia_empreendimento",
+                                            "referencia_outros",
                                             "nome_antigo",
                                             "logradouro_interno",
-                                            "nome_edificacao",
+                                            "nome_empreendimento",
+                                            "distancia_estrada",
+                                            "descricao_area",
+                                            "ruido",
                                             "bairro",
                                             "cep",
                                             "municipio",
                                             "uf",
+                                            "outros",
                                         ],
                                     },
                                 },
@@ -290,9 +313,12 @@ conn = iniciar_duckbd()
 
 
 def buscar(query: str):
+    if not SEARX_URL:
+        return "A variável SEARX_URL não foi definida, a busca web não está disponível."
+
     params = {"q": query, "format": "json"}
     try:
-        res = requests.get(f"{SEARX_URL}", params=params)
+        res = requests.get(SEARX_URL, params=params, timeout=30)
         resposta_bruta = res.json()
     except Exception as e:
         return f"Ocorreu um erro ao buscar por '{query}': {e!s}"
@@ -322,8 +348,9 @@ def acessar_url(url: str):
         res = requests.get(
             url,
             headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
             },
+            timeout=30,
         )
         return str(md.convert(res).markdown)
     except Exception as e:
@@ -384,7 +411,10 @@ def estruturar_ferramentas(bruto):
         fun = call.get("function", {})
         nome: str = fun.get("name", "")
         args_bruto = fun.get("arguments")
-        args = json.loads(args_bruto)
+        try:
+            args = json.loads(args_bruto)
+        except (json.JSONDecodeError, TypeError):
+            continue
 
         resultado.append(ToolCall(idx, nome, args))
     return resultado
@@ -478,6 +508,7 @@ def realizar_requisicao(messages):
             "tools": criar_ferramentas(),
             "temperature": 0.6,
         },
+        timeout=300,
     )
 
     response.raise_for_status()
@@ -490,10 +521,22 @@ def react_loop(n_iter: int = 10, n_paciencia_erro: int = 2):
     # "R ALCIDES CARNEIRO LEAL 71 APTO 104 ED MANAGUA CONJ RES NICARAGUA",
     # "Municipio: Recife/PE\nBairro: PINA\nBanco de Dados: Imóveis da União",
 
-    endereco = "Av Atlântica 123 apt 321"
-    extras = "Municipio: Rio de Janeiro/RJ\nBairro: Copacabana\nBanco de Dados: Imóveis da União"
+    # endereco = "FAZ PIRA COMBOA DOS CAVALOS E OUTROS S/N VIVEIRO DE CAMARAO"
+    # endereco = "AV OCEANICA 3009 ED. SOLARIUS - AP. 606 E VAGA DE GARAGEM"
+    # endereco = "R C 64 QD VIII, LOTE 127, LOT NOSSA SENHORA PEN"
+    # endereco = "ROD BR 307, KM 304 113 Lote 113, Conjunto Residencial Lobo D'Almada"
+    # endereco = "R Antonio Gomes dos Santos s/n Dista 200m da CE-040, estrada que liga Tapera à Canoa"
+    # endereco = "PR Mar territorial. Parque Aquícola Marinho Amontada 01. s/n Área E"
+    # endereco = "A De 8.278,00 m² - Patio da Estação s/n Frente para Rua Rui Barbosa"
+    # endereco = "AC SAI DO POV. CAPIM GROSSO VIRA A DIR. NO AÇÚDE PÚB. + 6,6KM V 000 000"
+    # endereco = "AV BR-343 KM-08-LADO ESQUERDO SENT. PBA- LUIZ CORREIA S/N Km 08, próximo ao acesso ao aeroporto de Parnaíba"
+    endereco = "FAZ FAZENDA LUAR DO YBICUHY - S/Nº PA SEPE TIARAJU III - BR 1581293 - SNATANA DO LIVRAMENTO/RS"
+    endereco = "AV Presidente Dutra 1172 Com uma vaga de estacionamento"
+
+    extras = "Municipio: Itaperuna/RJ\nBairro: Pres. Costa e Silva\nBanco de Dados: Imóveis da União"
 
     n_erros = n_paciencia_erro
+    resposta_bruta = {}
 
     messages = [
         {
