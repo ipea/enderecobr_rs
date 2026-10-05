@@ -74,6 +74,7 @@ def renderizar_prompt_sistema() -> str:
 | complemento | internal unit of the property, type and value together | "APTO 104", "BL 4", "SALA 306B", "VG 17" |
 | empreendimento | development name: building, condominium, conjunto, residencial, loteamento | "ED MANAGUA", "CONJ RES NICARAGUA", "COND PALM VILLAGE", "LOT JARDIM PIAI" |
 | parcela | cadastral identifier of the land. Hierarchy: gleba ⊃ (loteamento/desmembramento) ⊃ quadra ⊃ lote; "área" is a subdivision | "GLEBA 10 AREA II LT 02 QD B", "QD 34 LOTE 17", "Lotes 023/024/025" |
+| cadastro | property registration/inscription code (municipal cadastro/IPTU, matrícula, RI, CCIR/INCRA) — an administrative identifier, not a land unit and not CNEFE-geocodable | "Cadastro 37", "Matrícula 98.278", "RI 28006" |
 | descricao_area | textual description of land/area/use (including measurement) — not an identifier | "ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...", "VIVEIRO DE CAMARAO", "Mar territorial", "8.278,00 m²" |
 | quilometragem_via | route kilometer: the number is the position ALONG the road | "KM 304", "BR-307 KM 304" |
 | referencia | snippet that points to another address or place; do not detail the subtype here | "ESQUINA COM AV BOA VIAGEM", "EM FRENTE AO N. 2380", "DESM DO LT 06" |
@@ -82,7 +83,7 @@ def renderizar_prompt_sistema() -> str:
 | cep | CEP | "50720-000" |
 | municipio | município | "RECIFE" |
 | uf | federal unit | "PE" |
-| ruido | bare tokens/markers with no value (punctuation, loose separators, leaked record id, embedded lat/lon) | "V 000 000", "NBP 1045707-4", "-20.23°,-41.51°" |
+| ruido | bare tokens/markers with no value (punctuation, loose separators, leaked process/protocol id, embedded lat/lon) | "V 000 000", "NBP 1045707-4", "-20.23°,-41.51°" |
 | outros | meaningful content fitting no other type; always comment the reason and suggest a new type | — |
 
 Watch out for false friends: `FRENTE`/`FUNDOS` are `complemento` (front/rear of the lot). But `FRENTE PARA` / `EM FRENTE A` introducing another street is NOT complemento — it is part of `referencia`. E.g.: in "Frente para Rua Rui Barbosa", "Frente para" is not `complemento`.
@@ -253,6 +254,7 @@ def criar_ferramentas():
                                             "complemento",
                                             "empreendimento",
                                             "parcela",
+                                            "cadastro",
                                             "descricao_area",
                                             "quilometragem_via",
                                             "referencia",
