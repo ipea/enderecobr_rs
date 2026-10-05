@@ -1,218 +1,131 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.10"
-# dependencies = ["markitdown[pdf,docx,xls,xlsx]", "requests", "duckdb"]
+# requires-python = ">=3.12"
+# dependencies = [
+#     "duckdb>=1.4.1",
+#     "markitdown[pdf,docx,xls,xlsx]",
+#     "python-dotenv",
+#     "requests",
+#     "rich",
+#     "typer",
+# ]
 # ///
+"""Etiqueta endereços brasileiros brutos em campos rotulados.
+
+O script usa uma LLM com *tool-calling* (loop reAct) para segmentar o endereço
+em spans verbo-verbatim. A LLM pode consultar o CNEFE (DuckDB), buscar na web
+(SearxNG) e baixar URLs (MarkItDown) quando o trecho for ambíguo.
+
+Uso:
+    uv run etiquetar.py "R ALCIDES CARNEIRO LEAL 71 APTO 104" \\
+        --extras "Municipio: Recife/PE" --env .env
+
+A ontologia de rótulos fica em `prompt_sistema.md` (prompt) e `ONTOLOGIA.md`
+(notas de pós-processamento).
+"""
+
+from __future__ import annotations
 
 import json
 import os
+import random
 import tempfile
-from dataclasses import dataclass
-from pprint import pprint
-from typing import Any
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Annotated, Any, cast
 
 import duckdb
 import markitdown
 import requests
+import typer
+from dotenv import load_dotenv
+from rich.console import Console
+from rich.pretty import pprint
 
-API_KEY = os.environ.get("API_KEY")
-API_URL = os.environ.get("API_URL")
-API_MODEL = os.environ.get("API_MODEL")
-SEARX_URL = os.environ.get("SEARX_URL")
-CNEFE_PATH = os.environ.get("CNEFE_PATH")
-MUNICIPIOS_PATH = "../../src/data/municipios.csv"
+# --- Caminhos -------------------------------------------------------------
 
-md = markitdown.MarkItDown()
+DIR_MODULO = Path(__file__).resolve().parent
+# scripts/crf/src/crf_endereco -> <repo>/src/data/municipios.csv
+MUNICIPIOS_PADRAO = DIR_MODULO.parents[3] / "src" / "data" / "municipios.csv"
+TEMPLATE_PROMPT_SISTEMA = DIR_MODULO / "prompt_sistema.md"
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0"
+)
 
-if not API_KEY or not API_MODEL or not API_URL:
-    raise Exception(
-        "As variáveis de ambiente API_MODEL, API_MODEL, API_URL devem ser fornecidas."
+console = Console()
+
+# --- Configuração ---------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Config:
+    """Variáveis de ambiente resolvidas para uma execução."""
+
+    api_url: str
+    api_key: str
+    api_model: str
+    cnefe_path: str
+    municipios_path: Path
+    searx_url: str | None = None
+
+    @property
+    def url_chat(self) -> str:
+        return f"{self.api_url}/v1/chat/completions"
+
+
+def carregar_config(env_path: Path) -> Config:
+    """Carrega o `.env` e valida as variáveis obrigatórias."""
+    if env_path.is_file():
+        load_dotenv(env_path)
+    elif env_path.name != ".env":
+        raise typer.BadParameter(f"Arquivo .env não encontrado: {env_path}")
+
+    def exigir(nome: str) -> str:
+        valor = os.environ.get(nome)
+        if not valor:
+            raise typer.BadParameter(
+                f"Variável de ambiente obrigatória ausente: {nome}. "
+                "Defina-a no .env ou no ambiente."
+            )
+        return valor
+
+    searx_url = os.environ.get("SEARX_URL")
+    if not searx_url:
+        console.print(
+            "[yellow]SEARX_URL não definida; a busca web ficará indisponível.[/yellow]"
+        )
+
+    return Config(
+        api_url=exigir("API_URL"),
+        api_key=exigir("API_KEY"),
+        api_model=exigir("API_MODEL"),
+        cnefe_path=exigir("CNEFE_PATH"),
+        municipios_path=Path(os.environ.get("MUNICIPIOS_PATH", MUNICIPIOS_PADRAO)),
+        searx_url=searx_url,
     )
 
-if not CNEFE_PATH:
-    raise Exception("A variável de ambiente CNEFE_PATH deve ser fornecida.")
 
-if not SEARX_URL:
-    print(
-        "Atenção: A variável SEARX_URL não foi definida, a ferramenta de busca web não estará disponível."
-    )
+# --- Prompts --------------------------------------------------------------
 
 
-def renderizar_prompt_sistema() -> str:
+def renderizar_prompt_sistema(config: Config) -> str:
+    """Preenche o template do prompt de sistema com as ferramentas disponíveis."""
     ferramentas = [
         "- `responder`: submit the final result. Always use this tool to answer.",
-        "- `sql_query`: query CNEFE in DuckDB. Restrict by município and/or uf, always use LIMIT and avoid SELECT *.",
+        (
+            "- `sql_query`: query CNEFE in DuckDB. Restrict by município and/or "
+            "uf, always use LIMIT and avoid SELECT *."
+        ),
     ]
-    if SEARX_URL:
+    if config.searx_url:
         ferramentas.append("- `search`: search across several search engines.")
     ferramentas.append(
         "- `fetch_url`: fetch a URL and return its content as markdown (markitdown)."
     )
-    secao_ferramentas = "\n".join(ferramentas)
 
-    return f"""You segment raw Brazilian addresses into labeled fields to generate training data for a CRF model.
-
-## General rules
-
-1. Verbatim: every `valor` is a snippet copied exactly as it appears in the raw address. Do not normalize, expand abbreviations, fix typos, or change case/accents.
-2. Use only the raw address text as the source of `valor`. The "Extra info" exists only to guide tool use — the trained model will NEVER see it, so any value not verbatim in the address will be rejected. Do not validate or enrich: if a field is absent, do not create it; if you don't know the address, answer anyway.
-3. Order segments as they appear in the text.
-4. Do not label connectives, conjunctions or prepositions: they separate units and therefore act as a cut between segments.
-5. One segment per referent. Everything pointing to the SAME referent stays in a single segment, even with several tokens (e.g.: "QD 34 LOTE 17", "GLEBA 10 AREA II LT 02 QD B", "Lotes 023/024/025 QD 34"). Distinct units — each with its own token — become separate segments, and the connective between them is not labeled (e.g.: "AP 701 E VG 17" → two `complemento`). Lists and ranges with a shared token or separator stay in a single segment, with internal separators (/, -, ,) INSIDE the segment (e.g.: "Lotes 1-5", "10-20").
-6. Snippets that point to another address or place are `referencia` (e.g.: "ESQUINA COM", "EM FRENTE AO", "DESM DO"). A number inside a reference belongs to the reference, NOT to `numero` — that is, `numero` of the main address is unique.
-7. `quilometragem_via` is the route kilometer — the number IS the position along the road ("KM 304", "BR-307 KM 304"). An offset measures the distance from a landmark ("200m da CE-040", "+ 6,6KM") and, since it points to another place, belongs to `referencia`.
-8. Município, UF, `localidade` and CEP, when present in the address itself, are labeled normally — the "Extra info" NEVER populates segments. A bare street-type token without an associated name (e.g.: "A", "PR", "AC") is NOT `logradouro`: use `descricao_area`, `referencia` or `outros` as appropriate.
-
-## Label table
-
-| tipo | what to mark | example |
-|---|---|---|
-| logradouro | street type + title + name, verbatim; absorbs rodovia | "R ALCIDES CARNEIRO LEAL", "AV OCEANICA", "ROD BR-116" |
-| logradouro_interno | way/area internal to a development (not an official municipal street) | "RUA PROJETADA GH", "Rua 7 do Condomínio X" |
-| numero | property number, including absence of a number | "71", "S/N", "SN", "S/Nº" |
-| modificador_numero | suffix/marker attached to the number | "A", "504-B1", "POSTE" |
-| complemento | internal unit of the property, type and value together | "APTO 104", "BL 4", "SALA 306B", "VG 17" |
-| empreendimento | development name: building, condominium, conjunto, residencial, loteamento | "ED MANAGUA", "CONJ RES NICARAGUA", "COND PALM VILLAGE", "LOT JARDIM PIAI" |
-| parcela | cadastral identifier of the land. Hierarchy: gleba ⊃ (loteamento/desmembramento) ⊃ quadra ⊃ lote; "área" is a subdivision | "GLEBA 10 AREA II LT 02 QD B", "QD 34 LOTE 17", "Lotes 023/024/025" |
-| cadastro | property registration/inscription code (municipal cadastro/IPTU, matrícula, RI, CCIR/INCRA) — an administrative identifier, not a land unit and not CNEFE-geocodable | "Cadastro 37", "Matrícula 98.278", "RI 28006" |
-| descricao_area | textual description of land/area/use (including measurement) — not an identifier | "ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...", "VIVEIRO DE CAMARAO", "Mar territorial", "8.278,00 m²" |
-| quilometragem_via | route kilometer: the number is the position ALONG the road | "KM 304", "BR-307 KM 304" |
-| referencia | snippet that points to another address or place; do not detail the subtype here | "ESQUINA COM AV BOA VIAGEM", "EM FRENTE AO N. 2380", "DESM DO LT 06" |
-| denominacao | current or former name of the street/place | "atual Luís Tanure", "ANTIGA RUA B" |
-| localidade | name of a locality, bairro, district, village, place or zone | "PINA", "BARRA DO BEBEDOURO", "ZONA RURAL" |
-| cep | CEP | "50720-000" |
-| municipio | município | "RECIFE" |
-| uf | federal unit | "PE" |
-| ruido | bare tokens/markers with no value (punctuation, loose separators, leaked process/protocol id, embedded lat/lon) | "V 000 000", "NBP 1045707-4", "-20.23°,-41.51°" |
-| outros | meaningful content fitting no other type; always comment the reason and suggest a new type | — |
-
-Watch out for false friends: `FRENTE`/`FUNDOS` are `complemento` (front/rear of the lot). But `FRENTE PARA` / `EM FRENTE A` introducing another street is NOT complemento — it is part of `referencia`. E.g.: in "Frente para Rua Rui Barbosa", "Frente para" is not `complemento`.
-
-## Tools
-
-{secao_ferramentas}
-
-Usage policy: simple cases → answer directly, WITHOUT calling a tool. Only use a tool when the snippet is ambiguous (e.g. unknown município or development). Do not call a tool just to extract obvious snippets.
-
-## Comment
-
-- `comentario` is only for: (a) what the search or the SQL query revealed; (b) a real labeling doubt. Max ~2 sentences; do not explain the obvious.
-- Whenever you use `outros`, comment the reason and suggest a new type.
-
-## CNEFE schema:
-
-Base with ~110.6 million rows and ~106.4 million unique addresses (code_address). Each row is a species present at the address (household, establishment, etc.), so the same address appears in several rows.
-
-- All text is UPPERCASE and WITHOUT ACCENTS.
-- Empty text is '' (not NULL) and missing numbers are 0 (not NULL).
-- Address with no number: num_adress = 0 with dsc_modificador = 'SN' (26 million rows). When dsc_modificador = 'KM', num_adress is the kilometer (highways/roads). The modifier also holds number suffixes (A, B, CASA 2...) and markers (POSTE, SUCAM): it is free text with ~157 thousand distinct values.
-- There is NO bairro column. desc_localidade is the locality (district seat, village, 'ZONA RURAL', 'CENTRO', even BR names), not a bairro.
-- nom_tipo_seglogr has 390 distinct values. Most common: RUA (73 mi), AVENIDA, ESTRADA, TRAVESSA, RODOVIA, FAZENDA, SITIO, EDF, POVOADO, ALAMEDA, BECO. Typical rural types: CORREGO, RAMAL, LINHA, COMUNIDADE, IGARAPE, ASSENTAMENTO, VIELA.
-- nom_titulo_seglogr is empty in 86% of rows; when filled it is the street title (SAO, DOUTOR, SANTA, PADRE, CORONEL, PRESIDENTE...), separate from the name.
-- nom_seglogr has ~1.28 million distinct values and can be literally 'SEM DENOMINACAO' (1.2 million rows).
-- Complements come in pairs nom_comp_elemN/val_comp_elemN (N=1 to 5; 1 and 2 are common, 3+ is rare). nom is the category (CASA, APARTAMENTO, BLOCO, QUADRA, FUNDOS, FRENTE, TERREO, ANDAR, LOTE, LOJA, TORRE, EDIFICIO, CONJUNTO...) and val is the value, often empty in elem1.
-- cod_especie: 1=private household (82% of rows), 3=agricultural establishment, 6=establishment for other purposes, 7=building under construction. dsc_estabelecimento is the establishment name (BAR, IGREJA, 'VAGO', 'SEM NOME'...), not the street.
-- code_muni is the 7-digit IBGE code.
-
-Try to restrict your queries by municipio and/or uf, and always use a LIMIT and avoid SELECT *.
-
-### Table 'cnefe':
-
-column_name|column_type
--------------
-code_address|INTEGER
-code_state|INTEGER
-code_muni|INTEGER
-code_district|INTEGER
-code_sub_district|BIGINT
-code_sector|VARCHAR
-num_quadra|INTEGER
-num_face|INTEGER
-cep|INTEGER
-desc_localidade|VARCHAR
-nom_tipo_seglogr|VARCHAR
-nom_titulo_seglogr|VARCHAR
-nom_seglogr|VARCHAR
-num_adress|INTEGER
-dsc_modificador|VARCHAR
-nom_comp_elem1|VARCHAR
-val_comp_elem1|VARCHAR
-nom_comp_elem2|VARCHAR
-val_comp_elem2|VARCHAR
-nom_comp_elem3|VARCHAR
-val_comp_elem3|VARCHAR
-nom_comp_elem4|VARCHAR
-val_comp_elem4|VARCHAR
-nom_comp_elem5|VARCHAR
-val_comp_elem5|VARCHAR
-lat|DOUBLE
-lon|DOUBLE
-nv_geo_coord|INTEGER
-cod_especie|INTEGER
-dsc_estabelecimento|VARCHAR
-cod_indicador_estab_endereco|INTEGER
-cod_indicador_const_endereco|INTEGER
-cod_indicador_finalidade_const|INTEGER
-cod_tipo_especi|INTEGER
-
-### Table 'municipio':
-
-column_name|column_type
--------------
-cod_ibge|BIGINT
-municipio|VARCHAR
-uf|VARCHAR
-
-### Reference table of States (not in the database):
-
-codigo|nome
------
-11|RONDONIA
-12|ACRE
-13|AMAZONAS
-14|RORAIMA
-15|PARA
-16|AMAPA
-17|TOCANTINS
-21|MARANHAO
-22|PIAUI
-23|CEARA
-24|RIO GRANDE DO NORTE
-25|PARAIBA
-26|PERNAMBUCO
-27|ALAGOAS
-28|SERGIPE
-29|BAHIA
-31|MINAS GERAIS
-32|ESPIRITO SANTO
-33|RIO DE JANEIRO
-35|SAO PAULO
-41|PARANA
-42|SANTA CATARINA
-43|RIO GRANDE DO SUL
-50|MATO GROSSO DO SUL
-51|MATO GROSSO
-52|GOIAS
-53|DISTRITO FEDERAL
-
-# Useful DuckDB functions
-
-concat(value, ...) or concat_ws(separator, string, ...) - NULLs are ignored
-ends_with(string, search_string) or starts_with(string, search_string)
-contains(string, search_string)
-lower(string) or upper()
-len(string)
-strip_accents(string)
-regexp_matches(string, regex[, options])
-
-levenshtein(s1, s2)
-damerau_levenshtein(s1, s2)
-jaccard(s1, s2)
-jaro_winkler_similarity(s1, s2[, score_cutoff])
-jaro_similarity(s1, s2[, score_cutoff])
-
-
-"""
+    template = TEMPLATE_PROMPT_SISTEMA.read_text(encoding="utf-8")
+    return template.replace("{secao_ferramentas}", "\n".join(ferramentas))
 
 
 def renderizar_prompt_usuario(endereco: str, extras: str, n_rodadas: int) -> str:
@@ -226,452 +139,493 @@ You have {n_rodadas} rounds.
 """
 
 
-def criar_ferramentas():
-    tools = []
+# --- Esquemas das ferramentas (function calling) --------------------------
 
-    tools.append(
-        {
-            "type": "function",
-            "function": {
-                "name": "responder",
-                "description": "Submit the final answer to the request",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "segmentos": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "valor": {"type": "string"},
-                                    "tipo": {
-                                        "type": "string",
-                                        "enum": [
-                                            "logradouro",
-                                            "logradouro_interno",
-                                            "numero",
-                                            "modificador_numero",
-                                            "complemento",
-                                            "empreendimento",
-                                            "parcela",
-                                            "cadastro",
-                                            "descricao_area",
-                                            "quilometragem_via",
-                                            "referencia",
-                                            "denominacao",
-                                            "localidade",
-                                            "cep",
-                                            "municipio",
-                                            "uf",
-                                            "ruido",
-                                            "outros",
-                                        ],
-                                    },
-                                },
-                                "required": ["valor", "tipo"],
-                                "additionalProperties": False,
-                            },
-                            "minItems": 1,
-                        },
-                        "comentario": {
-                            "type": "string",
-                        },
-                    },
-                    "required": ["segmentos"],
-                    "additionalProperties": False,
-                },
-                "strict": True,
+TIPOS_SEGMENTO = [
+    "logradouro",
+    "logradouro_interno",
+    "numero",
+    "modificador_numero",
+    "complemento",
+    "empreendimento",
+    "parcela",
+    "cadastro",
+    "descricao_area",
+    "quilometragem_via",
+    "referencia",
+    "denominacao",
+    "localidade",
+    "cep",
+    "municipio",
+    "uf",
+    "ruido",
+    "outros",
+]
+
+
+def _criar_json_schema_funcao(
+    nome: str,
+    descricao: str,
+    propriedades: dict[str, Any],
+    requeridos: list[str],
+) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": nome,
+            "description": descricao,
+            "parameters": {
+                "type": "object",
+                "properties": propriedades,
+                "required": requeridos,
+                "additionalProperties": False,
             },
-        }
-    )
+            "strict": True,
+        },
+    }
 
-    tools.append(
-        {
-            "type": "function",
-            "function": {
-                "name": "fetch_url",
-                "description": "Fetch the requested URL and return the result in markdown",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "url": {
-                            "type": "string",
-                            "description": "Requested URL",
-                        },
-                    },
-                    "required": ["url"],
-                    "additionalProperties": False,
-                },
-                "strict": True,
-            },
-        }
-    )
 
-    tools.append(
-        {
-            "type": "function",
-            "function": {
-                "name": "sql_query",
-                "description": "Run a SQL query using DuckDB over CNEFE.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "sql": {
-                            "type": "string",
-                            "description": "SQL to execute",
-                        },
-                    },
-                    "required": ["sql"],
-                    "additionalProperties": False,
-                },
-                "strict": True,
-            },
-        }
-    )
-
-    if SEARX_URL:
-        tools.append(
+def criar_ferramentas(config: Config) -> list[dict[str, Any]]:
+    """Monta as ferramentas expostas à LLM, conforme a configuração."""
+    ferramentas = [
+        _criar_json_schema_funcao(
+            "responder",
+            "Submit the final answer to the request",
             {
-                "type": "function",
-                "function": {
-                    "name": "search",
-                    "description": "Search across several search engines.",
-                    "parameters": {
+                "segmentos": {
+                    "type": "array",
+                    "items": {
                         "type": "object",
                         "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "Search query",
-                            },
+                            "valor": {"type": "string"},
+                            "tipo": {"type": "string", "enum": TIPOS_SEGMENTO},
                         },
-                        "required": ["query"],
+                        "required": ["valor", "tipo"],
                         "additionalProperties": False,
                     },
-                    "strict": True,
+                    "minItems": 1,
                 },
-            }
-        )
-    return tools
-
-
-def iniciar_duckbd():
-    caminho_db = os.path.join(tempfile.gettempdir(), "cnefe-enderecobr.db")
-    conn = duckdb.connect(caminho_db)
-    conn.register("cnefe", conn.read_parquet(CNEFE_PATH))
-    conn.register("municipio", conn.read_csv(MUNICIPIOS_PATH))
-
-    return conn
-
-
-conn = iniciar_duckbd()
-
-
-def search(query: str):
-    if not SEARX_URL:
-        return "SEARX_URL is not set; web search is unavailable."
-
-    params = {"q": query, "format": "json"}
-    try:
-        res = requests.get(SEARX_URL, params=params, timeout=30)
-        resposta_bruta = res.json()
-    except Exception as e:
-        return f"An error occurred while searching for '{query}': {e!s}"
-
-    resposta_final = []
-    for result in resposta_bruta.get("results", []):
-        titulo = result.get("title", "")
-        conteudo = result.get("content", "")
-        url = result.get("url", "")
-        engines = result.get("engines", [])
-        pubdate = result.get("pubdate", [])  # Data formatada
-
-        atual = f"""# {titulo}
-url: {url}
-motores de busca: {", ".join(engines)}
-data publicação: {pubdate}
-conteúdo: {conteudo}
-
-"""
-        resposta_final.append(atual)
-
-    return "\n".join(resposta_final)
-
-
-def fetch_url(url: str):
-    try:
-        res = requests.get(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
+                "comentario": {"type": "string"},
             },
-            timeout=30,
+            ["segmentos"],
+        ),
+        _criar_json_schema_funcao(
+            "fetch_url",
+            "Fetch the requested URL and return the result in markdown",
+            {"url": {"type": "string", "description": "Requested URL"}},
+            ["url"],
+        ),
+        _criar_json_schema_funcao(
+            "sql_query",
+            "Run a SQL query using DuckDB over CNEFE.",
+            {"sql": {"type": "string", "description": "SQL to execute"}},
+            ["sql"],
+        ),
+    ]
+
+    if config.searx_url:
+        ferramentas.append(
+            _criar_json_schema_funcao(
+                "search",
+                "Search across several search engines.",
+                {"query": {"type": "string", "description": "Search query"}},
+                ["query"],
+            )
         )
-        return str(md.convert(res).markdown)
-    except Exception as e:
-        return f"An error occurred while fetching '{url}': {e!s}"
+
+    return ferramentas
 
 
-def sql_query(sql: str):
-    try:
-        consulta = conn.execute(sql)
-        colunas = [str(col[0]) for col in consulta.description]
-        resultado = consulta.fetchall()
-    except Exception as e:
-        return f"An error occurred while running the query: {e!s}"
-
-    corpo_tabela = "\n".join(["|".join([str(e) for e in linha]) for linha in resultado])
-
-    return f"""{"|".join(colunas)}
----------
-{corpo_tabela}
-"""
+# --- Modelos de resposta da LLM -------------------------------------------
 
 
-@dataclass()
+@dataclass
 class ToolCall:
     idx: str
     nome: str
     argumentos: Any
 
 
-@dataclass()
+@dataclass
 class Segmento:
     valor: str
     tipo: str
 
 
-@dataclass()
+@dataclass
 class RespostaFinal:
     segmentos: list[Segmento]
     comentario: str | None
 
 
-@dataclass()
+@dataclass
 class RespostaModelo:
-    resposta: str
+    resposta: str | None
     raciociono: str
     tool_calls: list[ToolCall]
     message_original: Any
 
-    def obter_resposta_final(self):
-        return next(iter([c for c in self.tool_calls if c.nome == "responder"]), None)
+    def obter_resposta_final(self) -> ToolCall | None:
+        return next((c for c in self.tool_calls if c.nome == "responder"), None)
 
 
-def estruturar_ferramentas(bruto):
-    chamadas_ferramentas = bruto.get("tool_calls", [])
+def estruturar_tool_calls(message: dict[str, Any]) -> list[ToolCall]:
     resultado: list[ToolCall] = []
-    for call in chamadas_ferramentas:
-        idx = call.get("id", "")
-        fun = call.get("function", {})
-        nome: str = fun.get("name", "")
-        args_bruto = fun.get("arguments")
+    for call in message.get("tool_calls", []):
+        funcao = call.get("function", {})
         try:
-            args = json.loads(args_bruto)
+            argumentos = json.loads(funcao.get("arguments"))
         except (json.JSONDecodeError, TypeError):
             continue
 
-        resultado.append(ToolCall(idx, nome, args))
+        resultado.append(
+            ToolCall(
+                idx=call.get("id", ""),
+                nome=funcao.get("name", ""),
+                argumentos=argumentos,
+            )
+        )
     return resultado
 
 
-def estruturar_resposta_modelo(resposta_bruta) -> RespostaModelo:
-    msg_modelo = resposta_bruta.get("choices", [{}])[0].get("message", {})
-
-    resposta = msg_modelo.get("content")
-    raciociono = msg_modelo.get("reasoning", "")
-    calls = estruturar_ferramentas(msg_modelo)
-
-    return RespostaModelo(resposta, raciociono, calls, msg_modelo)
-
-
-def despachar_ferramenta(call: ToolCall):
-    match call.nome:
-        case "search":
-            return search(call.argumentos.get("query"))
-        case "sql_query":
-            return sql_query(call.argumentos.get("sql"))
-        case "fetch_url":
-            return fetch_url(call.argumentos.get("url"))
-
-    return f"Requested tool {call.nome} does not exist"
+def estruturar_resposta_modelo(resposta_bruta: dict[str, Any]) -> RespostaModelo:
+    message = resposta_bruta.get("choices", [{}])[0].get("message", {})
+    return RespostaModelo(
+        resposta=message.get("content"),
+        raciociono=message.get("reasoning", ""),
+        tool_calls=estruturar_tool_calls(message),
+        message_original=message,
+    )
 
 
-def processar_resultado_final(resposta: ToolCall) -> RespostaFinal:
-    segmentos = resposta.argumentos.get("segmentos", [])
-    comentario = resposta.argumentos.get("comentario")
+def processar_resultado_final(chamada: ToolCall) -> RespostaFinal:
+    """Converte a chamada `responder` na resposta final estruturada."""
+    segmentos = [
+        Segmento(valor=str(seg.get("valor", "")), tipo=str(seg.get("tipo", "")))
+        for seg in chamada.argumentos.get("segmentos", [])
+    ]
+    return RespostaFinal(
+        segmentos=segmentos, comentario=chamada.argumentos.get("comentario")
+    )
 
-    resposta_final = RespostaFinal(segmentos=[], comentario=comentario)
 
-    for seg in segmentos:
-        tipo = str(seg.get("tipo", ""))
-        valor = str(seg.get("valor", ""))
-        resposta_final.segmentos.append(Segmento(valor=valor, tipo=tipo))
+# --- Ferramentas ----------------------------------------------------------
 
-    return resposta_final
+
+class Ferramentas:
+    """Executa as ferramentas chamadas pela LLM (CNEFE, busca web, fetch)."""
+
+    def __init__(self, config: Config, cliente: ClienteHTTP) -> None:
+        self.config = config
+        self.cliente = cliente
+        self.md = markitdown.MarkItDown()
+
+        caminho_db = Path(tempfile.gettempdir()) / "cnefe-enderecobr.db"
+        self.conn = duckdb.connect(str(caminho_db))
+        self.conn.register("cnefe", self.conn.read_parquet(config.cnefe_path))
+        self.conn.register("municipio", self.conn.read_csv(str(config.municipios_path)))
+
+    def fechar(self) -> None:
+        self.conn.close()
+
+    def despachar(self, chamada: ToolCall) -> str:
+        match chamada.nome:
+            case "search":
+                return self.buscar_web(chamada.argumentos.get("query", ""))
+            case "sql_query":
+                return self.consultar_sql(chamada.argumentos.get("sql", ""))
+            case "fetch_url":
+                return self.buscar_url(chamada.argumentos.get("url", ""))
+            case _:
+                return f"Requested tool {chamada.nome} does not exist"
+
+    def buscar_web(self, query: str) -> str:
+        if not self.config.searx_url:
+            return "SEARX_URL is not set; web search is unavailable."
+
+        try:
+            res = self.cliente.obter(
+                self.config.searx_url, params={"q": query, "format": "json"}
+            )
+            resultados = res.json().get("results", [])
+        except (requests.RequestException, ValueError) as e:
+            return f"An error occurred while searching for '{query}': {e!s}"
+
+        blocos = []
+        for resultado in resultados:
+            blocos.append(
+                f"""# {resultado.get("title", "")}
+url: {resultado.get("url", "")}
+motores de busca: {", ".join(resultado.get("engines", []))}
+data publicação: {resultado.get("pubdate", [])}
+conteúdo: {resultado.get("content", "")}
+
+"""
+            )
+        return "\n".join(blocos)
+
+    def buscar_url(self, url: str) -> str:
+        try:
+            res = self.cliente.obter(url, headers={"User-Agent": USER_AGENT})
+            return str(self.md.convert(res).markdown)
+        except (
+            requests.RequestException,
+            markitdown.MarkItDownException,
+            ValueError,
+            OSError,
+        ) as e:
+            return f"An error occurred while fetching '{url}': {e!s}"
+
+    def consultar_sql(self, sql: str) -> str:
+        try:
+            consulta = self.conn.execute(sql)
+            colunas = [str(col[0]) for col in consulta.description]
+            resultado = consulta.fetchall()
+        except duckdb.Error as e:
+            return f"An error occurred while running the query: {e!s}"
+
+        cabecalho = "|".join(colunas)
+        corpo = "\n".join("|".join(str(v) for v in linha) for linha in resultado)
+        return f"{cabecalho}\n---------\n{corpo}\n"
+
+
+# --- HTTP -----------------------------------------------------------------
+
+ERROS_TRANSITORIOS = (
+    requests.Timeout,
+    requests.ConnectionError,
+    requests.HTTPError,
+    requests.JSONDecodeError,
+)
+
+
+class ClienteHTTP:
+    """Cliente HTTP com retry para erros transientes.
+
+    Concentraliza o backoff exponencial + jitter num único lugar, reusado tanto
+    nas chamadas à LLM (`enviar_json`) quanto nas ferramentas de busca e fetch
+    de páginas (`obter`).
+    """
+
+    def __init__(
+        self,
+        n_tentativas: int = 5,
+        delay_base: float = 2.0,
+        timeout_conexao: float = 10.0,
+    ) -> None:
+        self.n_tentativas = n_tentativas
+        self.delay_base = delay_base
+        self.timeout_conexao = timeout_conexao
+        self.sessao = requests.Session()
+        self.sessao.trust_env = True
+
+    def obter(
+        self, url: str, *, timeout: float = 30.0, **kwargs: Any
+    ) -> requests.Response:
+        """GET com retry; retorna a resposta bruta."""
+        return cast(requests.Response, self._requisitar("GET", url, timeout, **kwargs))
+
+    def enviar_json(
+        self,
+        url: str,
+        payload: dict[str, Any],
+        *,
+        timeout: float = 300.0,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """POST com retry; decodifica e retorna o corpo JSON."""
+        return cast(
+            dict[str, Any],
+            self._requisitar(
+                "POST", url, timeout, json=payload, decodificar=True, **kwargs
+            ),
+        )
+
+    def _requisitar(
+        self,
+        metodo: str,
+        url: str,
+        timeout: float,
+        *,
+        decodificar: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Executa uma requisição, reenviando em erros transientes."""
+        for tentativa in range(self.n_tentativas):
+            try:
+                resposta = self.sessao.request(
+                    metodo, url, timeout=(self.timeout_conexao, timeout), **kwargs
+                )
+                resposta.raise_for_status()
+                return resposta.json() if decodificar else resposta
+            except (
+                requests.Timeout,
+                requests.ConnectionError,
+                requests.HTTPError,
+                requests.JSONDecodeError,
+            ) as e:
+                if tentativa == self.n_tentativas - 1:
+                    raise
+                delay = self.delay_base * (2**tentativa - 1) + random.uniform(0, 5)
+                console.print(
+                    f"[yellow]Tentativa {tentativa + 1}/{self.n_tentativas} "
+                    f"falhou: {e}. Retentando em {delay:.2f}s…[/yellow]"
+                )
+                time.sleep(delay)
+
+        raise RuntimeError("Não foi possível realizar a requisição.")
+
+
+def realizar_requisicao(
+    cliente: ClienteHTTP, config: Config, messages: list[dict[str, Any]]
+) -> dict[str, Any]:
+    return cliente.enviar_json(
+        config.url_chat,
+        {
+            "model": config.api_model,
+            "messages": messages,
+            "tools": criar_ferramentas(config),
+            "temperature": 0.3,
+        },
+        headers={
+            "Authorization": f"Bearer {config.api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+
+
+# --- Contexto de execução -------------------------------------------------
+
+
+@dataclass
+class Contexto:
+    """Reúne a configuração, o cliente HTTP e as ferramentas de uma execução."""
+
+    config: Config
+    cliente: ClienteHTTP
+    ferramentas: Ferramentas
+
+    @classmethod
+    def criar(cls, config: Config) -> Contexto:
+        cliente = ClienteHTTP()
+        return cls(
+            config=config,
+            cliente=cliente,
+            ferramentas=Ferramentas(config, cliente),
+        )
+
+    def fechar(self) -> None:
+        self.ferramentas.fechar()
+
+
+# --- Validação ------------------------------------------------------------
 
 
 def validar_resposta_final(
     endereco: str, resposta: RespostaFinal
 ) -> tuple[str, str | None]:
-    ultima_pos = 0
+    """Confere que cada segmento é um trecho verbatim e na ordem do endereço.
 
+    Retorna a visualização anotada e, se houver, a descrição dos problemas.
+    """
+    ultima_pos = 0
     problemas: list[str] = []
-    visualizacao_segmentos: list[str] = []
+    visualizacao: list[str] = []
 
     for i, seg in enumerate(resposta.segmentos):
-        posicao_segmento = endereco.find(seg.valor, ultima_pos)
+        posicao = endereco.find(seg.valor, ultima_pos)
 
-        if posicao_segmento == -1:
+        if posicao == -1:
             problemas.append(
                 f"Could not locate segment #{i + 1}: {seg.valor} ({seg.tipo}) "
             )
             continue
 
-        if posicao_segmento != ultima_pos:
-            visualizacao_segmentos.append(endereco[ultima_pos:posicao_segmento])
+        if posicao != ultima_pos:
+            visualizacao.append(endereco[ultima_pos:posicao])
 
-        nova_posicao = posicao_segmento + len(seg.valor)
-
-        visualizacao_segmentos.append(
-            f"{endereco[posicao_segmento:nova_posicao]} [{seg.tipo}]"
-        )
-
-        ultima_pos = nova_posicao
+        fim = posicao + len(seg.valor)
+        visualizacao.append(f"{endereco[posicao:fim]} [{seg.tipo}]")
+        ultima_pos = fim
 
     if ultima_pos != len(endereco):
-        visualizacao_segmentos.append(endereco[ultima_pos:])
+        visualizacao.append(endereco[ultima_pos:])
 
-    problemas_str = None
-    if len(problemas):
-        problemas_str = "\n".join(problemas)
-
-    vis = "\n".join(visualizacao_segmentos)
-    return (vis, problemas_str)
+    problemas_str = "\n".join(problemas) if problemas else None
+    return "\n".join(visualizacao), problemas_str
 
 
-def realizar_requisicao(messages):
-    response = requests.post(
-        f"{API_URL}/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": API_MODEL,
-            "messages": messages,
-            "tools": criar_ferramentas(),
-            "temperature": 0.3,
-        },
-        timeout=300,
-    )
-
-    response.raise_for_status()
-    data = response.json()
-    return data
+# --- Loop reAct -----------------------------------------------------------
 
 
-def react_loop(n_iter: int = 10, n_paciencia_erro: int = 2):
-    # "FAZ ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO BARRA DO BEBEDOURO 0 BARRA DO BEBEDOURO",
-    # "R ALCIDES CARNEIRO LEAL 71 APTO 104 ED MANAGUA CONJ RES NICARAGUA",
-    # "Municipio: Recife/PE\nBairro: PINA\nBanco de Dados: Imóveis da União",
+class ErroSegmentacao(RuntimeError):
+    """Não foi possível obter uma segmentação válida."""
 
-    # endereco = "FAZ PIRA COMBOA DOS CAVALOS E OUTROS S/N VIVEIRO DE CAMARAO"
-    # endereco = "AV OCEANICA 3009 ED. SOLARIUS - AP. 606 E VAGA DE GARAGEM"
-    # endereco = "R C 64 QD VIII, LOTE 127, LOT NOSSA SENHORA PEN"
-    # endereco = "ROD BR 307, KM 304 113 Lote 113, Conjunto Residencial Lobo D'Almada"
-    # endereco = "R Antonio Gomes dos Santos s/n Dista 200m da CE-040, estrada que liga Tapera à Canoa"
-    # endereco = "PR Mar territorial. Parque Aquícola Marinho Amontada 01. s/n Área E"
-    # endereco = "A De 8.278,00 m² - Patio da Estação s/n Frente para Rua Rui Barbosa"
-    # endereco = "AC SAI DO POV. CAPIM GROSSO VIRA A DIR. NO AÇÚDE PÚB. + 6,6KM V 000 000"
-    # endereco = "AV BR-343 KM-08-LADO ESQUERDO SENT. PBA- LUIZ CORREIA S/N Km 08, próximo ao acesso ao aeroporto de Parnaíba"
-    endereco = "FAZ FAZENDA LUAR DO YBICUHY - S/Nº PA SEPE TIARAJU III - BR 1581293 - SNATANA DO LIVRAMENTO/RS"
-    endereco = "AV Presidente Dutra 1172 Com uma vaga de estacionamento"
 
-    extras = "Municipio: Itaperuna/RJ\nBairro: Pres. Costa e Silva\nBanco de Dados: Imóveis da União"
-
-    n_erros = n_paciencia_erro
-    resposta_bruta = {}
-
-    messages = [
-        {
-            "role": "system",
-            "content": renderizar_prompt_sistema(),
-        },
+def segmentar(
+    contexto: Contexto,
+    endereco: str,
+    extras: str,
+    *,
+    n_iter: int = 10,
+    tolerancia_erro: int = 2,
+) -> RespostaFinal:
+    """Roda o loop reAct até obter uma segmentação válida."""
+    config = contexto.config
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": renderizar_prompt_sistema(config)},
         {
             "role": "user",
             "content": renderizar_prompt_usuario(endereco, extras, n_iter),
         },
     ]
+    erros_consecutivos = 0
 
     for i in range(n_iter):
-        print(f"Iteração #{i + 1}")
+        console.rule(f"Iteração {i + 1}/{n_iter}")
 
-        resposta_bruta = realizar_requisicao(messages)
-        resposta = estruturar_resposta_modelo(resposta_bruta)
-
+        resposta = estruturar_resposta_modelo(
+            realizar_requisicao(contexto.cliente, config, messages)
+        )
         messages.append(resposta.message_original)
 
-        print("========================")
-        print(f"# Raciociono:\n{resposta.raciociono}")
-        print("========================")
-        print()
-
+        if resposta.raciociono:
+            console.print(resposta.raciociono, style="dim italic")
         if resposta.resposta:
-            print(resposta.resposta)
+            console.print(resposta.resposta)
 
-        resposta_final = resposta.obter_resposta_final()
+        chamada_final = resposta.obter_resposta_final()
+        if chamada_final is not None:
+            resultado = processar_resultado_final(chamada_final)
+            visualizacao, erro = validar_resposta_final(endereco, resultado)
+            console.print(visualizacao)
 
-        if resposta_final:
-            resultado_final = processar_resultado_final(resposta_final)
-            vis, erro = validar_resposta_final(endereco, resultado_final)
+            if erro is None:
+                return resultado
 
-            print()
-            pprint(resultado_final)
-            print("Visualizacao:")
-            print(vis)
-            print("-------------")
-            if erro:
-                print("Erro:", erro)
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": f"An error occurred while validating your segmentation. Fix it and submit again.\n{erro}",
-                    }
+            erros_consecutivos += 1
+            if erros_consecutivos > tolerancia_erro:
+                raise ErroSegmentacao(
+                    f"Validação falhou {erros_consecutivos} vezes seguidas:\n{erro}"
                 )
-
-                if n_erros == 0:
-                    n_erros -= 1
-                    i -= 1
-                    continue
-
-            else:
-                break
-
-        if not resposta_final:
-            for c in resposta.tool_calls:
-                pprint(c)
-                resposta_ferramenta = despachar_ferramenta(c)
-                print()
-                print(resposta_ferramenta)
-
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": c.idx,
-                        "content": resposta_ferramenta,
-                    }
-                )
-
-        if i == n_iter - 1:
             messages.append(
                 {
                     "role": "user",
-                    "content": f"Round {i + 1} of {n_iter}",
+                    "content": f"An error occurred while validating your segmentation. Fix it and submit again.\n{erro}",
                 }
+            )
+            continue
+
+        for chamada in resposta.tool_calls:
+            console.print(f"[bold]{chamada.nome}[/bold] {chamada.argumentos}")
+            saida = contexto.ferramentas.despachar(chamada)
+            console.print(saida)
+            messages.append(
+                {"role": "tool", "tool_call_id": chamada.idx, "content": saida}
             )
 
         if i == n_iter - 1:
-            print("ÚLTIMA ITERACAO")
+            console.print("[bold red]Última iteração[/bold red]")
             messages.append(
                 {
                     "role": "user",
@@ -679,7 +633,78 @@ def react_loop(n_iter: int = 10, n_paciencia_erro: int = 2):
                 }
             )
 
-    print(json.dumps(resposta_bruta, indent=4))
+    raise ErroSegmentacao(f"Sem resposta final após {n_iter} iterações.")
 
 
-react_loop()
+# --- CLI ------------------------------------------------------------------
+
+app = typer.Typer(no_args_is_help=True, add_completion=False)
+
+
+@app.command()
+def etiquetar(
+    endereco: Annotated[str, typer.Argument(help="Endereço bruto a segmentar.")],
+    extras: Annotated[
+        str,
+        typer.Option(
+            "--extras",
+            "-e",
+            help="Informação extra de contexto (NÃO popula segmentos).",
+        ),
+    ] = "",
+    env: Annotated[
+        Path,
+        typer.Option("--env", help="Caminho do arquivo .env."),
+    ] = Path(".env"),
+    iteracoes: Annotated[
+        int,
+        typer.Option(
+            "--iteracoes", "-n", min=1, help="Máximo de rodadas do loop reAct."
+        ),
+    ] = 10,
+    tolerancia_erro: Annotated[
+        int,
+        typer.Option(
+            "--tolerancia-erro",
+            min=0,
+            help="Falhas de validação consecutivas antes de abortar.",
+        ),
+    ] = 2,
+    saida: Annotated[
+        Path | None,
+        typer.Option("--saida", "-o", help="Arquivo JSON de saída (padrão: stdout)."),
+    ] = None,
+) -> None:
+    """Segmenta um endereço bruto em campos rotulados usando uma LLM."""
+    contexto = Contexto.criar(carregar_config(env))
+    try:
+        resultado = segmentar(
+            contexto,
+            endereco,
+            extras,
+            n_iter=iteracoes,
+            tolerancia_erro=tolerancia_erro,
+        )
+    finally:
+        contexto.fechar()
+
+    console.rule("Resultado final")
+    pprint(resultado)
+
+    dados = {
+        "endereco": endereco,
+        "extras": extras,
+        "segmentos": [asdict(seg) for seg in resultado.segmentos],
+        "comentario": resultado.comentario,
+    }
+    texto = json.dumps(dados, ensure_ascii=False, indent=2)
+
+    if saida:
+        saida.write_text(texto, encoding="utf-8")
+        console.print(f"[green]Salvo em {saida}[/green]")
+    else:
+        console.print(texto)
+
+
+if __name__ == "__main__":
+    app()
