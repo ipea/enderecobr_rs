@@ -40,82 +40,82 @@ if not SEARX_URL:
 
 def renderizar_prompt_sistema() -> str:
     ferramentas = [
-        "- `responder`: submete o resultado final. Sempre use esta ferramenta para responder.",
-        "- `consulta_sql`: consulta o CNEFE no DuckDB. Limite por município e/ou uf, use sempre LIMIT e evite SELECT *.",
+        "- `responder`: submit the final result. Always use this tool to answer.",
+        "- `sql_query`: query CNEFE in DuckDB. Restrict by município and/or uf, always use LIMIT and avoid SELECT *.",
     ]
     if SEARX_URL:
-        ferramentas.append("- `buscar`: realiza uma busca em vários motores de busca.")
+        ferramentas.append("- `search`: search across several search engines.")
     ferramentas.append(
-        "- `acessar_url`: acessa uma URL e retorna o conteúdo em markdown (markitdown)."
+        "- `fetch_url`: fetch a URL and return its content as markdown (markitdown)."
     )
     secao_ferramentas = "\n".join(ferramentas)
 
-    return f"""Você segmenta endereços brasileiros brutos em campos rotulados, para gerar dados de treino de um modelo de CRF.
+    return f"""You segment raw Brazilian addresses into labeled fields to generate training data for a CRF model.
 
-## Regras gerais
+## General rules
 
-1. Verbatim: cada `valor` é um trecho copiado exatamente como está no endereço bruto. Não normalize, não expanda abreviações, não corrija erros de digitação, não altere caixa nem acentos.
-2. Use apenas o texto do endereço bruto como fonte dos `valor`. As "Informações extras" existem só para orientar o uso de ferramentas — o modelo treinado NUNCA as verá, então qualquer valor que não esteja verbatim no endereço será rejeitado. Não valide nem enriqueça: se um campo não aparece, não o crie; se você não conhece o endereço, responda mesmo assim.
-3. Ordene os segmentos na ordem em que aparecem no texto.
-4. Não rotule conectivos, conjunções e preposições: eles separam unidades e, portanto, viram corte entre segmentos.
-5. Um segmento por referente. Tudo que aponta para o MESMO referente fica num único segmento, mesmo com vários tokens (ex.: "QD 34 LOTE 17", "GLEBA 10 AREA II LT 02 QD B", "Lotes 023/024/025 QD 34"). Unidades distintas — cada uma com seu próprio token — viram segmentos separados, e o conectivo entre elas não é rotulado (ex.: "AP 701 E VG 17" → dois `complemento`). Listas e intervalos com token ou separador compartilhado ficam num único segmento, com os separadores internos (/, -, ,) DENTRO do segmento (ex.: "Lotes 1-5", "10-20").
-6. Trechos que remetem a outro endereço ou local são `referencia` (ex.: "ESQUINA COM", "EM FRENTE AO", "DESM DO"). O número dentro de uma referência pertence à referência, NÃO a `numero` — ou seja, `numero` do endereço principal é único.
-7. `quilometragem_via` é a cota na própria via — o número É a posição ao longo dela ("KM 304", "BR-307 KM 304"). Um afastamento mede a separação de um marco ("200m da CE-040", "+ 6,6KM") e, por remeter a outro ponto, integra a `referencia`.
-8. Município, UF, `localidade` e CEP, quando aparecem no próprio endereço, são rotulados normalmente — as "Informações extras" NUNCA populam segmentos. Um tipo de logradouro solto, sem nome associado (ex.: "A", "PR", "AC"), NÃO é `logradouro`: use `descricao_area`, `referencia` ou `outros` conforme o caso.
+1. Verbatim: every `valor` is a snippet copied exactly as it appears in the raw address. Do not normalize, expand abbreviations, fix typos, or change case/accents.
+2. Use only the raw address text as the source of `valor`. The "Extra info" exists only to guide tool use — the trained model will NEVER see it, so any value not verbatim in the address will be rejected. Do not validate or enrich: if a field is absent, do not create it; if you don't know the address, answer anyway.
+3. Order segments as they appear in the text.
+4. Do not label connectives, conjunctions or prepositions: they separate units and therefore act as a cut between segments.
+5. One segment per referent. Everything pointing to the SAME referent stays in a single segment, even with several tokens (e.g.: "QD 34 LOTE 17", "GLEBA 10 AREA II LT 02 QD B", "Lotes 023/024/025 QD 34"). Distinct units — each with its own token — become separate segments, and the connective between them is not labeled (e.g.: "AP 701 E VG 17" → two `complemento`). Lists and ranges with a shared token or separator stay in a single segment, with internal separators (/, -, ,) INSIDE the segment (e.g.: "Lotes 1-5", "10-20").
+6. Snippets that point to another address or place are `referencia` (e.g.: "ESQUINA COM", "EM FRENTE AO", "DESM DO"). A number inside a reference belongs to the reference, NOT to `numero` — that is, `numero` of the main address is unique.
+7. `quilometragem_via` is the route kilometer — the number IS the position along the road ("KM 304", "BR-307 KM 304"). An offset measures the distance from a landmark ("200m da CE-040", "+ 6,6KM") and, since it points to another place, belongs to `referencia`.
+8. Município, UF, `localidade` and CEP, when present in the address itself, are labeled normally — the "Extra info" NEVER populates segments. A bare street-type token without an associated name (e.g.: "A", "PR", "AC") is NOT `logradouro`: use `descricao_area`, `referencia` or `outros` as appropriate.
 
-## Tabela de rótulos
+## Label table
 
-| tipo | marcar | exemplo |
+| tipo | what to mark | example |
 |---|---|---|
-| logradouro | tipo + título + nome da via, verbatim; absorve rodovia | "R ALCIDES CARNEIRO LEAL", "AV OCEANICA", "ROD BR-116" |
-| logradouro_interno | via/área interna a um empreendimento (não é logradouro oficial do município) | "RUA PROJETADA GH", "Rua 7 do Condomínio X" |
-| numero | número do imóvel, incluindo ausência de número | "71", "S/N", "SN", "S/Nº" |
-| modificador_numero | sufixo/marco colado ao número | "A", "504-B1", "POSTE" |
-| complemento | unidade interna do imóvel, com tipo e valor juntos | "APTO 104", "BL 4", "SALA 306B", "VG 17" |
-| empreendimento | nome de desenvolvimento: edifício, condomínio, conjunto, residencial, loteamento | "ED MANAGUA", "CONJ RES NICARAGUA", "COND PALM VILLAGE", "LOT JARDIM PIAI" |
-| parcela | identificador cadastral do terreno. Hierarquia: gleba ⊃ (loteamento/desmembramento) ⊃ quadra ⊃ lote; "área" é subdivisão | "GLEBA 10 AREA II LT 02 QD B", "QD 34 LOTE 17", "Lotes 023/024/025" |
-| descricao_area | descrição textual de área/terreno/uso (inclusive medida) — não é identificador | "ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...", "VIVEIRO DE CAMARAO", "Mar territorial", "8.278,00 m²" |
-| quilometragem_via | cota na própria via: o número é a posição AO LONGO dela | "KM 304", "BR-307 KM 304" |
-| referencia | trecho que remete a outro endereço ou local, sem detalhar subtipo aqui | "ESQUINA COM AV BOA VIAGEM", "EM FRENTE AO N. 2380", "DESM DO LT 06" |
-| denominacao | denominação atual ou anterior do logradouro/local | "atual Luís Tanure", "ANTIGA RUA B" |
-| localidade | nome de localidade, bairro, distrito, povoado, lugar ou zona | "PINA", "BARRA DO BEBEDOURO", "ZONA RURAL" |
+| logradouro | street type + title + name, verbatim; absorbs rodovia | "R ALCIDES CARNEIRO LEAL", "AV OCEANICA", "ROD BR-116" |
+| logradouro_interno | way/area internal to a development (not an official municipal street) | "RUA PROJETADA GH", "Rua 7 do Condomínio X" |
+| numero | property number, including absence of a number | "71", "S/N", "SN", "S/Nº" |
+| modificador_numero | suffix/marker attached to the number | "A", "504-B1", "POSTE" |
+| complemento | internal unit of the property, type and value together | "APTO 104", "BL 4", "SALA 306B", "VG 17" |
+| empreendimento | development name: building, condominium, conjunto, residencial, loteamento | "ED MANAGUA", "CONJ RES NICARAGUA", "COND PALM VILLAGE", "LOT JARDIM PIAI" |
+| parcela | cadastral identifier of the land. Hierarchy: gleba ⊃ (loteamento/desmembramento) ⊃ quadra ⊃ lote; "área" is a subdivision | "GLEBA 10 AREA II LT 02 QD B", "QD 34 LOTE 17", "Lotes 023/024/025" |
+| descricao_area | textual description of land/area/use (including measurement) — not an identifier | "ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...", "VIVEIRO DE CAMARAO", "Mar territorial", "8.278,00 m²" |
+| quilometragem_via | route kilometer: the number is the position ALONG the road | "KM 304", "BR-307 KM 304" |
+| referencia | snippet that points to another address or place; do not detail the subtype here | "ESQUINA COM AV BOA VIAGEM", "EM FRENTE AO N. 2380", "DESM DO LT 06" |
+| denominacao | current or former name of the street/place | "atual Luís Tanure", "ANTIGA RUA B" |
+| localidade | name of a locality, bairro, district, village, place or zone | "PINA", "BARRA DO BEBEDOURO", "ZONA RURAL" |
 | cep | CEP | "50720-000" |
 | municipio | município | "RECIFE" |
-| uf | unidade federativa | "PE" |
-| ruido | apenas tokens/marcadores sem valor (pontuação, separadores soltos, id/registro vazado, lat/lon embutida) | "V 000 000", "NBP 1045707-4", "-20.23°,-41.51°" |
-| outros | trecho com conteúdo semântico que não cabe nos demais tipos; sempre comente o motivo e sugira um tipo novo | — |
+| uf | federal unit | "PE" |
+| ruido | bare tokens/markers with no value (punctuation, loose separators, leaked record id, embedded lat/lon) | "V 000 000", "NBP 1045707-4", "-20.23°,-41.51°" |
+| outros | meaningful content fitting no other type; always comment the reason and suggest a new type | — |
 
-Atenção a falsos amigos: `FRENTE`/`FUNDOS` são `complemento` (frente/fundos do lote). Já `FRENTE PARA` / `EM FRENTE A` introduzindo outro logradouro NÃO é complemento — faz parte da `referencia`. Ex.: em "Frente para Rua Rui Barbosa", "Frente para" não é `complemento`.
+Watch out for false friends: `FRENTE`/`FUNDOS` are `complemento` (front/rear of the lot). But `FRENTE PARA` / `EM FRENTE A` introducing another street is NOT complemento — it is part of `referencia`. E.g.: in "Frente para Rua Rui Barbosa", "Frente para" is not `complemento`.
 
-## Ferramentas
+## Tools
 
 {secao_ferramentas}
 
-Política de uso: casos simples → responda direto, SEM chamar ferramenta. Só use ferramenta quando o trecho for ambíguo (ex.: município ou empreendimento desconhecido). Não chame ferramenta só para extrair trechos óbvios.
+Usage policy: simple cases → answer directly, WITHOUT calling a tool. Only use a tool when the snippet is ambiguous (e.g. unknown município or development). Do not call a tool just to extract obvious snippets.
 
-## Comentário
+## Comment
 
-- `comentario` serve apenas para: (a) o que a busca ou a consulta SQL revelou; (b) dúvida real de rótulo. Máximo ~2 frases; não explique o óbvio.
-- Sempre que usar `outros`, comente o motivo e sugira um tipo novo.
+- `comentario` is only for: (a) what the search or the SQL query revealed; (b) a real labeling doubt. Max ~2 sentences; do not explain the obvious.
+- Whenever you use `outros`, comment the reason and suggest a new type.
 
-## Schema do CNEFE:
+## CNEFE schema:
 
-Base com ~110,6 milhões de linhas e ~106,4 milhões de endereços únicos (code_address). Cada linha é uma espécie presente no endereço (domicílio, estabelecimento etc.), logo um mesmo endereço aparece em várias linhas.
+Base with ~110.6 million rows and ~106.4 million unique addresses (code_address). Each row is a species present at the address (household, establishment, etc.), so the same address appears in several rows.
 
-- Todo o texto está em MAIÚSCULAS e SEM ACENTOS.
-- Texto vazio é '' (não NULL) e números ausentes são 0 (não NULL).
-- Endereço sem número: num_adress = 0 com dsc_modificador = 'SN' (26 milhões de linhas). Quando dsc_modificador = 'KM', num_adress é a quilometragem (rodovias/estradas). O modificador também guarda sufixos de número (A, B, CASA 2...) e marcos (POSTE, SUCAM): é texto livre com ~157 mil valores distintos.
-- NÃO existe coluna de bairro. desc_localidade é a localidade (sede de distrito, povoado, 'ZONA RURAL', 'CENTRO', até nomes de BRs), não um bairro.
-- nom_tipo_seglogr tem 390 valores distintos. Mais comuns: RUA (73 mi), AVENIDA, ESTRADA, TRAVESSA, RODOVIA, FAZENDA, SITIO, EDF, POVOADO, ALAMEDA, BECO. Tipos rurais típicos: CORREGO, RAMAL, LINHA, COMUNIDADE, IGARAPE, ASSENTAMENTO, VIELA.
-- nom_titulo_seglogr é vazio em 86% das linhas; quando preenchido é o título do logradouro (SAO, DOUTOR, SANTA, PADRE, CORONEL, PRESIDENTE...), separado do nome.
-- nom_seglogr tem ~1,28 milhão de valores distintos e pode ser literalmente 'SEM DENOMINACAO' (1,2 milhão de linhas).
-- Complementos vêm em pares nom_comp_elemN/val_comp_elemN (N=1 a 5; 1 e 2 são comuns, 3+ é raro). nom é a categoria (CASA, APARTAMENTO, BLOCO, QUADRA, FUNDOS, FRENTE, TERREO, ANDAR, LOTE, LOJA, TORRE, EDIFICIO, CONJUNTO...) e val é o valor, frequentemente vazio no elem1.
-- cod_especie: 1=domicílio particular (82% das linhas), 3=estabelecimento agropecuário, 6=estabelecimento de outras finalidades, 7=edificação em construção. dsc_estabelecimento é o nome do estabelecimento (BAR, IGREJA, 'VAGO', 'SEM NOME'...), não do logradouro.
-- code_muni é o código IBGE de 7 dígitos.
+- All text is UPPERCASE and WITHOUT ACCENTS.
+- Empty text is '' (not NULL) and missing numbers are 0 (not NULL).
+- Address with no number: num_adress = 0 with dsc_modificador = 'SN' (26 million rows). When dsc_modificador = 'KM', num_adress is the kilometer (highways/roads). The modifier also holds number suffixes (A, B, CASA 2...) and markers (POSTE, SUCAM): it is free text with ~157 thousand distinct values.
+- There is NO bairro column. desc_localidade is the locality (district seat, village, 'ZONA RURAL', 'CENTRO', even BR names), not a bairro.
+- nom_tipo_seglogr has 390 distinct values. Most common: RUA (73 mi), AVENIDA, ESTRADA, TRAVESSA, RODOVIA, FAZENDA, SITIO, EDF, POVOADO, ALAMEDA, BECO. Typical rural types: CORREGO, RAMAL, LINHA, COMUNIDADE, IGARAPE, ASSENTAMENTO, VIELA.
+- nom_titulo_seglogr is empty in 86% of rows; when filled it is the street title (SAO, DOUTOR, SANTA, PADRE, CORONEL, PRESIDENTE...), separate from the name.
+- nom_seglogr has ~1.28 million distinct values and can be literally 'SEM DENOMINACAO' (1.2 million rows).
+- Complements come in pairs nom_comp_elemN/val_comp_elemN (N=1 to 5; 1 and 2 are common, 3+ is rare). nom is the category (CASA, APARTAMENTO, BLOCO, QUADRA, FUNDOS, FRENTE, TERREO, ANDAR, LOTE, LOJA, TORRE, EDIFICIO, CONJUNTO...) and val is the value, often empty in elem1.
+- cod_especie: 1=private household (82% of rows), 3=agricultural establishment, 6=establishment for other purposes, 7=building under construction. dsc_estabelecimento is the establishment name (BAR, IGREJA, 'VAGO', 'SEM NOME'...), not the street.
+- code_muni is the 7-digit IBGE code.
 
-Procure limitar por municipio e/ou uf suas consultas, além de usar sempre um LIMIT e evitar SELECT *.
+Try to restrict your queries by municipio and/or uf, and always use a LIMIT and avoid SELECT *.
 
-### Tabela 'cnefe':
+### Table 'cnefe':
 
 column_name|column_type
 -------------
@@ -154,7 +154,7 @@ cod_indicador_const_endereco|INTEGER
 cod_indicador_finalidade_const|INTEGER
 cod_tipo_especi|INTEGER
 
-### Tabela 'municipio':
+### Table 'municipio':
 
 column_name|column_type
 -------------
@@ -162,7 +162,7 @@ cod_ibge|BIGINT
 municipio|VARCHAR
 uf|VARCHAR
 
-### Tabela de refência de Estados (não está no banco):
+### Reference table of States (not in the database):
 
 codigo|nome
 -----
@@ -194,12 +194,12 @@ codigo|nome
 52|GOIAS
 53|DISTRITO FEDERAL
 
-# Funções úteis DuckDB
+# Useful DuckDB functions
 
-concat(value, ...) ou concat_ws(separator, string, ...) - Nulos são ignorados
-ends_with(string, search_string) ou starts_with(string, search_string)
+concat(value, ...) or concat_ws(separator, string, ...) - NULLs are ignored
+ends_with(string, search_string) or starts_with(string, search_string)
 contains(string, search_string)
-lower(string) ou upper()
+lower(string) or upper()
 len(string)
 strip_accents(string)
 regexp_matches(string, regex[, options])
@@ -215,13 +215,13 @@ jaro_similarity(s1, s2[, score_cutoff])
 
 
 def renderizar_prompt_usuario(endereco: str, extras: str, n_rodadas: int) -> str:
-    return f"""Informações extras (contexto apenas; NÃO servem para popular segmentos):
+    return f"""Extra info (context only; it does NOT populate segments):
 {extras}
 
-Endereço bruto:
+Raw address:
 {endereco}
 
-Você tem {n_rodadas} rodadas.
+You have {n_rodadas} rounds.
 """
 
 
@@ -233,7 +233,7 @@ def criar_ferramentas():
             "type": "function",
             "function": {
                 "name": "responder",
-                "description": "Dá a resposta final da solicitação",
+                "description": "Submit the final answer to the request",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -287,17 +287,17 @@ def criar_ferramentas():
         {
             "type": "function",
             "function": {
-                "name": "acessar_url",
-                "description": "Acessa a URL solicitada e retorna o resultado usando a lib markitdown",
+                "name": "fetch_url",
+                "description": "Fetch the requested URL and return the result in markdown",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "url": {
                             "type": "string",
-                            "description": "URL desejada",
+                            "description": "Requested URL",
                         },
                     },
-                    "required": ["valor"],
+                    "required": ["url"],
                     "additionalProperties": False,
                 },
                 "strict": True,
@@ -309,14 +309,14 @@ def criar_ferramentas():
         {
             "type": "function",
             "function": {
-                "name": "consulta_sql",
-                "description": "Realiza uma consulta SQL usando o DuckDB em cima do CNEFE.",
+                "name": "sql_query",
+                "description": "Run a SQL query using DuckDB over CNEFE.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "sql": {
                             "type": "string",
-                            "description": "SQL a ser executado",
+                            "description": "SQL to execute",
                         },
                     },
                     "required": ["sql"],
@@ -332,14 +332,14 @@ def criar_ferramentas():
             {
                 "type": "function",
                 "function": {
-                    "name": "buscar",
-                    "description": "Realizar uma busca em vários motores de busca.",
+                    "name": "search",
+                    "description": "Search across several search engines.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "query": {
                                 "type": "string",
-                                "description": "Query de busca",
+                                "description": "Search query",
                             },
                         },
                         "required": ["query"],
@@ -364,16 +364,16 @@ def iniciar_duckbd():
 conn = iniciar_duckbd()
 
 
-def buscar(query: str):
+def search(query: str):
     if not SEARX_URL:
-        return "A variável SEARX_URL não foi definida, a busca web não está disponível."
+        return "SEARX_URL is not set; web search is unavailable."
 
     params = {"q": query, "format": "json"}
     try:
         res = requests.get(SEARX_URL, params=params, timeout=30)
         resposta_bruta = res.json()
     except Exception as e:
-        return f"Ocorreu um erro ao buscar por '{query}': {e!s}"
+        return f"An error occurred while searching for '{query}': {e!s}"
 
     resposta_final = []
     for result in resposta_bruta.get("results", []):
@@ -395,7 +395,7 @@ conteúdo: {conteudo}
     return "\n".join(resposta_final)
 
 
-def acessar_url(url: str):
+def fetch_url(url: str):
     try:
         res = requests.get(
             url,
@@ -406,16 +406,16 @@ def acessar_url(url: str):
         )
         return str(md.convert(res).markdown)
     except Exception as e:
-        return f"Ocorreu um erro ao acessar '{url}': {e!s}"
+        return f"An error occurred while fetching '{url}': {e!s}"
 
 
-def consulta_sql(sql: str):
+def sql_query(sql: str):
     try:
         consulta = conn.execute(sql)
         colunas = [str(col[0]) for col in consulta.description]
         resultado = consulta.fetchall()
     except Exception as e:
-        return f"Ocorreu um erro ao realizar a consulta: {e!s}"
+        return f"An error occurred while running the query: {e!s}"
 
     corpo_tabela = "\n".join(["|".join([str(e) for e in linha]) for linha in resultado])
 
@@ -484,14 +484,14 @@ def estruturar_resposta_modelo(resposta_bruta) -> RespostaModelo:
 
 def despachar_ferramenta(call: ToolCall):
     match call.nome:
-        case "buscar":
-            return buscar(call.argumentos.get("query"))
-        case "consulta_sql":
-            return consulta_sql(call.argumentos.get("sql"))
-        case "acessar_url":
-            return acessar_url(call.argumentos.get("url"))
+        case "search":
+            return search(call.argumentos.get("query"))
+        case "sql_query":
+            return sql_query(call.argumentos.get("sql"))
+        case "fetch_url":
+            return fetch_url(call.argumentos.get("url"))
 
-    return f"Ferramenta {call.nome} solicitada não existe"
+    return f"Requested tool {call.nome} does not exist"
 
 
 def processar_resultado_final(resposta: ToolCall) -> RespostaFinal:
@@ -521,7 +521,7 @@ def validar_resposta_final(
 
         if posicao_segmento == -1:
             problemas.append(
-                f"Não foi possível localizar o {i + 1}º segmento: {seg.valor} ({seg.tipo}) "
+                f"Could not locate segment #{i + 1}: {seg.valor} ({seg.tipo}) "
             )
             continue
 
@@ -558,7 +558,7 @@ def realizar_requisicao(messages):
             "model": API_MODEL,
             "messages": messages,
             "tools": criar_ferramentas(),
-            "temperature": 0.6,
+            "temperature": 0.3,
         },
         timeout=300,
     )
@@ -633,7 +633,7 @@ def react_loop(n_iter: int = 10, n_paciencia_erro: int = 2):
                 messages.append(
                     {
                         "role": "user",
-                        "content": f"Ocorreu um erro ao validar sua segmentação. Corrija e submeta novamente.\n{erro}",
+                        "content": f"An error occurred while validating your segmentation. Fix it and submit again.\n{erro}",
                     }
                 )
 
@@ -664,7 +664,7 @@ def react_loop(n_iter: int = 10, n_paciencia_erro: int = 2):
             messages.append(
                 {
                     "role": "user",
-                    "content": f"Iteração {i + 1} de {n_iter}",
+                    "content": f"Round {i + 1} of {n_iter}",
                 }
             )
 
@@ -673,7 +673,7 @@ def react_loop(n_iter: int = 10, n_paciencia_erro: int = 2):
             messages.append(
                 {
                     "role": "user",
-                    "content": "Última iteração - Dê sua resposta agora ou se abstenha",
+                    "content": "Final round - Give your answer now or abstain",
                 }
             )
 
