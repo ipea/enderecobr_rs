@@ -6,6 +6,7 @@
 
 import json
 import os
+import tempfile
 from dataclasses import dataclass
 from pprint import pprint
 from typing import Any
@@ -28,26 +29,74 @@ if not API_KEY or not API_MODEL or not API_URL:
         "As variáveis de ambiente API_MODEL, API_MODEL, API_URL devem ser fornecidas."
     )
 
+if not CNEFE_PATH:
+    raise Exception("A variável de ambiente CNEFE_PATH deve ser fornecida.")
+
 if not SEARX_URL:
     print(
         "Atenção: A variável SEARX_URL não foi definida, a ferramenta de busca web não estará disponível."
     )
 
 
-def renderizar_prompt(n_rodadas: int, endereco: str, extras: str):
-    return f"""Me ajude a segmentar endereços brasileiros para que eu seja capaz de treinar um modelo de CRF em cima deste dado.
+def renderizar_prompt_sistema() -> str:
+    ferramentas = [
+        "- `responder`: submete o resultado final. Sempre use esta ferramenta para responder.",
+        "- `consulta_sql`: consulta o CNEFE no DuckDB. Limite por município e/ou uf, use sempre LIMIT e evite SELECT *.",
+    ]
+    if SEARX_URL:
+        ferramentas.append("- `buscar`: realiza uma busca em vários motores de busca.")
+    ferramentas.append(
+        "- `acessar_url`: acessa uma URL e retorna o conteúdo em markdown (markitdown)."
+    )
+    secao_ferramentas = "\n".join(ferramentas)
 
-Quando for um caso ambíguo, use as ferramentas que você tem acesso para auxiliar na sua resposta. Para casos simples, você pode dar a resposta diretamente.
-Quando tiver tomado uma decisão, use a ferramenta `responder`.
-Copie os campos de forma verbatim como está no valor bruto. Não normalize, nem expanda abreviações etc.
-Use o campo de comentário livre para fazer obervações sobre seus achados, quando buscar informações externas ou ficar em dúvida. Você não deve usa-lo para explicar coisas óbvias.
-Se um campo não aparece no endereço, deixe-o vazio. Não enriqueça os dados se algo não existir. Não valide-o também, se os campos estão claros o suficiente, você já deve responder, mesmo que você não conheça o endereço. Não corrija typos ou qualquer coisa, eu quero uma cópia exata de trechos do endereço bruto realmente. Na sua resposta, use somente o texto do endereço como base, não use as informações extras para popular nada da resposta, elas só servem para dar um contexto extra e facilitar o uso de ferramentas disponibilizadas. Dê os segmentos na ordem em que aparecem no texto. Use o tipo 'outros' para identificar trechos relevantes que não são ambrangidos pelos demais tipos, e sempre que usá-lo, comente sobre o motivo e dê uma sugestão para um novo tipo específico. Não categorize conectivos, conjunções e afins. Crie mais de um complemento quando se referirem a duas unidades distintas.
+    return f"""Você segmenta endereços brasileiros brutos em campos rotulados, para gerar dados de treino de um modelo de CRF.
 
-Por "Empreendimento", entenda "Ponto de Interesse".
+## Regras gerais
 
-Quando notar um trecho que é uma referencia do endereço principal, mantenha endereços e empreendimentos distintos em segmentos separados, e restante das informações em 'referencia_outros', mesmo que elas possam ser encaixadas em categorias gerais mais específicas (ex: quilometragem de estrada).
+1. Verbatim: cada `valor` é um trecho copiado exatamente como está no endereço bruto. Não normalize, não expanda abreviações, não corrija erros de digitação, não altere caixa nem acentos.
+2. Use apenas o texto do endereço bruto como fonte dos `valor`. As "Informações extras" existem só para orientar o uso de ferramentas — o modelo treinado NUNCA as verá, então qualquer valor que não esteja verbatim no endereço será rejeitado. Não valide nem enriqueça: se um campo não aparece, não o crie; se você não conhece o endereço, responda mesmo assim.
+3. Ordene os segmentos na ordem em que aparecem no texto.
+4. Não rotule conectivos, conjunções e preposições: eles separam unidades e, portanto, viram corte entre segmentos.
+5. Um segmento por referente. Tudo que aponta para o MESMO referente fica num único segmento, mesmo com vários tokens (ex.: "QD 34 LOTE 17", "GLEBA 10 AREA II LT 02 QD B", "Lotes 023/024/025 QD 34"). Unidades distintas — cada uma com seu próprio token — viram segmentos separados, e o conectivo entre elas não é rotulado (ex.: "AP 701 E VG 17" → dois `complemento`). Listas e intervalos com token ou separador compartilhado ficam num único segmento, com os separadores internos (/, -, ,) DENTRO do segmento (ex.: "Lotes 1-5", "10-20").
+6. Trechos que remetem a outro endereço ou local são `referencia` (ex.: "ESQUINA COM", "EM FRENTE AO", "DESM DO"). O número dentro de uma referência pertence à referência, NÃO a `numero` — ou seja, `numero` do endereço principal é único.
+7. `quilometragem_via` é a cota na própria via — o número É a posição ao longo dela ("KM 304", "BR-307 KM 304"). Um afastamento mede a separação de um marco ("200m da CE-040", "+ 6,6KM") e, por remeter a outro ponto, integra a `referencia`.
+8. Município, UF, `localidade` e CEP, quando aparecem no próprio endereço, são rotulados normalmente — as "Informações extras" NUNCA populam segmentos. Um tipo de logradouro solto, sem nome associado (ex.: "A", "PR", "AC"), NÃO é `logradouro`: use `descricao_area`, `referencia` ou `outros` conforme o caso.
 
-Seja sucinto na sua resposta.
+## Tabela de rótulos
+
+| tipo | marcar | exemplo |
+|---|---|---|
+| logradouro | tipo + título + nome da via, verbatim; absorve rodovia | "R ALCIDES CARNEIRO LEAL", "AV OCEANICA", "ROD BR-116" |
+| logradouro_interno | via/área interna a um empreendimento (não é logradouro oficial do município) | "RUA PROJETADA GH", "Rua 7 do Condomínio X" |
+| numero | número do imóvel, incluindo ausência de número | "71", "S/N", "SN", "S/Nº" |
+| modificador_numero | sufixo/marco colado ao número | "A", "504-B1", "POSTE" |
+| complemento | unidade interna do imóvel, com tipo e valor juntos | "APTO 104", "BL 4", "SALA 306B", "VG 17" |
+| empreendimento | nome de desenvolvimento: edifício, condomínio, conjunto, residencial, loteamento | "ED MANAGUA", "CONJ RES NICARAGUA", "COND PALM VILLAGE", "LOT JARDIM PIAI" |
+| parcela | identificador cadastral do terreno. Hierarquia: gleba ⊃ (loteamento/desmembramento) ⊃ quadra ⊃ lote; "área" é subdivisão | "GLEBA 10 AREA II LT 02 QD B", "QD 34 LOTE 17", "Lotes 023/024/025" |
+| descricao_area | descrição textual de área/terreno/uso (inclusive medida) — não é identificador | "ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...", "VIVEIRO DE CAMARAO", "Mar territorial", "8.278,00 m²" |
+| quilometragem_via | cota na própria via: o número é a posição AO LONGO dela | "KM 304", "BR-307 KM 304" |
+| referencia | trecho que remete a outro endereço ou local, sem detalhar subtipo aqui | "ESQUINA COM AV BOA VIAGEM", "EM FRENTE AO N. 2380", "DESM DO LT 06" |
+| denominacao | denominação atual ou anterior do logradouro/local | "atual Luís Tanure", "ANTIGA RUA B" |
+| localidade | nome de localidade, bairro, distrito, povoado, lugar ou zona | "PINA", "BARRA DO BEBEDOURO", "ZONA RURAL" |
+| cep | CEP | "50720-000" |
+| municipio | município | "RECIFE" |
+| uf | unidade federativa | "PE" |
+| ruido | apenas tokens/marcadores sem valor (pontuação, separadores soltos, id/registro vazado, lat/lon embutida) | "V 000 000", "NBP 1045707-4", "-20.23°,-41.51°" |
+| outros | trecho com conteúdo semântico que não cabe nos demais tipos; sempre comente o motivo e sugira um tipo novo | — |
+
+Atenção a falsos amigos: `FRENTE`/`FUNDOS` são `complemento` (frente/fundos do lote). Já `FRENTE PARA` / `EM FRENTE A` introduzindo outro logradouro NÃO é complemento — faz parte da `referencia`. Ex.: em "Frente para Rua Rui Barbosa", "Frente para" não é `complemento`.
+
+## Ferramentas
+
+{secao_ferramentas}
+
+Política de uso: casos simples → responda direto, SEM chamar ferramenta. Só use ferramenta quando o trecho for ambíguo (ex.: município ou empreendimento desconhecido). Não chame ferramenta só para extrair trechos óbvios.
+
+## Comentário
+
+- `comentario` serve apenas para: (a) o que a busca ou a consulta SQL revelou; (b) dúvida real de rótulo. Máximo ~2 frases; não explique o óbvio.
+- Sempre que usar `outros`, comente o motivo e sugira um tipo novo.
 
 ## Schema do CNEFE:
 
@@ -162,12 +211,17 @@ jaro_winkler_similarity(s1, s2[, score_cutoff])
 jaro_similarity(s1, s2[, score_cutoff])
 
 
-Você tem {n_rodadas} rodadas para responder.
+"""
 
-Endereço desejado: {endereco}
 
-Informações extras:
+def renderizar_prompt_usuario(endereco: str, extras: str, n_rodadas: int) -> str:
+    return f"""Informações extras (contexto apenas; NÃO servem para popular segmentos):
 {extras}
+
+Endereço bruto:
+{endereco}
+
+Você tem {n_rodadas} rodadas.
 """
 
 
@@ -193,21 +247,21 @@ def criar_ferramentas():
                                         "type": "string",
                                         "enum": [
                                             "logradouro",
-                                            "numero",
-                                            "complemento",
-                                            "referencia_endereco",
-                                            "referencia_empreendimento",
-                                            "referencia_outros",
-                                            "nome_antigo",
                                             "logradouro_interno",
-                                            "nome_empreendimento",
-                                            "distancia_estrada",
+                                            "numero",
+                                            "modificador_numero",
+                                            "complemento",
+                                            "empreendimento",
+                                            "parcela",
                                             "descricao_area",
-                                            "ruido",
-                                            "bairro",
+                                            "quilometragem_via",
+                                            "referencia",
+                                            "denominacao",
+                                            "localidade",
                                             "cep",
                                             "municipio",
                                             "uf",
+                                            "ruido",
                                             "outros",
                                         ],
                                     },
@@ -299,12 +353,10 @@ def criar_ferramentas():
 
 
 def iniciar_duckbd():
-    query = f"""
-CREATE VIEW IF NOT EXISTS cnefe AS SELECT * FROM read_parquet("{CNEFE_PATH}");
-CREATE VIEW IF NOT EXISTS municipio AS SELECT * FROM read_csv("{MUNICIPIOS_PATH}");
-"""
-    conn = duckdb.connect("/tmp/cnefe-enderecobr.db")
-    _ = conn.execute(query)
+    caminho_db = os.path.join(tempfile.gettempdir(), "cnefe-enderecobr.db")
+    conn = duckdb.connect(caminho_db)
+    conn.register("cnefe", conn.read_parquet(CNEFE_PATH))
+    conn.register("municipio", conn.read_csv(MUNICIPIOS_PATH))
 
     return conn
 
@@ -540,9 +592,13 @@ def react_loop(n_iter: int = 10, n_paciencia_erro: int = 2):
 
     messages = [
         {
+            "role": "system",
+            "content": renderizar_prompt_sistema(),
+        },
+        {
             "role": "user",
-            "content": renderizar_prompt(n_iter, endereco, extras),
-        }
+            "content": renderizar_prompt_usuario(endereco, extras, n_iter),
+        },
     ]
 
     for i in range(n_iter):
