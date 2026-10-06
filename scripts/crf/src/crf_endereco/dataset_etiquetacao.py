@@ -5,6 +5,7 @@
 #     "duckdb>=1.4.1",
 #     "rapidfuzz",
 #     "rich",
+#     "tqdm",
 #     "typer",
 # ]
 # ///
@@ -19,9 +20,13 @@ Uso:
     uv run dataset_etiquetacao.py imoveis_uniao ORIGEM.xlsx destino.db -n 1000 --seed 42
 
 Notas:
-- A origem é lida com DuckDB; o destino é escrito com `sqlite3` (append).
-- O filtro de diversidade (`--similaridade-maxima`/`--distancia-minima`) usa
-  rapidfuzz (escala 0–100) contra os endereços já presentes no banco.
+- A origem é lida com DuckDB (streaming, um único passe); o destino é
+  escrito com `sqlite3` (append).
+- O filtro de diversidade (`--similaridade-maxima`) usa rapidfuzz (escala
+  0–100) contra os endereços já presentes no banco.
+- A amostra é construída com reservoir sampling sobre o stream (memória
+  constante, reprodutível via `--seed`): pede-se o tamanho exato e, havendo
+  endereços diversos suficientes, a amostra sai cheia.
 """
 
 from __future__ import annotations
@@ -32,13 +37,14 @@ import random
 import sqlite3
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, ClassVar
 
 import duckdb
+import tqdm
 import typer
 from rapidfuzz import fuzz, process
 from rich.console import Console
@@ -68,7 +74,7 @@ class FiltroDiversidade(ABC):
 
     @abstractmethod
     def aceitar(self, endereco: str) -> bool:
-        raise NotImplementedError
+        """True se `endereco` pode entrar no dataset (não fere a diversidade)."""
 
 
 class SemFiltroDiversidade(FiltroDiversidade):
@@ -153,70 +159,60 @@ class Populador(ABC):
     def popular(
         self,
         conn: duckdb.DuckDBPyConnection,
-        *,
-        tamanho: int,
-        seed: int | None,
     ) -> Iterator[RegistroEtiquetacao]:
-        raise NotImplementedError
+        """Percorre a origem em streaming, rendendo um registro por linha."""
 
 
 class PopuladorImoveisUniao(Populador):
     """Imóveis da União (SPU): endereço já concatenado + geo.
 
-    A consulta é um literal com placeholders: a extensão `excel` e a
-    amostragem são resolvidas com parâmetros ligados, sem montar SQL com
-    dados do usuário. O filtro fica DENTRO da subconsulta — do contrário o
-    DuckDB amostraria primeiro e só então filtraria, devolvendo menos linhas
-    que o pedido. A amostragem é determinística por `seed` (ordena por hash).
+    A consulta é um literal com placeholders (a extensão `excel` e o caminho
+    entram como parâmetros, sem montar SQL com dados do usuário). A origem é
+    percorrida em streaming, em lotes; a amostragem e o filtro acontecem
+    depois, sobre o stream (ver `amostrar_reservatorio`).
     """
 
     tipo = "imoveis_uniao"
     rotulo = "Imóveis da União (SPU)"
+    TAM_LOTE: ClassVar[int] = 20_000
 
-    CONSULTA_AMOSTRA: ClassVar[str] = """
+    CONSULTA: ClassVar[str] = """
         SELECT "Rip Imóvel", "UF", "Município", "Bairro", "Endereço",
                "Latitude", "Longitude", "Nível de Precisão"
-        FROM (
-            SELECT "Rip Imóvel", "UF", "Município", "Bairro", "Endereço",
-                   "Latitude", "Longitude", "Nível de Precisão",
-                   hash("Endereço", ?) AS _ordem
-            FROM read_xlsx(?, sheet = ?)
-            WHERE "Endereço" IS NOT NULL AND trim("Endereço") <> ''
-        )
-        ORDER BY _ordem
-        LIMIT ?
+        FROM read_xlsx(?, sheet = ?)
+        WHERE "Endereço" IS NOT NULL AND trim("Endereço") <> ''
     """
 
     def popular(
         self,
         conn: duckdb.DuckDBPyConnection,
-        *,
-        tamanho: int,
-        seed: int | None,
     ) -> Iterator[RegistroEtiquetacao]:
         conn.execute("INSTALL excel; LOAD excel;")
+        resultado = conn.execute(
+            self.CONSULTA, [str(self.arquivo), self.aba or "Sheet1"]
+        )
 
-        semente = seed if seed is not None else random.randrange(2**31)
-        linhas = conn.execute(
-            self.CONSULTA_AMOSTRA,
-            [semente, str(self.arquivo), self.aba or "Sheet1", tamanho],
-        ).fetchall()
-
-        for linha in linhas:
-            rip, uf, municipio, bairro, endereco, lat, lon, precisao = linha
-            yield RegistroEtiquetacao(
-                endereco=str(endereco).strip(),
-                extras=montar_extras(municipio, uf, bairro, banco="Imóveis da União"),
-                meta={
-                    "latitude": converter_float(lat),
-                    "longitude": converter_float(lon),
-                    "nivel_precisao": precisao,
-                    "arquivo": str(self.arquivo),
-                    "aba": self.aba or "Sheet1",
-                },
-                origem=self.tipo,
-                origem_id=str(rip),
-            )
+        while True:
+            linhas = resultado.fetchmany(self.TAM_LOTE)
+            if not linhas:
+                break
+            for linha in linhas:
+                rip, uf, municipio, bairro, endereco, lat, lon, precisao = linha
+                yield RegistroEtiquetacao(
+                    endereco=str(endereco).strip(),
+                    extras=montar_extras(
+                        municipio, uf, bairro, banco="Imóveis da União"
+                    ),
+                    meta={
+                        "latitude": converter_float(lat),
+                        "longitude": converter_float(lon),
+                        "nivel_precisao": precisao,
+                        "arquivo": str(self.arquivo),
+                        "aba": self.aba or "Sheet1",
+                    },
+                    origem=self.tipo,
+                    origem_id=str(rip),
+                )
 
 
 POPULADORES: dict[str, type[Populador]] = {
@@ -314,6 +310,81 @@ def montar_lote(tipo_dataset: str) -> str:
     return f"{tipo_dataset}-{datetime.now(UTC):%Y%m%dT%H%M%S}"
 
 
+# --- Amostragem -----------------------------------------------------------
+
+
+@dataclass
+class ResultadoAmostragem:
+    amostra: list[RegistroEtiquetacao]
+    candidatos: int
+    aceitos: int
+
+
+def reservatorio(
+    fonte: Iterator[RegistroEtiquetacao],
+    tamanho: int,
+    seed: int | None,
+) -> list[RegistroEtiquetacao]:
+    """Reservoir sampling (Algoritmo R): amostra uniforme de `tamanho`.
+
+    Um único passe e memória constante (`tamanho` registros), independente do
+    tamanho da origem.
+    """
+    rnd = random.Random(seed)
+    reserva: list[RegistroEtiquetacao] = []
+
+    for i, registro in enumerate(fonte):
+        if i < tamanho:
+            reserva.append(registro)
+        else:
+            # Troca com probabilidade tamanho / (i + 1).
+            escolhido = rnd.randrange(i + 1)
+            if escolhido < tamanho:
+                reserva[escolhido] = registro
+
+    return reserva
+
+
+def amostrar_diverso(
+    populador: Populador,
+    criar_filtro: Callable[[], FiltroDiversidade],
+    *,
+    tamanho: int,
+    seed: int | None,
+    fator_inicial: int = 3,
+    max_rodadas: int = 2,
+) -> ResultadoAmostragem:
+    """Amostra `tamanho` endereços diversos, repetindo até atingir o pedido.
+
+    Cada rodada faz um reservoir de `tamanho * fator` candidatos (uma leitura
+    da origem) e aplica o filtro de diversidade sobre esse pool. Se não atingir
+    o pedido, dobra o pool e tenta de novo. O pool é limitado de propósito: o
+    filtro fuzzy custa O(pool) por candidato, então passar o filtro na origem
+    inteira seria inviável.
+    """
+    fator = fator_inicial
+    candidatos = 0
+    aceitos = 0
+    amostra: list[RegistroEtiquetacao] = []
+
+    for _ in range(max_rodadas):
+        conn = duckdb.connect()
+        try:
+            pool = reservatorio(populador.popular(conn), tamanho * fator, seed)
+        finally:
+            conn.close()
+
+        filtro = criar_filtro()
+        amostra = [r for r in tqdm.tqdm(pool) if filtro.aceitar(r.endereco)]
+        candidatos, aceitos = len(pool), len(amostra)
+
+        if aceitos >= tamanho:
+            break
+        fator *= 2
+
+    return ResultadoAmostragem(amostra[:tamanho], candidatos, aceitos)
+
+
 # --- CLI ------------------------------------------------------------------
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -361,45 +432,54 @@ def popular(
     try:
         criar_banco(conn_destino)
 
-        if similaridade_maxima is not None:
-            existentes = ler_enderecos_existentes(conn_destino)
-            filtro: FiltroDiversidade = FiltroDiversidadeFuzzy(
-                existentes,
-                similaridade_maxima=similaridade_maxima,
+        existentes = (
+            ler_enderecos_existentes(conn_destino)
+            if similaridade_maxima is not None
+            else []
+        )
+
+        def criar_filtro() -> FiltroDiversidade:
+            if similaridade_maxima is None:
+                return SemFiltroDiversidade()
+            return FiltroDiversidadeFuzzy(
+                existentes, similaridade_maxima=similaridade_maxima
             )
+
+        if similaridade_maxima is not None:
             console.print(
                 f"[dim]Filtro fuzzy comparando com {len(existentes)} "
                 "endereços já no banco.[/dim]"
             )
-        else:
-            filtro = SemFiltroDiversidade()
+        console.print(
+            f"[bold]{populador.rotulo}[/bold] — lendo a origem e "
+            f"amostrando até {tamanho_amostra} endereços…"
+        )
 
-        conn_origem = duckdb.connect()
-        try:
-            console.print(
-                f"[bold]{populador.rotulo}[/bold] — "
-                f"sorteando {tamanho_amostra} endereços…"
-            )
-            registros = [
-                registro
-                for registro in populador.popular(
-                    conn_origem, tamanho=tamanho_amostra, seed=seed
-                )
-                if filtro.aceitar(registro.endereco)
-            ]
-        finally:
-            conn_origem.close()
+        resultado = amostrar_diverso(
+            populador,
+            criar_filtro,
+            tamanho=tamanho_amostra,
+            seed=seed,
+            # Sem filtro não há descarte: o pool já é o tamanho final.
+            fator_inicial=1 if similaridade_maxima is None else 3,
+        )
 
-        inseridos, ignorados = gravar_registros(conn_destino, registros, lote)
+        inseridos, ignorados = gravar_registros(conn_destino, resultado.amostra, lote)
         total = contar_registros(conn_destino)
     finally:
         conn_destino.close()
 
+    descartados = resultado.candidatos - resultado.aceitos
     console.rule("Resumo")
     console.print(f"Lote: [bold]{lote}[/bold]")
-    console.print(f"Sorteados: {len(registros)}")
+    console.print(f"Candidatos (pool): {resultado.candidatos}")
+    if descartados:
+        console.print(f"Descartados por diversidade: [yellow]{descartados}[/yellow]")
+    console.print(
+        f"Tamanho da amostra: [bold]{len(resultado.amostra)}[/bold] / {tamanho_amostra}"
+    )
     console.print(f"Inseridos: [green]{inseridos}[/green]")
-    console.print(f"Ignorados (hash duplicado): [yellow]{ignorados}[/yellow]")
+    console.print(f"Ignorados (hash duplicado): {ignorados}")
     console.print(f"Total no banco: [bold]{total}[/bold]")
 
 
