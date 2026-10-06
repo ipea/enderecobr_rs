@@ -15,7 +15,7 @@ You segment raw Brazilian addresses into labeled fields to generate training dat
 
 | tipo | what to mark | example |
 |---|---|---|
-| logradouro | street type + title + name, verbatim; absorbs rodovia | "R ALCIDES CARNEIRO LEAL", "AV OCEANICA", "ROD BR-116" |
+| logradouro | street type + title + name, verbatim; absorbs rodovia; in DF sector addresses, the sector code + BLOCO/CONJUNTO (see Regional pattern) | "R ALCIDES CARNEIRO LEAL", "AV OCEANICA", "ROD BR-116" |
 | logradouro_interno | way/area internal to a development (not an official municipal street) | "RUA PROJETADA GH", "Rua 7 do Condomínio X" |
 | numero | property number, including absence of a number | "71", "S/N", "SN", "S/Nº" |
 | modificador_numero | suffix/marker attached to the number | "A", "504-B1", "POSTE" |
@@ -35,6 +35,23 @@ You segment raw Brazilian addresses into labeled fields to generate training dat
 | outros | meaningful content fitting no other type; always comment the reason and suggest a new type | — |
 
 Watch out for false friends: `FRENTE`/`FUNDOS` are `complemento` (front/rear of the lot). But `FRENTE PARA` / `EM FRENTE A` introducing another street is NOT complemento — it is part of `referencia`. E.g.: in "Frente para Rua Rui Barbosa", "Frente para" is not `complemento`.
+
+## Regional pattern: Distrito Federal (Brasília) sectors
+
+Many DF addresses are not "street + number": they use a sector code — superquadras and commercial blocks (SQN, SQS, SCLN, SCLS, SHN, SHS, SHIS, SQNW, SQSW...), residential quadras (QNM, QNN, QNP, QNO, QI, QE, QS, QR...), sectors (SH, ST...), optionally followed by CONJUNTO and/or BLOCO. In the CNEFE these codes are NOT a street: `nom_seglogr` holds the whole sector identifier INCLUDING the BLOCO/CONJUNTO (e.g. 'SQN 302 BLOCO B', 'SQS 116 BLOCO C', 'QNM 34 CONJUNTO J', 'QI 20 CONJUNTO I'), `num_adress` is 0 ('SN'), and the unit (APARTAMENTO, CASA...) is the complement.
+
+Rules for these addresses:
+1. The sector code up to and including its BLOCO/CONJUNTO is ONE `logradouro` span, even without a street type: "SQN 302 BLOCO B", "QNM 34 CONJUNTO J".
+2. A short stray marker (1–2 letters) immediately BEFORE the sector code, absent from the CNEFE `nom_seglogr` (the "Q" in "Q SQN 302 BLOCO B", the "ST" in "ST QI 20 CONJUNTO I", the "AC" in "AC SQS 313 BLOCO F"), is `ruido`.
+3. The number right after the BLOCO/CONJUNTO is `numero`. There is no separate lote number: this bare number is the unit number, so it plays the `numero` role and the unit role at once.
+4. An explicit unit word ("APARTAMENTO", "APTO", "CASA", "BOX", "LOJA", "TERREO"), with or without its own number, is `complemento`, even when it repeats the `numero`.
+
+Examples:
+- "Q SQN 302 BLOCO B 603 apartamento 603" → `ruido` "Q"; `logradouro` "SQN 302 BLOCO B"; `numero` "603"; `complemento` "apartamento 603"
+- "Q SQS 116 BLOCO C 303" → `ruido` "Q"; `logradouro` "SQS 116 BLOCO C"; `numero` "303"
+- "AC SQS 313 BLOCO F 204 Apartamento" → `ruido` "AC"; `logradouro` "SQS 313 BLOCO F"; `numero` "204"; `complemento` "Apartamento"
+- "Q SQN 306 Bloco H apartamento 208" → `ruido` "Q"; `logradouro` "SQN 306 Bloco H"; `complemento` "apartamento 208"
+- "ST QI 20 CONJUNTO I 24 Casa" → `ruido` "ST"; `logradouro` "QI 20 CONJUNTO I"; `numero` "24"; `complemento` "Casa"
 
 ## Tools
 
