@@ -81,6 +81,7 @@ class Config:
     api_model: str
     cnefe_path: str
     municipios_path: Path
+    timeout_sql: float = 15.0
     searx_url: str | None = None
 
     @property
@@ -104,6 +105,17 @@ def carregar_config(env_path: Path) -> Config:
             )
         return valor
 
+    def opcional_float(nome: str, padrao: float) -> float:
+        bruto = os.environ.get(nome)
+        if not bruto:
+            return padrao
+        try:
+            return float(bruto)
+        except ValueError as e:
+            raise typer.BadParameter(
+                f"Variável de ambiente {nome} deve ser numérica (recebido {bruto!r})."
+            ) from e
+
     searx_url = os.environ.get("SEARX_URL")
     if not searx_url:
         console.print(
@@ -116,6 +128,7 @@ def carregar_config(env_path: Path) -> Config:
         api_model=exigir("API_MODEL"),
         cnefe_path=exigir("CNEFE_PATH"),
         municipios_path=Path(os.environ.get("MUNICIPIOS_PATH", MUNICIPIOS_PADRAO)),
+        timeout_sql=opcional_float("TIMEOUT_SQL", 15.0),
         searx_url=searx_url,
     )
 
@@ -392,12 +405,30 @@ conteúdo: {resultado.get("content", "")}
             return f"An error occurred while fetching '{url}': {e!s}"
 
     def consultar_sql(self, sql: str) -> str:
+        # Watchdog: interrompe a query se passar de `timeout_sql` segundos.
+        # `interrupt()` é thread-safe e deixa a conexão reutilizável.
+        expirou = threading.Event()
+
+        def _interromper() -> None:
+            expirou.set()
+            self.conn.interrupt()
+
+        timer = threading.Timer(self.config.timeout_sql, _interromper)
+        timer.start()
         try:
             consulta = self.conn.execute(sql)
             colunas = [str(col[0]) for col in consulta.description]
             resultado = consulta.fetchall()
         except duckdb.Error as e:
+            if expirou.is_set():
+                return (
+                    f"The query exceeded the {self.config.timeout_sql:.0f}s timeout "
+                    "and was cancelled. Restrict by município/uf and add a LIMIT. "
+                    "(Or raise TIMEOUT_SQL.)"
+                )
             return f"An error occurred while running the query: {e!s}"
+        finally:
+            timer.cancel()
 
         cabecalho = "|".join(colunas)
         corpo = "\n".join("|".join(str(v) for v in linha) for linha in resultado)
