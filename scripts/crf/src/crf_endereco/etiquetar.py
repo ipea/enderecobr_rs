@@ -31,6 +31,7 @@ A ontologia de rótulos fica em `prompt_sistema.md` (prompt) e `ONTOLOGIA.md`
 from __future__ import annotations
 
 import json
+import math
 import os
 import random
 import sqlite3
@@ -699,6 +700,15 @@ class LinhaPendente:
     extras: str
 
 
+@dataclass(frozen=True)
+class OrigemPendente:
+    """Uma origem com pendentes, com o seu peso (nº já anotado) para o sorteio."""
+
+    origem: str
+    anotados: int
+    pendentes: int
+
+
 def abrir_banco(caminho: Path) -> sqlite3.Connection:
     """Abre o SQLite gerado por `dataset_etiquetacao.py`."""
     if not caminho.is_file():
@@ -708,18 +718,115 @@ def abrir_banco(caminho: Path) -> sqlite3.Connection:
     return conn
 
 
+def listar_origens_pendentes(
+    conn: sqlite3.Connection,
+    *,
+    lote: str | None = None,
+    incluir_erros: bool = False,
+) -> list[OrigemPendente]:
+    """Origens que têm pendentes, com quantos já foram anotados em cada uma.
+
+    `anotados` conta só as anotações bem-sucedidas (sem `$.erro`); é a base do
+    peso usado por `alocar_por_origem` para equilibrar as proporções.
+    """
+    linhas = conn.execute(
+        """
+        SELECT p.origem,
+               (SELECT count(*) FROM enderecos e
+                 WHERE e.origem = p.origem
+                   AND e.resposta_llm IS NOT NULL
+                   AND json_extract(e.resposta_llm, '$.erro') IS NULL) AS anotados,
+               count(*) AS pendentes
+        FROM enderecos AS p
+        WHERE (
+                p.resposta_llm IS NULL
+                OR (:incluir_erros AND json_extract(p.resposta_llm, '$.erro') IS NOT NULL)
+              )
+          AND (:lote IS NULL OR p.lote = :lote)
+        GROUP BY p.origem
+        """,
+        {"incluir_erros": incluir_erros, "lote": lote},
+    ).fetchall()
+    return [
+        OrigemPendente(origem=cast(str, o), anotados=cast(int, a), pendentes=cast(int, p))
+        for o, a, p in linhas
+    ]
+
+
+def alocar_por_origem(
+    origens: list[OrigemPendente], tamanho: int
+) -> list[tuple[OrigemPendente, int]]:
+    """Distribui `tamanho` entre as origens proporcional ao peso 1/(anotados+1).
+
+    Método do maior resto, respeitando os pendentes de cada origem (o excedente
+    de uma origem saturada é repassado às demais). Retorna só as cotas > 0.
+    """
+    if tamanho <= 0 or not origens:
+        return []
+    pesos = {o.origem: 1.0 / (o.anotados + 1) for o in origens}
+    total_peso = sum(pesos.values())
+    cotas = {o.origem: tamanho * pesos[o.origem] / total_peso for o in origens}
+    cota = {o.origem: min(math.floor(cotas[o.origem]), o.pendentes) for o in origens}
+    restante = tamanho - sum(cota.values())
+    ordem = sorted(
+        origens,
+        key=lambda o: (cotas[o.origem] - math.floor(cotas[o.origem]), pesos[o.origem]),
+        reverse=True,
+    )
+    while restante > 0 and any(cota[o.origem] < o.pendentes for o in origens):
+        for o in ordem:
+            if restante <= 0:
+                break
+            if cota[o.origem] < o.pendentes:
+                cota[o.origem] += 1
+                restante -= 1
+    return [(o, cota[o.origem]) for o in origens if cota[o.origem] > 0]
+
+
+def coletar_lote_balanceado(
+    conn: sqlite3.Connection,
+    *,
+    limite: int | None,
+    lote: str | None,
+    incluir_erros: bool,
+) -> tuple[list[LinhaPendente], list[tuple[OrigemPendente, int]]]:
+    """Coleta um lote com cotas por origem, pesando 1/(anotados+1).
+
+    Sem `limite`, usa o total de pendentes (equivale a pegar tudo). As linhas de
+    cada origem saem em ordem aleatória e o lote final é embaralhado.
+    """
+    origens = listar_origens_pendentes(conn, lote=lote, incluir_erros=incluir_erros)
+    tamanho = limite if limite is not None else sum(o.pendentes for o in origens)
+    alocacao = alocar_por_origem(origens, tamanho)
+
+    linhas: list[LinhaPendente] = []
+    for origem, quantidade in alocacao:
+        linhas.extend(
+            selecionar_pendentes(
+                conn,
+                limite=quantidade,
+                lote=lote,
+                incluir_erros=incluir_erros,
+                origem=origem.origem,
+            )
+        )
+    random.shuffle(linhas)
+    return linhas, alocacao
+
+
 def selecionar_pendentes(
     conn: sqlite3.Connection,
     *,
     limite: int | None = None,
     lote: str | None = None,
     incluir_erros: bool = False,
+    origem: str | None = None,
 ) -> list[LinhaPendente]:
     """Seleciona as linhas a processar: pendentes e, opcionalmente, com erro.
 
     Consulta estática, só com parâmetros nomeados: `incluir_erros` liga/desliga
-    o ramo de erros, `limite` nulo vira `-1` (sem limite no SQLite) e `lote`
-    nulo desativa o filtro por lote.
+    o ramo de erros, `limite` nulo vira `-1` (sem limite no SQLite), `lote` nulo
+    desativa o filtro por lote e `origem` nulo desativa o filtro por origem.
     """
     linhas = cast(
         list[sqlite3.Row],
@@ -729,12 +836,18 @@ def selecionar_pendentes(
             WHERE (
                 resposta_llm IS NULL
                 OR (:incluir_erros AND json_extract(resposta_llm, '$.erro') IS NOT NULL)
-            )
+              )
               AND (:lote IS NULL OR lote = :lote)
+              AND (:origem IS NULL OR origem = :origem)
             ORDER BY random()
             LIMIT COALESCE(:limite, -1)
             """,
-            {"incluir_erros": incluir_erros, "lote": lote, "limite": limite},
+            {
+                "incluir_erros": incluir_erros,
+                "lote": lote,
+                "origem": origem,
+                "limite": limite,
+            },
         ).fetchall(),
     )
 
@@ -1011,6 +1124,13 @@ def lote(
             help="Reprocessa linhas cujo resultado anterior foi um erro.",
         ),
     ] = False,
+    balancear_origens: Annotated[
+        bool,
+        typer.Option(
+            "--balancear-origens/--sem-balancear-origens",
+            help="Sorteia o lote com cotas proporcionais por origem (1/(anotados+1)).",
+        ),
+    ] = True,
     verboso: Annotated[
         bool,
         typer.Option(
@@ -1027,12 +1147,25 @@ def lote(
 
     conn = abrir_banco(banco)
     try:
-        linhas = selecionar_pendentes(
-            conn,
-            limite=limite,
-            lote=lote_id,
-            incluir_erros=retentar_erros,
-        )
+        if balancear_origens:
+            linhas, alocacao = coletar_lote_balanceado(
+                conn,
+                limite=limite,
+                lote=lote_id,
+                incluir_erros=retentar_erros,
+            )
+            for origem, quantidade in alocacao:
+                console.print(
+                    f"[dim]{origem.origem}: {quantidade} "
+                    f"(anotados={origem.anotados}, pendentes={origem.pendentes})[/dim]"
+                )
+        else:
+            linhas = selecionar_pendentes(
+                conn,
+                limite=limite,
+                lote=lote_id,
+                incluir_erros=retentar_erros,
+            )
         if not linhas:
             console.print("[yellow]Nenhum endereço pendente para processar.[/yellow]")
             return
