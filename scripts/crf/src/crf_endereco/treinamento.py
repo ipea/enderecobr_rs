@@ -1,72 +1,96 @@
-import duckdb
+import json
+import sqlite3
+
 import sklearn_crfsuite
 
-from crf_endereco.endereco import (
-    ABREVIACOES_COMUNS,
-    Endereco,
-    EnderecoGerador,
-    GeradorParametrosEndereco,
-)
 from crf_endereco.preproc import (
     ExtratorFeature,
-    RotuladorEnderecoBIO,
     tokenize,
 )
 
 
+mapa_tipo_segmento = {
+    "logradouro_interno": "logradouro",
+    "modificador_numero": "numero",
+    "cadastro": None,
+    "quilometragem_via": None,
+    "denominacao": None,
+    "empreendimento": None,
+    "ruido": None,
+    "outros": None,
+    "descricao_area": None,
+}
+
+
+def mergear(endereco: str, segmentos: list[dict[str, str]], tokenizer):
+    toks_segmentos: list[tuple[str, str]] = []
+
+    for segmento in segmentos:
+        texto_segmento = segmento.get("valor", "")
+        tipo_segmento = segmento.get("tipo", "")
+        for i, tok in enumerate(tokenizer(texto_segmento)):
+            if tipo_segmento in mapa_tipo_segmento:
+                tipo_segmento = mapa_tipo_segmento[tipo_segmento]
+
+            if tipo_segmento is None:
+                toks_segmentos.append((tok, "O"))
+            elif i == 0:
+                toks_segmentos.append((tok, f"B_{tipo_segmento.upper()}"))
+            else:
+                toks_segmentos.append((tok, f"I_{tipo_segmento.upper()}"))
+
+    toks_endereco = tokenizer(endereco)
+    toks_labels: list[str] = []
+    pos_segmento = 0
+
+    for tok in toks_endereco:
+        seg_atual = toks_segmentos[pos_segmento]
+        if tok == seg_atual[0]:
+            toks_labels.append(seg_atual[1])
+            pos_segmento += 1
+        else:
+            toks_labels.append("O")
+
+    assert len(toks_labels) == len(toks_endereco)
+    return toks_endereco, toks_labels
+
+
 def main():
-    query = """
-select 
-    coalesce(logradouro, ''), 
-    coalesce(numero, ''),
-    coalesce(complemento, ''),
-    coalesce(localidade, ''),
-    coalesce(cep, ''),
-    coalesce(municipio, ''),
-    coalesce(uf, ''),
-    coalesce(origem, ''),
-from './dados/treino.parquet'
+    query = """select endereco, resposta_llm 
+from enderecos
+where resposta_llm is not null 
+  and (resposta_llm ->> '$.erro') is null
+limit 10;
 """
-    con = duckdb.connect()
+    con = sqlite3.connect("./dataset.sqlite")
     print("Coletando dados...")
-    dados = con.sql(query).fetchall()
+    dados = con.execute(query).fetchall()
     con.close()
 
-    gerador_parametros = GeradorParametrosEndereco.sem_ruido()
-    gerador = EnderecoGerador(ABREVIACOES_COMUNS)
-    rotulador = RotuladorEnderecoBIO(tokenize)
     extrator_features = ExtratorFeature()
 
     x: list[list[dict[str, float]]] = []
     y: list[list[str]] = []
 
     print("Preprocessando dados...")
-    for d in dados:
-        params = gerador_parametros.gerar_parametro()
-        endereco = Endereco(
-            logradouro=str(d[0]),
-            numero=str(d[1]),
-            complemento=str(d[2]),
-            bairro=str(d[3]),
-            cep=str(d[4]),
-            municipio=str(d[5]),
-            uf=str(d[6]),
-        )
-        novo_endereco = gerador.gerar_endereco(endereco, params)
-        toks, tags = rotulador.obter_tokenizado(novo_endereco)
-        feats = extrator_features.tokens2features(toks)
-        x.append(feats)
-        y.append(tags)
+    for endereco, resposta_str in dados:
+        resposta = json.loads(resposta_str)
+        segmentos = resposta.get("segmentos", [])
+        tokens, labels = mergear(endereco, segmentos, tokenize)
+        features = extrator_features.tokens2features(tokens)
+
+        x.append(features)
+        y.append(labels)
 
     print("Realizando treinamento...")
     crf = sklearn_crfsuite.CRF(
         algorithm="lbfgs",
-        c1=0.75,
-        c2=0.1,
-        max_iterations=50,
+        # c1=0.75,
+        # c2=0.1,
+        max_iterations=1000,
         all_possible_transitions=False,
-        min_freq=5,
-        model_filename="./dados/tagger.crf",
+        # min_freq=2,
+        model_filename="./tagger.crf",
     )
     _ = crf.fit(x, y)
 
