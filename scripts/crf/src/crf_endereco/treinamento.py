@@ -10,15 +10,16 @@ from crf_endereco.preproc import (
 
 
 mapa_tipo_segmento = {
-    "logradouro_interno": "logradouro",
+    # "logradouro_interno": "logradouro",
     "modificador_numero": "numero",
     "cadastro": None,
-    "quilometragem_via": None,
-    "denominacao": None,
-    "empreendimento": None,
+    # "quilometragem_via": "logradouro",
+    # "denominacao": None,
+    # "empreendimento": None,
+    # "parcela": None,
     "ruido": None,
     "outros": None,
-    "descricao_area": None,
+    # "descricao_area": None,
 }
 
 
@@ -44,8 +45,12 @@ def mergear(endereco: str, segmentos: list[dict[str, str]], tokenizer):
     pos_segmento = 0
 
     for tok in toks_endereco:
-        seg_atual = toks_segmentos[pos_segmento]
-        if tok == seg_atual[0]:
+        if pos_segmento < len(toks_segmentos):
+            seg_atual = toks_segmentos[pos_segmento]
+        else:
+            seg_atual = None
+
+        if seg_atual is not None and tok == seg_atual[0]:
             toks_labels.append(seg_atual[1])
             pos_segmento += 1
         else:
@@ -59,8 +64,7 @@ def main():
     query = """select endereco, resposta_llm 
 from enderecos
 where resposta_llm is not null 
-  and (resposta_llm ->> '$.erro') is null
-limit 10;
+  and (resposta_llm ->> '$.erro') is null;
 """
     con = sqlite3.connect("./dataset.sqlite")
     print("Coletando dados...")
@@ -85,11 +89,12 @@ limit 10;
     print("Realizando treinamento...")
     crf = sklearn_crfsuite.CRF(
         algorithm="lbfgs",
-        # c1=0.75,
-        # c2=0.1,
-        max_iterations=1000,
+        # c1=0.01,
+        verbose=True,
+        c2=0.01,
+        max_iterations=2000,
         all_possible_transitions=False,
-        # min_freq=2,
+        min_freq=2,
         model_filename="./tagger.crf",
     )
     _ = crf.fit(x, y)
