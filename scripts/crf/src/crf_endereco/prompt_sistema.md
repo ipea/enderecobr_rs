@@ -20,7 +20,7 @@ You segment raw Brazilian addresses into labeled fields to generate training dat
 | numero | property number, including absence of a number | "71", "S/N", "SN", "S/Nº" |
 | modificador_numero | suffix/marker attached to the number | "A", "504-B1", "POSTE" |
 | complemento | internal unit of the property, type and value together | "APTO 104", "BL 4", "SALA 306B", "VG 17" |
-| empreendimento | development name: building, condominium, conjunto, residencial, loteamento | "ED MANAGUA", "CONJ RES NICARAGUA", "COND PALM VILLAGE", "LOT JARDIM PIAI" |
+| empreendimento | named place: building, condominium, conjunto, residencial, loteamento, or the organization/establishment occupying the address | "ED MANAGUA", "CONJ RES NICARAGUA", "COND PALM VILLAGE", "LOT JARDIM PIAI", "ASSOCIAÇÃO DE PAIS E AMIGOS DOS EXCEPCIONAIS", "CIEE-PR" |
 | parcela | cadastral identifier of the land. Hierarchy: gleba ⊃ (loteamento/desmembramento) ⊃ quadra ⊃ lote; "área" is a subdivision | "GLEBA 10 AREA II LT 02 QD B", "QD 34 LOTE 17", "Lotes 023/024/025" |
 | cadastro | property registration/inscription code (municipal cadastro/IPTU, matrícula, RI, CCIR/INCRA) — an administrative identifier, not a land unit and not CNEFE-geocodable | "Cadastro 37", "Matrícula 98.278", "RI 28006" |
 | descricao_area | textual description of land/area/use (including measurement) — not an identifier | "ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...", "VIVEIRO DE CAMARAO", "Mar territorial", "8.278,00 m²" |
@@ -35,6 +35,8 @@ You segment raw Brazilian addresses into labeled fields to generate training dat
 | outros | meaningful content fitting no other type; always comment the reason and suggest a new type | — |
 
 Watch out for false friends: `FRENTE`/`FUNDOS` are `complemento` (front/rear of the lot). But `FRENTE PARA` / `EM FRENTE A` introducing another street is NOT complemento — it is part of `referencia`. E.g.: in "Frente para Rua Rui Barbosa", "Frente para" is not `complemento`.
+
+Organization/establishment names: many raw addresses carry the name of an organization, company, association or venue (common in entity registries, e.g. CNEAS): "ASSOCIAÇÃO …", "INSTITUTO …", "APAE …", "CIEE-PR", "CLUBE …", "HOTEL …". When such a name shows up as a standalone snippet, label the WHOLE name as ONE `empreendimento` span (it names the place and is a geocodable anchor), regardless of where it appears. Keep it as a single span even if it contains tokens that look like other fields ("de/da", a number, a "PR" inside "CIEE/PR"). Do NOT merge it into an adjacent `logradouro`/`complemento`, and do not use `denominacao`/`referencia` for it. Only when the name is attached to a street type (e.g. "RUA APAE") does it stay part of the `logradouro`.
 
 ## Regional pattern: Distrito Federal (Brasília) sectors
 
