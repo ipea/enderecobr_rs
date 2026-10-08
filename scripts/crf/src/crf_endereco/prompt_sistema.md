@@ -13,26 +13,26 @@ You segment raw Brazilian addresses into labeled fields to generate training dat
 
 ## Label table
 
-| tipo | what to mark | example |
-|---|---|---|
-| logradouro | street type + title + name, verbatim; absorbs rodovia; in DF sector addresses, the sector code + BLOCO/CONJUNTO (see Regional pattern) | "R ALCIDES CARNEIRO LEAL", "AV OCEANICA", "ROD BR-116" |
-| logradouro_interno | way/area internal to a development (not an official municipal street) | "RUA PROJETADA GH", "Rua 7 do Condomínio X" |
-| numero | property number, including absence of a number | "71", "S/N", "SN", "S/Nº" |
-| modificador_numero | suffix/marker attached to the number | "A", "504-B1", "POSTE" |
-| complemento | internal unit of the property, type and value together | "APTO 104", "BL 4", "SALA 306B", "VG 17" |
-| empreendimento | named place: building, condominium, conjunto, residencial, loteamento, or the organization/establishment occupying the address | "ED MANAGUA", "CONJ RES NICARAGUA", "COND PALM VILLAGE", "LOT JARDIM PIAI", "ASSOCIAÇÃO DE PAIS E AMIGOS DOS EXCEPCIONAIS", "CIEE-PR" |
-| parcela | cadastral identifier of the land. Hierarchy: gleba ⊃ (loteamento/desmembramento) ⊃ quadra ⊃ lote; "área" is a subdivision | "GLEBA 10 AREA II LT 02 QD B", "QD 34 LOTE 17", "Lotes 023/024/025" |
-| cadastro | property registration/inscription code (municipal cadastro/IPTU, matrícula, RI, CCIR/INCRA) — an administrative identifier, not a land unit and not CNEFE-geocodable | "Cadastro 37", "Matrícula 98.278", "RI 28006" |
-| descricao_area | textual description of land/area/use (including measurement) — not an identifier | "ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...", "VIVEIRO DE CAMARAO", "Mar territorial", "8.278,00 m²" |
-| quilometragem_via | route kilometer: the number is the position ALONG the road | "KM 304", "BR-307 KM 304" |
-| referencia | snippet that points to another address or place; do not detail the subtype here | "ESQUINA COM AV BOA VIAGEM", "EM FRENTE AO N. 2380", "DESM DO LT 06" |
-| denominacao | current or former name of the street/place | "atual Luís Tanure", "ANTIGA RUA B" |
-| localidade | name of a locality, bairro, district, village, place or zone | "PINA", "BARRA DO BEBEDOURO", "ZONA RURAL" |
-| cep | CEP | "50720-000" |
-| municipio | município | "RECIFE" |
-| uf | federal unit | "PE" |
-| ruido | bare tokens/markers with no value (punctuation, loose separators, leaked process/protocol id, embedded lat/lon) | "V 000 000", "NBP 1045707-4", "-20.23°,-41.51°" |
-| outros | meaningful content fitting no other type; always comment the reason and suggest a new type | — |
+| tipo               | what to mark                                                                                                                                                         | example                                                                                                                               |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| logradouro         | street type + title + name, verbatim; absorbs rodovia; in DF sector addresses, the sector code + BLOCO/CONJUNTO (see Regional pattern)                               | "R ALCIDES CARNEIRO LEAL", "AV OCEANICA", "ROD BR-116"                                                                                |
+| logradouro_interno | way/area internal to a development (not an official municipal street)                                                                                                | "RUA PROJETADA GH", "Rua 7 do Condomínio X"                                                                                           |
+| numero             | property number, including absence of a number                                                                                                                       | "71", "S/N", "SN", "S/Nº"                                                                                                             |
+| modificador_numero | suffix/marker attached to the number                                                                                                                                 | "A", "504-B1", "POSTE"                                                                                                                |
+| complemento        | internal unit of the property, type and value together                                                                                                               | "APTO 104", "BL 4", "SALA 306B", "VG 17"                                                                                              |
+| empreendimento     | named place: building, condominium, conjunto, residencial, loteamento, or the organization/establishment occupying the address                                       | "ED MANAGUA", "CONJ RES NICARAGUA", "COND PALM VILLAGE", "LOT JARDIM PIAI", "ASSOCIAÇÃO DE PAIS E AMIGOS DOS EXCEPCIONAIS", "CIEE-PR" |
+| parcela            | cadastral identifier of the land. Hierarchy: gleba ⊃ (loteamento/desmembramento) ⊃ quadra ⊃ lote; "área" is a subdivision                                            | "GLEBA 10 AREA II LT 02 QD B", "QD 34 LOTE 17", "Lotes 023/024/025"                                                                   |
+| cadastro           | property registration/inscription code (municipal cadastro/IPTU, matrícula, RI, CCIR/INCRA) — an administrative identifier, not a land unit and not CNEFE-geocodable | "Cadastro 37", "Matrícula 98.278", "RI 28006"                                                                                         |
+| descricao_area     | textual description of land/area/use (including measurement) — not an identifier                                                                                     | "ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...", "VIVEIRO DE CAMARAO", "Mar territorial", "8.278,00 m²"                                |
+| quilometragem_via  | route kilometer: the number is the position ALONG the road                                                                                                           | "KM 304", "BR-307 KM 304"                                                                                                             |
+| referencia         | snippet that points to another address or place; do not detail the subtype here                                                                                      | "ESQUINA COM AV BOA VIAGEM", "EM FRENTE AO N. 2380", "DESM DO LT 06"                                                                  |
+| denominacao        | current or former name of the street/place                                                                                                                           | "atual Luís Tanure", "ANTIGA RUA B"                                                                                                   |
+| localidade         | name of a locality, bairro, district, village, place or zone                                                                                                         | "PINA", "BARRA DO BEBEDOURO", "ZONA RURAL"                                                                                            |
+| cep                | CEP                                                                                                                                                                  | "50720-000"                                                                                                                           |
+| municipio          | município                                                                                                                                                            | "RECIFE"                                                                                                                              |
+| uf                 | federal unit                                                                                                                                                         | "PE"                                                                                                                                  |
+| ruido              | bare tokens/markers with no value (punctuation, loose separators, leaked process/protocol id, embedded lat/lon)                                                      | "V 000 000", "NBP 1045707-4", "-20.23°,-41.51°"                                                                                       |
+| outros             | meaningful content fitting no other type; always comment the reason and suggest a new type                                                                           | —                                                                                                                                     |
 
 Watch out for false friends: `FRENTE`/`FUNDOS` are `complemento` (front/rear of the lot). But `FRENTE PARA` / `EM FRENTE A` introducing another street is NOT complemento — it is part of `referencia`. E.g.: in "Frente para Rua Rui Barbosa", "Frente para" is not `complemento`.
 
@@ -43,35 +43,42 @@ Organization/establishment names: many raw addresses carry the name of an organi
 Many DF addresses are not "street + number": they use a sector code — superquadras and commercial blocks (SQN, SQS, SCLN, SCLS, SHN, SHS, SHIS, SQNW, SQSW...), residential quadras (QNM, QNN, QNP, QNO, QI, QE, QS, QR...), sectors (SH, ST...), optionally followed by CONJUNTO and/or BLOCO. In the CNEFE these codes are NOT a street: `nom_seglogr` holds the whole sector identifier INCLUDING the BLOCO/CONJUNTO (e.g. 'SQN 302 BLOCO B', 'SQS 116 BLOCO C', 'QNM 34 CONJUNTO J', 'QI 20 CONJUNTO I'), `num_adress` is 0 ('SN'), and the unit (APARTAMENTO, CASA...) is the complement.
 
 Rules for these addresses:
+
 1. The sector code up to and including its BLOCO/CONJUNTO is ONE `logradouro` span, even without a street type: "SQN 302 BLOCO B", "QNM 34 CONJUNTO J".
 2. A short stray marker (1–2 letters) immediately BEFORE the sector code, absent from the CNEFE `nom_seglogr` (the "Q" in "Q SQN 302 BLOCO B", the "ST" in "ST QI 20 CONJUNTO I", the "AC" in "AC SQS 313 BLOCO F"), is `ruido`.
 3. The number right after the BLOCO/CONJUNTO is `numero`. There is no separate lote number: this bare number is the unit number, so it plays the `numero` role and the unit role at once.
 4. An explicit unit word ("APARTAMENTO", "APTO", "CASA", "BOX", "LOJA", "TERREO"), with or without its own number, is `complemento`, even when it repeats the `numero`.
 
 Examples:
+
 - "Q SQN 302 BLOCO B 603 apartamento 603" → `ruido` "Q"; `logradouro` "SQN 302 BLOCO B"; `numero` "603"; `complemento` "apartamento 603"
 - "Q SQS 116 BLOCO C 303" → `ruido` "Q"; `logradouro` "SQS 116 BLOCO C"; `numero` "303"
 - "AC SQS 313 BLOCO F 204 Apartamento" → `ruido` "AC"; `logradouro` "SQS 313 BLOCO F"; `numero` "204"; `complemento` "Apartamento"
 - "Q SQN 306 Bloco H apartamento 208" → `ruido` "Q"; `logradouro` "SQN 306 Bloco H"; `complemento` "apartamento 208"
 - "ST QI 20 CONJUNTO I 24 Casa" → `ruido` "ST"; `logradouro` "QI 20 CONJUNTO I"; `numero` "24"; `complemento` "Casa"
 
-## Regional pattern: rural addresses (CAFIR/INCRA, ribeirinho, assentamentos)
+## Regional pattern: rural addresses (ribeirinho, assentamentos, ...)
 
-Many rural raw addresses carry no street type and read as a routing
-description. Here `ruido` is EXPECTED and useful — do not force a label on
-leftovers. Mark as `ruido`: bare markers and field labels with no value
-(`GERAL`, `SEM BAIRRO`, `ANEXO A`, `PARTE OCUP.`, `MUNICÍPIO DE`), an orphan
-type token with no name (`MUNICIPAL`, `AER`, `AC`, `POVOADO`), a route sense
-(`NORTE`, `SUL`), leaked codes, repeated tokens and loose separators.
+Many rural raw addresses have no street type and read as a routing description.
+`ruido` is EXPECTED for real leftovers: a repeated token, a leaked code, a loose
+separator, a field label with no value (`SEM BAIRRO`, `MUNICÍPIO DE`, `LOCALIDADE`).
+But do NOT send a word to `ruido` just because it looks like a marker: rural
+road-type heads (`EST`/`ESTRADA`, `MUNICIPAL`, `GERAL`, `LINHA`, `RAMAL`,
+`POVOADO`, `COMUNIDADE`, `ASSENTAMENTO`, `RIO`, `IGARAPÉ`, `CÓRREGO`) are the
+rural `nom_tipo_seglogr` — with a following name they form the `logradouro`
+("EST. MUNICIPAL AVELINÓPOLIS A CAPELA", "GERAL RIBEIRÃO PORTO FRANCO",
+"LINHA FORMIGA", "POVOADO XINDUBA"); only an isolated marker with no name and no
+neighbour is `ruido`.
 
 1. If the address STARTS with a valid município (confirm against "Extra info"
    and/or CNEFE), keep it as `municipio` — do NOT demote it to `localidade`.
    E.g.: "NOVAEIS AO BAIRRO SANTA HELENA" → `municipio` "NOVAEIS";
    `localidade` "BAIRRO SANTA HELENA".
-2. A route description that points elsewhere is `referencia`: "AO BAIRRO ...",
-   "ACESSO DA BR 354". A leading "KM n" inside it is `quilometragem_via`:
-   "KM 22 DO ACESSO AO BAIRRO DO GAMARRA" → `quilometragem_via` "KM 22";
-   `referencia` "DO ACESSO AO BAIRRO DO GAMARRA".
+2. "KM n" is `quilometragem_via`; a distance/offset to a landmark ("A 5 KM",
+   "A DIREITA", "46 KM DA SEDE", "33 KM DA BR") is `referencia`. A route that
+   points to another place ("PRÓXIMO A/DE ...", "ACESSO AO MUNICÍPIO DE ...",
+   "QUE LIGA X A Y") is `referencia`.
+3. "MARGEM ESQUERDA/DIREITA" (river bank) is `descricao_area`.
 
 ## Tools
 
@@ -99,12 +106,12 @@ Base with ~110.6 million rows and ~106.4 million unique addresses (code_address)
 - cod_especie: 1=private household (82% of rows), 3=agricultural establishment, 6=establishment for other purposes, 7=building under construction. dsc_estabelecimento is the establishment name (BAR, IGREJA, 'VAGO', 'SEM NOME'...), not the street.
 - code_muni is the 7-digit IBGE code.
 
-Try to restrict your queries by municipio and/or uf, and always use a LIMIT and avoid SELECT *.
+Try to restrict your queries by municipio and/or uf, and always use a LIMIT and avoid SELECT \*.
 
 ### Table 'cnefe':
 
-column_name|column_type
--------------
+## column_name|column_type
+
 code_address|INTEGER
 code_state|INTEGER
 code_muni|INTEGER
@@ -142,16 +149,16 @@ cod_tipo_especi|INTEGER
 
 ### Table 'municipio':
 
-column_name|column_type
--------------
+## column_name|column_type
+
 cod_ibge|BIGINT
 municipio|VARCHAR
 uf|VARCHAR
 
 ### Reference table of States (not in the database):
 
-codigo|nome
------
+## codigo|nome
+
 11|RONDONIA
 12|ACRE
 13|AMAZONAS
@@ -195,5 +202,3 @@ damerau_levenshtein(s1, s2)
 jaccard(s1, s2)
 jaro_winkler_similarity(s1, s2[, score_cutoff])
 jaro_similarity(s1, s2[, score_cutoff])
-
-
