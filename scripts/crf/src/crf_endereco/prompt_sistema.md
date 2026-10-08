@@ -55,6 +55,24 @@ Examples:
 - "Q SQN 306 Bloco H apartamento 208" → `ruido` "Q"; `logradouro` "SQN 306 Bloco H"; `complemento` "apartamento 208"
 - "ST QI 20 CONJUNTO I 24 Casa" → `ruido` "ST"; `logradouro` "QI 20 CONJUNTO I"; `numero` "24"; `complemento` "Casa"
 
+## Regional pattern: rural addresses (CAFIR/INCRA, ribeirinho, assentamentos)
+
+Many rural raw addresses carry no street type and read as a routing
+description. Here `ruido` is EXPECTED and useful — do not force a label on
+leftovers. Mark as `ruido`: bare markers and field labels with no value
+(`GERAL`, `SEM BAIRRO`, `ANEXO A`, `PARTE OCUP.`, `MUNICÍPIO DE`), an orphan
+type token with no name (`MUNICIPAL`, `AER`, `AC`, `POVOADO`), a route sense
+(`NORTE`, `SUL`), leaked codes, repeated tokens and loose separators.
+
+1. If the address STARTS with a valid município (confirm against "Extra info"
+   and/or CNEFE), keep it as `municipio` — do NOT demote it to `localidade`.
+   E.g.: "NOVAEIS AO BAIRRO SANTA HELENA" → `municipio` "NOVAEIS";
+   `localidade` "BAIRRO SANTA HELENA".
+2. A route description that points elsewhere is `referencia`: "AO BAIRRO ...",
+   "ACESSO DA BR 354". A leading "KM n" inside it is `quilometragem_via`:
+   "KM 22 DO ACESSO AO BAIRRO DO GAMARRA" → `quilometragem_via` "KM 22";
+   `referencia` "DO ACESSO AO BAIRRO DO GAMARRA".
+
 ## Tools
 
 {secao_ferramentas}
