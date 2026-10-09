@@ -86,7 +86,7 @@ where resposta_llm is not null
         x.append(features)
         y.append(labels)
 
-    print("Realizando treinamento...")
+    print(f"Realizando treinamento (n={len(x)})...")
     crf = sklearn_crfsuite.CRF(
         algorithm="lbfgs",
         # c1=0.01,

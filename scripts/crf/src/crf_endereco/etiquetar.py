@@ -701,10 +701,15 @@ class LinhaPendente:
 
 
 @dataclass(frozen=True)
-class OrigemPendente:
-    """Uma origem com pendentes, com o seu peso (nº já anotado) para o sorteio."""
+class EstratoPendente:
+    """Um estrato de amostragem com pendentes (uma origem ou uma UF).
 
-    origem: str
+    `chave` identifica o estrato (nome da origem, ou sigla da UF); `anotados`
+    conta as anotações bem-sucedidas (sem `$.erro`) do estrato — base do peso
+    1/(anotados+1) — e `pendentes` limita a cota.
+    """
+
+    chave: str
     anotados: int
     pendentes: int
 
@@ -718,22 +723,22 @@ def abrir_banco(caminho: Path) -> sqlite3.Connection:
     return conn
 
 
-def listar_origens_pendentes(
+def listar_ufs_pendentes(
     conn: sqlite3.Connection,
     *,
     lote: str | None = None,
     incluir_erros: bool = False,
-) -> list[OrigemPendente]:
-    """Origens que têm pendentes, com quantos já foram anotados em cada uma.
+) -> list[EstratoPendente]:
+    """UFs que têm pendentes, com quantos já foram anotados em cada uma.
 
     `anotados` conta só as anotações bem-sucedidas (sem `$.erro`); é a base do
-    peso usado por `alocar_por_origem` para equilibrar as proporções.
+    peso usado por `alocar` no primeiro nível (UF). UFs nulas viram a chave ''.
     """
     linhas = conn.execute(
         """
-        SELECT p.origem,
+        SELECT coalesce(p.uf, '') AS uf,
                (SELECT count(*) FROM enderecos e
-                 WHERE e.origem = p.origem
+                 WHERE coalesce(e.uf, '') = coalesce(p.uf, '')
                    AND e.resposta_llm IS NOT NULL
                    AND json_extract(e.resposta_llm, '$.erro') IS NULL) AS anotados,
                count(*) AS pendentes
@@ -743,44 +748,83 @@ def listar_origens_pendentes(
                 OR (:incluir_erros AND json_extract(p.resposta_llm, '$.erro') IS NOT NULL)
               )
           AND (:lote IS NULL OR p.lote = :lote)
-        GROUP BY p.origem
+        GROUP BY coalesce(p.uf, '')
         """,
         {"incluir_erros": incluir_erros, "lote": lote},
     ).fetchall()
     return [
-        OrigemPendente(origem=cast(str, o), anotados=cast(int, a), pendentes=cast(int, p))
+        EstratoPendente(chave=cast(str, u), anotados=cast(int, a), pendentes=cast(int, p))
+        for u, a, p in linhas
+    ]
+
+
+def listar_origens_pendentes(
+    conn: sqlite3.Connection,
+    uf: str,
+    *,
+    lote: str | None = None,
+    incluir_erros: bool = False,
+) -> list[EstratoPendente]:
+    """Origens com pendentes dentro de uma UF, com quantos já foram anotados.
+
+    Espelha `listar_ufs_pendentes` no segundo nível (origem dentro da UF); é a
+    base do peso 1/(anotados da célula origem×UF + 1).
+    """
+    linhas = conn.execute(
+        """
+        SELECT p.origem,
+               (SELECT count(*) FROM enderecos e
+                 WHERE e.origem = p.origem
+                   AND coalesce(e.uf, '') = coalesce(p.uf, '')
+                   AND e.resposta_llm IS NOT NULL
+                   AND json_extract(e.resposta_llm, '$.erro') IS NULL) AS anotados,
+               count(*) AS pendentes
+        FROM enderecos AS p
+        WHERE coalesce(p.uf, '') = :uf
+          AND (
+                p.resposta_llm IS NULL
+                OR (:incluir_erros AND json_extract(p.resposta_llm, '$.erro') IS NOT NULL)
+              )
+          AND (:lote IS NULL OR p.lote = :lote)
+        GROUP BY p.origem
+        """,
+        {"uf": uf, "incluir_erros": incluir_erros, "lote": lote},
+    ).fetchall()
+    return [
+        EstratoPendente(chave=cast(str, o), anotados=cast(int, a), pendentes=cast(int, p))
         for o, a, p in linhas
     ]
 
 
-def alocar_por_origem(
-    origens: list[OrigemPendente], tamanho: int
-) -> list[tuple[OrigemPendente, int]]:
-    """Distribui `tamanho` entre as origens proporcional ao peso 1/(anotados+1).
+def alocar(
+    estratos: list[EstratoPendente], tamanho: int
+) -> list[tuple[EstratoPendente, int]]:
+    """Distribui `tamanho` entre os estratos proporcional ao peso 1/(anotados+1).
 
-    Método do maior resto, respeitando os pendentes de cada origem (o excedente
-    de uma origem saturada é repassado às demais). Retorna só as cotas > 0.
+    Método do maior resto, respeitando os pendentes de cada estrato (o
+    excedente de um estrato saturado é repassado aos demais). Retorna só as
+    cotas > 0. Serve tanto às origens quanto às UFs (balanceamento hierárquico).
     """
-    if tamanho <= 0 or not origens:
+    if tamanho <= 0 or not estratos:
         return []
-    pesos = {o.origem: 1.0 / (o.anotados + 1) for o in origens}
+    pesos = {e.chave: 1.0 / (e.anotados + 1) for e in estratos}
     total_peso = sum(pesos.values())
-    cotas = {o.origem: tamanho * pesos[o.origem] / total_peso for o in origens}
-    cota = {o.origem: min(math.floor(cotas[o.origem]), o.pendentes) for o in origens}
+    cotas = {e.chave: tamanho * pesos[e.chave] / total_peso for e in estratos}
+    cota = {e.chave: min(math.floor(cotas[e.chave]), e.pendentes) for e in estratos}
     restante = tamanho - sum(cota.values())
     ordem = sorted(
-        origens,
-        key=lambda o: (cotas[o.origem] - math.floor(cotas[o.origem]), pesos[o.origem]),
+        estratos,
+        key=lambda e: (cotas[e.chave] - math.floor(cotas[e.chave]), pesos[e.chave]),
         reverse=True,
     )
-    while restante > 0 and any(cota[o.origem] < o.pendentes for o in origens):
-        for o in ordem:
+    while restante > 0 and any(cota[e.chave] < e.pendentes for e in estratos):
+        for e in ordem:
             if restante <= 0:
                 break
-            if cota[o.origem] < o.pendentes:
-                cota[o.origem] += 1
+            if cota[e.chave] < e.pendentes:
+                cota[e.chave] += 1
                 restante -= 1
-    return [(o, cota[o.origem]) for o in origens if cota[o.origem] > 0]
+    return [(e, cota[e.chave]) for e in estratos if cota[e.chave] > 0]
 
 
 def coletar_lote_balanceado(
@@ -789,27 +833,36 @@ def coletar_lote_balanceado(
     limite: int | None,
     lote: str | None,
     incluir_erros: bool,
-) -> tuple[list[LinhaPendente], list[tuple[OrigemPendente, int]]]:
-    """Coleta um lote com cotas por origem, pesando 1/(anotados+1).
+) -> tuple[list[LinhaPendente], list[tuple[EstratoPendente, EstratoPendente, int]]]:
+    """Coleta um lote com cotas hierárquicas UF → origem, pesando 1/(anotados+1).
 
-    Sem `limite`, usa o total de pendentes (equivale a pegar tudo). As linhas de
-    cada origem saem em ordem aleatória e o lote final é embaralhado.
+    Sem `limite`, usa o total de pendentes (equivale a pegar tudo). Primeiro
+    distribui o lote entre as UFs; depois, dentro da cota de cada UF, distribui
+    entre as origens dela. As linhas de cada origem saem em ordem aleatória e o
+    lote final é embaralhado. Retorna também a alocação por (UF, origem) para o
+    relatório.
     """
-    origens = listar_origens_pendentes(conn, lote=lote, incluir_erros=incluir_erros)
-    tamanho = limite if limite is not None else sum(o.pendentes for o in origens)
-    alocacao = alocar_por_origem(origens, tamanho)
+    ufs = listar_ufs_pendentes(conn, lote=lote, incluir_erros=incluir_erros)
+    tamanho = limite if limite is not None else sum(u.pendentes for u in ufs)
 
     linhas: list[LinhaPendente] = []
-    for origem, quantidade in alocacao:
-        linhas.extend(
-            selecionar_pendentes(
-                conn,
-                limite=quantidade,
-                lote=lote,
-                incluir_erros=incluir_erros,
-                origem=origem.origem,
-            )
+    alocacao: list[tuple[EstratoPendente, EstratoPendente, int]] = []
+    for uf, cota_uf in alocar(ufs, tamanho):
+        origens = listar_origens_pendentes(
+            conn, uf.chave, lote=lote, incluir_erros=incluir_erros
         )
+        for origem, cota_origem in alocar(origens, cota_uf):
+            linhas.extend(
+                selecionar_pendentes(
+                    conn,
+                    limite=cota_origem,
+                    lote=lote,
+                    incluir_erros=incluir_erros,
+                    origem=origem.chave,
+                    uf=uf.chave,
+                )
+            )
+            alocacao.append((uf, origem, cota_origem))
     random.shuffle(linhas)
     return linhas, alocacao
 
@@ -821,12 +874,13 @@ def selecionar_pendentes(
     lote: str | None = None,
     incluir_erros: bool = False,
     origem: str | None = None,
+    uf: str | None = None,
 ) -> list[LinhaPendente]:
     """Seleciona as linhas a processar: pendentes e, opcionalmente, com erro.
 
     Consulta estática, só com parâmetros nomeados: `incluir_erros` liga/desliga
-    o ramo de erros, `limite` nulo vira `-1` (sem limite no SQLite), `lote` nulo
-    desativa o filtro por lote e `origem` nulo desativa o filtro por origem.
+    o ramo de erros; `limite` nulo vira `-1` (sem limite no SQLite); `lote`,
+    `origem` e `uf` nulos desativam o respectivo filtro.
     """
     linhas = cast(
         list[sqlite3.Row],
@@ -839,6 +893,7 @@ def selecionar_pendentes(
               )
               AND (:lote IS NULL OR lote = :lote)
               AND (:origem IS NULL OR origem = :origem)
+              AND (:uf IS NULL OR coalesce(uf, '') = :uf)
             ORDER BY random()
             LIMIT COALESCE(:limite, -1)
             """,
@@ -846,6 +901,7 @@ def selecionar_pendentes(
                 "incluir_erros": incluir_erros,
                 "lote": lote,
                 "origem": origem,
+                "uf": uf,
                 "limite": limite,
             },
         ).fetchall(),
@@ -1124,11 +1180,11 @@ def lote(
             help="Reprocessa linhas cujo resultado anterior foi um erro.",
         ),
     ] = False,
-    balancear_origens: Annotated[
+    balancear: Annotated[
         bool,
         typer.Option(
-            "--balancear-origens/--sem-balancear-origens",
-            help="Sorteia o lote com cotas proporcionais por origem (1/(anotados+1)).",
+            "--balancear/--sem-balancear",
+            help="Sorteia o lote com cotas hierárquicas UF→origem (1/(anotados+1)).",
         ),
     ] = True,
     verboso: Annotated[
@@ -1147,18 +1203,23 @@ def lote(
 
     conn = abrir_banco(banco)
     try:
-        if balancear_origens:
+        if balancear:
             linhas, alocacao = coletar_lote_balanceado(
                 conn,
                 limite=limite,
                 lote=lote_id,
                 incluir_erros=retentar_erros,
             )
-            for origem, quantidade in alocacao:
-                console.print(
-                    f"[dim]{origem.origem}: {quantidade} "
-                    f"(anotados={origem.anotados}, pendentes={origem.pendentes})[/dim]"
+            agrupado: dict[str, list[tuple[str, int]]] = {}
+            for uf, origem, quantidade in alocacao:
+                agrupado.setdefault(uf.chave, []).append((origem.chave, quantidade))
+            for uf_chave, itens in agrupado.items():
+                total_uf = sum(quantidade for _, quantidade in itens)
+                detalhe = " ".join(
+                    f"{origem or '??'}={quantidade}" for origem, quantidade in itens
                 )
+                cabecalho = f"{uf_chave or '??'}: {total_uf} ({len(itens)} origem(ns))"
+                console.print(f"[dim]{cabecalho} — {detalhe}[/dim]")
         else:
             linhas = selecionar_pendentes(
                 conn,

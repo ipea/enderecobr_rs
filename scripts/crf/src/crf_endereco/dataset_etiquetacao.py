@@ -61,13 +61,19 @@ console = Console()
 
 @dataclass
 class RegistroEtiquetacao:
-    """Uma linha do dataset a etiquetar, antes de virar registro no SQLite."""
+    """Uma linha do dataset a etiquetar, antes de virar registro no SQLite.
+
+    `municipio`/`uf` são o contexto administrativo da linha (vêm da origem);
+    vão normalizados nas colunas homônimas do banco, sem alterar `extras`/`meta`.
+    """
 
     endereco: str
     extras: str
     meta: dict[str, Any]
     origem: str
     origem_id: str | None = None
+    municipio: str | None = None
+    uf: str | None = None
 
 
 # --- Filtro de diversidade ------------------------------------------------
@@ -139,6 +145,16 @@ def limpar_texto(valor: Any) -> str:
     if valor is None:
         return ""
     return str(valor).strip()
+
+
+def normalizar_municipio(valor: Any) -> str | None:
+    """Nome do município em maiúsculas (None quando vazio)."""
+    return limpar_texto(valor).upper() or None
+
+
+def normalizar_uf(valor: Any) -> str | None:
+    """Sigla da UF em maiúsculas (None quando vazia)."""
+    return limpar_texto(valor).upper() or None
 
 
 def montar_extras(
@@ -221,6 +237,8 @@ class PopuladorImoveisUniao(Populador):
                 break
             for linha in linhas:
                 rip, uf, municipio, bairro, endereco, lat, lon, precisao = linha
+                municipio = limpar_texto(municipio)
+                uf = limpar_texto(uf)
                 yield RegistroEtiquetacao(
                     endereco=str(endereco).strip(),
                     extras=montar_extras(
@@ -235,6 +253,8 @@ class PopuladorImoveisUniao(Populador):
                     },
                     origem=self.tipo,
                     origem_id=str(rip),
+                    municipio=municipio,
+                    uf=uf,
                 )
 
 
@@ -292,11 +312,13 @@ class PopuladorCensoEscolar(Populador):
                 escola = limpar_texto(escola)
                 dependencia = limpar_texto(dependencia)
                 localidade = self._limpar_localidade(localidade)
+                municipio = limpar_texto(municipio)
+                uf = limpar_texto(uf)
                 yield RegistroEtiquetacao(
                     endereco=str(endereco).strip(),
                     extras=montar_extras(
-                        limpar_texto(municipio),
-                        limpar_texto(uf),
+                        municipio,
+                        uf,
                         None,
                         banco="Censo Escolar (INEP)",
                         extras_adicionais=[
@@ -315,6 +337,8 @@ class PopuladorCensoEscolar(Populador):
                     },
                     origem=self.tipo,
                     origem_id=limpar_texto(codigo_inep) or None,
+                    municipio=municipio,
+                    uf=uf,
                 )
 
     def _limpar_localidade(self, valor: Any) -> str:
@@ -408,6 +432,8 @@ class PopuladorCafir(Populador):
                     },
                     origem=self.tipo,
                     origem_id=limpar_texto(nirf) or None,
+                    municipio=municipio,
+                    uf=uf,
                 )
 
 
@@ -511,6 +537,8 @@ class PopuladorAneel(Populador):
                     origem_id=limpar_texto(cod_id)
                     or limpar_texto(pn_con)
                     or None,
+                    municipio=limpar_texto(municipio),
+                    uf=limpar_texto(uf),
                 )
 
 
@@ -672,6 +700,8 @@ class PopuladorCneas(Populador):
                     },
                     origem=self.tipo,
                     origem_id=cod_entidade or None,
+                    municipio=campos["municipio"],
+                    uf=campos["uf"],
                 )
 
 
@@ -713,6 +743,8 @@ def criar_banco(conn: sqlite3.Connection) -> None:
             resposta_llm TEXT,
             origem TEXT NOT NULL,
             origem_id TEXT,
+            municipio TEXT,
+            uf TEXT,
             lote TEXT NOT NULL,
             hash_endereco TEXT NOT NULL UNIQUE,
             data_criacao TEXT NOT NULL,
@@ -748,9 +780,9 @@ def gravar_registros(
         conn.execute(
             """
             INSERT OR IGNORE INTO enderecos
-                (id, endereco, extras, meta, origem, origem_id, lote,
-                 hash_endereco, data_criacao)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, endereco, extras, meta, origem, origem_id, municipio, uf,
+                 lote, hash_endereco, data_criacao)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 base_ns + i,
@@ -759,6 +791,8 @@ def gravar_registros(
                 json.dumps(r.meta, ensure_ascii=False),
                 r.origem,
                 r.origem_id,
+                normalizar_municipio(r.municipio),
+                normalizar_uf(r.uf),
                 lote,
                 calcular_hash(r.endereco),
                 agora,
