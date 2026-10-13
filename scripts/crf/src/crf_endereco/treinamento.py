@@ -11,7 +11,7 @@ from crf_endereco.preproc import (
 
 mapa_tipo_segmento = {
     # "logradouro_interno": "logradouro",
-    "modificador_numero": "numero",
+    "modificador_numero": None,
     "cadastro": None,
     # "quilometragem_via": "logradouro",
     # "denominacao": None,

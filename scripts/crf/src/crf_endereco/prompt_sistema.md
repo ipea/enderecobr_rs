@@ -53,7 +53,12 @@ glossary:
 | SB   | sobrado     | CB   | cobertura |
 | FD   | fundos      | QT   | quitinete |
 | FT   | frente      | AD   | andar     |
-| LJ   | loja        |      |           |
+| LJ   | loja        | CS   | casa      |
+| BL   | bloco       | CJ   | conjunto  |
+| EN   | entrada     | MD   | módulo    |
+| TR   | trecho      | SS   | subsolo   |
+| SV   | serviço     | ED   | edifício  |
+| UN   | unidade     |      |           |
 
 Rules:
 
@@ -62,6 +67,11 @@ Rules:
 2. A single-letter suffix glued to the number ("11A", "163A") stays
    `modificador_numero` — do not confuse it with the unit codes above.
 3. In DF, the same letters can belong to the sector code ("SHIN CA 11" is one `logradouro`).
+4. `BL`/`CJ` (and `QD`/`AE`) are `complemento` only when they stand ALONE as a
+   unit; in DF they are usually absorbed into the sector `logradouro` when
+   contiguous with the code (see the DF section).
+5. DF false friend: `CA <name>` is "Colônia Agrícola" (a `localidade`), NOT
+   "casa" — e.g. "CA VICENTE PIRES", "CA 26 DE SETEMBRO", "CA SAMAMBAIA".
 
 Examples:
 
@@ -73,14 +83,20 @@ Examples:
 
 ## Regional pattern: Distrito Federal (Brasília) sectors
 
-Many DF addresses are not "street + number": they use a sector code — superquadras and commercial blocks (SQN, SQS, SCLN, SCLS, SHN, SHS, SHIS, SQNW, SQSW...), residential quadras (QNM, QNN, QNP, QNO, QI, QE, QS, QR...), sectors (SH, ST...), optionally followed by CONJUNTO and/or BLOCO. In the CNEFE these codes are NOT a street: `nom_seglogr` holds the whole sector identifier INCLUDING the BLOCO/CONJUNTO (e.g. 'SQN 302 BLOCO B', 'SQS 116 BLOCO C', 'QNM 34 CONJUNTO J', 'QI 20 CONJUNTO I'), `num_adress` is 0 ('SN'), and the unit (APARTAMENTO, CASA...) is the complement.
+Many DF addresses are not "street + number": they use a sector code — a short token (2–6 letters, often with an N/S/E/W suffix) naming a setor, quadra or conjunto, optionally followed by QUADRA/CONJUNTO/BLOCO/MÓDULO/TRECHO/ÁREA ESPECIAL/ENTRADA. Verified families (illustrative, NOT exhaustive — ANY token that names a setor/quadra behaves the same): SQN, SQS, SQNW, SQSW, SCLN, SCLS, SCN, SCS, SGAN, SGAS, SEPN, SEPS, SRTVN, SRTVS, SHN, SHS, SHIS, SHIN, SHLS, SHLN, SHCGN, SHCES/SHCE-S, SHTQ, SMPW, SAAN, SAS/SAUS, SAUN, SBS, SDS, SDN, SDMC, SIG, SIA, SIBS, SCES, SMHN, SMLN, SRES, SRL, SO/SOPI/SOFS, CLN, CLS, CLNW, ADE, AOS, AR, CCSW, CSG, CRS, CSA/CSB/CSD, CNB/CND/CNG/CNL/CNM, EQ/EQNM/EQNO/EQNP/EQS, QI, QE, QS, QR, QN, QD, QNM, QNN, QNO, QNP, QNA/QNC/QND/QNE/QNF/QNG/QNH/QNJ/QNL, QMS/QMSW, QRC, QRSW, QSB/QSC/QSE, QRO, SIND, SGCV, SCE.
+
+In the CNEFE these codes are NOT a street: 96% of DF rows have `nom_tipo_seglogr = 'EDF'`, and `nom_seglogr` holds the whole sector identifier INCLUDING the BLOCO/CONJUNTO/QUADRA (e.g. 'SQN 302 BLOCO B', 'SQS 116 BLOCO C', 'QNM 34 CONJUNTO J', 'QI 20 CONJUNTO I', 'SCS QUADRA 1 BLOCO E', 'SAUN QUADRA 5 LOTE B'); `num_adress` is 0 ('SN') in 97% of rows, and the unit (APARTAMENTO, CASA, LOTE...) is the complement.
 
 Rules for these addresses:
 
-1. The sector code up to and including its BLOCO/CONJUNTO is ONE `logradouro` span, even without a street type: "SQN 302 BLOCO B", "QNM 34 CONJUNTO J".
-2. A short stray marker (1–2 letters) immediately BEFORE the sector code, absent from the CNEFE `nom_seglogr` (the "Q" in "Q SQN 302 BLOCO B", the "ST" in "ST QI 20 CONJUNTO I", the "AC" in "AC SQS 313 BLOCO F"), is `ruido`.
-3. The number right after the BLOCO/CONJUNTO is `numero`. There is no separate lote number: this bare number is the unit number, so it plays the `numero` role and the unit role at once.
-4. An explicit unit word ("APARTAMENTO", "APTO", "CASA", "BOX", "LOJA", "TERREO"), with or without its own number, is `complemento`, even when it repeats the `numero`.
+1. The sector code up to and including a CONTIGUOUS QUADRA/CONJUNTO/BLOCO/MÓDULO/TRECHO/ÁREA ESPECIAL/ENTRADA is ONE `logradouro` span, even without a street type: "SQN 302 BLOCO B", "QNM 34 CONJUNTO J", "SCS QUADRA 1 BLOCO E", "SEPS 702 902 BLOCO B". Numbers may be glued or paired and stay inside the span: "SEPS 702 902" (quadras 702/902), "CLNW 10/11", "EQ 210 310", "SCLRN 702703". A spelled-out QUADRA/CONJUNTO/LOTE behaves the same as QD/CJ/LT.
+2. A short stray marker (1–2 letters) immediately BEFORE the sector code, absent from the CNEFE `nom_seglogr` (the "Q" in "Q SQN 302 BLOCO B", the "ST" in "ST QI 20 CONJUNTO I", the "AC" in "AC SQS 313 BLOCO F", the "BL" in "BL SQS 309 BLOCO G"), is `ruido`. BUT when the CNEFE `nom_seglogr` itself starts with the marker it is part of the `logradouro`: in satellite-city schemes the quadra is literally "Q n" ('Q 1 CONJUNTO A SDE', 'Q 103 CONJ 10'), so "Q 508 CJ 02" is ONE `logradouro`.
+3. After the sector code: `LT n` (lote) is `parcela` by default (LOTE is the most frequent DF complement, ~60% of rows); a bare number right after the BLOCO/CONJUNTO is `numero` (it plays the unit-number role); an explicit unit code/word ("AP", "APTO", "SL", "LJ", "CS", "EN", "SB", "ANDAR", "TR", "MD"...) is `complemento`, even when it repeats the `numero`. EXCEPTION: when the CNEFE `nom_seglogr` itself includes the LOTE, absorb `LT`/`LOTE` into the `logradouro` (e.g. 'SAUN QUADRA 5 LOTE B', 'SEPS 708 907 LOTE B', 'SIA TRECHO 1 LOTE 1840', 'SGCV LOTE 11 BLOCO F').
+4. A trailing "BLOCO X"/"CONJUNTO X" that duplicates the sector code (DF sources concatenate the address twice, e.g. "Q SQN 202 BLOCO B 205 BLOCO B", "Q SQN 212 BLOCO G 212 BLOCO G - Apartamento 409") is `complemento`.
+5. "Projeção n" (the position within a superquadra) is `complemento`.
+6. A named building "ED/EDF NAME" / "ED. NAME" ("ED DECK", "ED JK", "ED ARISTON") is `empreendimento`.
+7. Estrada-Parque abbreviations (EPTG, EPNB, EPIA, EPVP, EPCT, EPAR, EIXO) and DF-xxx / BR-xxx roads are `logradouro` (like ROD/EST); the "KM n" is `quilometragem_via`.
+8. Rural DF uses the same heads as the rural section (NR = Núcleo Rural, CH = Chácara, GB/GL = Gleba, GRANJA, COLÔNIA AGRÍCOLA, PIVÔ). Careful: `CA <name>` = "Colônia Agrícola" (a `localidade`, NOT "casa").
 
 Examples:
 
@@ -89,6 +105,14 @@ Examples:
 - "AC SQS 313 BLOCO F 204 Apartamento" → `ruido` "AC"; `logradouro` "SQS 313 BLOCO F"; `numero` "204"; `complemento` "Apartamento"
 - "Q SQN 306 Bloco H apartamento 208" → `ruido` "Q"; `logradouro` "SQN 306 Bloco H"; `complemento` "apartamento 208"
 - "ST QI 20 CONJUNTO I 24 Casa" → `ruido` "ST"; `logradouro` "QI 20 CONJUNTO I"; `numero` "24"; `complemento` "Casa"
+- "QNM 03 CJ A LT 06 SL 104" → `logradouro` "QNM 03 CJ A"; `parcela` "LT 06"; `complemento` "SL 104"
+- "Q 508 CJ 02 LT 21 LJ 01" → `logradouro` "Q 508 CJ 02" (satellite city: "Q" belongs to the sector); `parcela` "LT 21"; `complemento` "LJ 01"
+- "Q SQN 214 BLOCO K S/N BLOCO K APTº 606" → `ruido` "Q"; `logradouro` "SQN 214 BLOCO K"; `numero` "S/N"; `complemento` "BLOCO K"; `complemento` "APTº 606"
+- "Q SQN 212 BLOCO G 212 BLOCO G - Apartamento 409" → `ruido` "Q"; `logradouro` "SQN 212 BLOCO G"; `complemento` "212 BLOCO G"; `complemento` "Apartamento 409"
+- "ST SUPER QUADRA NORTE(SQN) 103 Projeção 1- Apto 404 - Bloco A" → `ruido` "ST"; `logradouro` "SUPER QUADRA NORTE(SQN) 103"; `complemento` "Projeção 1"; `complemento` "Apto 404"; `complemento` "Bloco A" (the BLOCO is separated from the code, so it does NOT join the `logradouro`)
+- "CA 26 DE SETEMBRO R 01 CH 02A LT 0" → `localidade` "CA 26 DE SETEMBRO"; `logradouro_interno` "R 01"; `parcela` "CH 02A LT 0"
+- "EPTG QE 03 BL A08 AP ZL" → `logradouro` "EPTG"; `logradouro` "QE 03 BL A08"; `complemento` "AP ZL"
+- "SAUN Q 05 LT B" → `logradouro` "SAUN Q 05 LT B" (CNEFE `nom_seglogr` = 'SAUN QUADRA 5 LOTE B', so the LOTE is absorbed)
 
 ## Regional pattern: rural addresses (ribeirinho, assentamentos, ...)
 
@@ -138,6 +162,7 @@ Base with ~110.6 million rows and ~106.4 million unique addresses (code_address)
 - Complements come in pairs nom_comp_elemN/val_comp_elemN (N=1 to 5; 1 and 2 are common, 3+ is rare). nom is the category (CASA, APARTAMENTO, BLOCO, QUADRA, FUNDOS, FRENTE, TERREO, ANDAR, LOTE, LOJA, TORRE, EDIFICIO, CONJUNTO...) and val is the value, often empty in elem1.
 - cod_especie: 1=private household (82% of rows), 3=agricultural establishment, 6=establishment for other purposes, 7=building under construction. dsc_estabelecimento is the establishment name (BAR, IGREJA, 'VAGO', 'SEM NOME'...), not the street.
 - code_muni is the 7-digit IBGE code.
+- Distrito Federal (code_state 53) is almost all buildings: 96% `nom_tipo_seglogr='EDF'` and 97% `dsc_modificador='SN'`. The sector identifier WITH its QUADRA/CONJUNTO/BLOCO lives in `nom_seglogr`; LOTE/CASA/APARTAMENTO/ENTRADA/BLOCO go to `nom_comp_elem*`, where LOTE is the single most common (60%).
 
 Try to restrict your queries by municipio and/or uf, and always use a LIMIT and avoid SELECT \*.
 
