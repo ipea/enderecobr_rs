@@ -24,6 +24,9 @@ Uso:
     # Lote: processa os pendentes do banco gerado por dataset_etiquetacao.py
     uv run etiquetar.py lote dataset.sqlite --env .env
 
+    # Lote filtrado por UF e/ou origem (repita ou separe por vírgula)
+    uv run etiquetar.py lote dataset.sqlite --uf RJ --origem siase --env .env
+
 A ontologia de rótulos fica em `prompt_sistema.md` (prompt) e `ONTOLOGIA.md`
 (notas de pós-processamento).
 """
@@ -37,6 +40,7 @@ import random
 import sqlite3
 import threading
 import time
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -723,16 +727,37 @@ def abrir_banco(caminho: Path) -> sqlite3.Connection:
     return conn
 
 
+def _lista_delimitada(valores: Sequence[str] | None, *, caixa: str) -> str | None:
+    """Junta um filtro em ``",v1,v2,"`` para uso com ``instr`` (ou ``None``).
+
+    Mantém a consulta SQL estática (só o valor delimitado vai como parâmetro);
+    o ``instr`` casa esse texto com a coluna já normalizada na base. ``caixa``
+    é ``'upper'`` ou ``'lower'``. Sem valores, devolve ``None`` (filtro off).
+    """
+    if not valores:
+        return None
+    itens = [item.strip() for item in valores if item.strip()]
+    if not itens:
+        return None
+    if caixa == "upper":
+        itens = [item.upper() for item in itens]
+    elif caixa == "lower":
+        itens = [item.lower() for item in itens]
+    return "," + ",".join(itens) + ","
+
+
 def listar_ufs_pendentes(
     conn: sqlite3.Connection,
     *,
     lote: str | None = None,
     incluir_erros: bool = False,
+    ufs: Sequence[str] | None = None,
 ) -> list[EstratoPendente]:
     """UFs que têm pendentes, com quantos já foram anotados em cada uma.
 
     `anotados` conta só as anotações bem-sucedidas (sem `$.erro`); é a base do
     peso usado por `alocar` no primeiro nível (UF). UFs nulas viram a chave ''.
+    `ufs` restringe às UFs dadas (sem diferenciar maiúsc./minúsc.).
     """
     linhas = conn.execute(
         """
@@ -748,9 +773,14 @@ def listar_ufs_pendentes(
                 OR (:incluir_erros AND json_extract(p.resposta_llm, '$.erro') IS NOT NULL)
               )
           AND (:lote IS NULL OR p.lote = :lote)
+          AND (:ufs IS NULL OR instr(:ufs, ',' || upper(coalesce(p.uf, '')) || ',') > 0)
         GROUP BY coalesce(p.uf, '')
         """,
-        {"incluir_erros": incluir_erros, "lote": lote},
+        {
+            "incluir_erros": incluir_erros,
+            "lote": lote,
+            "ufs": _lista_delimitada(ufs, caixa="upper"),
+        },
     ).fetchall()
     return [
         EstratoPendente(chave=cast(str, u), anotados=cast(int, a), pendentes=cast(int, p))
@@ -764,11 +794,13 @@ def listar_origens_pendentes(
     *,
     lote: str | None = None,
     incluir_erros: bool = False,
+    origens: Sequence[str] | None = None,
 ) -> list[EstratoPendente]:
     """Origens com pendentes dentro de uma UF, com quantos já foram anotados.
 
     Espelha `listar_ufs_pendentes` no segundo nível (origem dentro da UF); é a
-    base do peso 1/(anotados da célula origem×UF + 1).
+    base do peso 1/(anotados da célula origem×UF + 1). `origens` restringe às
+    origens dadas (sem diferenciar maiúsc./minúsc.).
     """
     linhas = conn.execute(
         """
@@ -786,9 +818,15 @@ def listar_origens_pendentes(
                 OR (:incluir_erros AND json_extract(p.resposta_llm, '$.erro') IS NOT NULL)
               )
           AND (:lote IS NULL OR p.lote = :lote)
+          AND (:origens IS NULL OR instr(:origens, ',' || lower(p.origem) || ',') > 0)
         GROUP BY p.origem
         """,
-        {"uf": uf, "incluir_erros": incluir_erros, "lote": lote},
+        {
+            "uf": uf,
+            "incluir_erros": incluir_erros,
+            "lote": lote,
+            "origens": _lista_delimitada(origens, caixa="lower"),
+        },
     ).fetchall()
     return [
         EstratoPendente(chave=cast(str, o), anotados=cast(int, a), pendentes=cast(int, p))
@@ -833,6 +871,8 @@ def coletar_lote_balanceado(
     limite: int | None,
     lote: str | None,
     incluir_erros: bool,
+    ufs: Sequence[str] | None = None,
+    origens: Sequence[str] | None = None,
 ) -> tuple[list[LinhaPendente], list[tuple[EstratoPendente, EstratoPendente, int]]]:
     """Coleta um lote com cotas hierárquicas UF → origem, pesando 1/(anotados+1).
 
@@ -840,26 +880,30 @@ def coletar_lote_balanceado(
     distribui o lote entre as UFs; depois, dentro da cota de cada UF, distribui
     entre as origens dela. As linhas de cada origem saem em ordem aleatória e o
     lote final é embaralhado. Retorna também a alocação por (UF, origem) para o
-    relatório.
+    relatório. `ufs`/`origens` restringem os estratos considerados.
     """
-    ufs = listar_ufs_pendentes(conn, lote=lote, incluir_erros=incluir_erros)
-    tamanho = limite if limite is not None else sum(u.pendentes for u in ufs)
+    estratos_uf = listar_ufs_pendentes(
+        conn, lote=lote, incluir_erros=incluir_erros, ufs=ufs
+    )
+    tamanho = (
+        limite if limite is not None else sum(u.pendentes for u in estratos_uf)
+    )
 
     linhas: list[LinhaPendente] = []
     alocacao: list[tuple[EstratoPendente, EstratoPendente, int]] = []
-    for uf, cota_uf in alocar(ufs, tamanho):
-        origens = listar_origens_pendentes(
-            conn, uf.chave, lote=lote, incluir_erros=incluir_erros
+    for uf, cota_uf in alocar(estratos_uf, tamanho):
+        estratos_origem = listar_origens_pendentes(
+            conn, uf.chave, lote=lote, incluir_erros=incluir_erros, origens=origens
         )
-        for origem, cota_origem in alocar(origens, cota_uf):
+        for origem, cota_origem in alocar(estratos_origem, cota_uf):
             linhas.extend(
                 selecionar_pendentes(
                     conn,
                     limite=cota_origem,
                     lote=lote,
                     incluir_erros=incluir_erros,
-                    origem=origem.chave,
-                    uf=uf.chave,
+                    origens=[origem.chave],
+                    ufs=[uf.chave],
                 )
             )
             alocacao.append((uf, origem, cota_origem))
@@ -873,14 +917,15 @@ def selecionar_pendentes(
     limite: int | None = None,
     lote: str | None = None,
     incluir_erros: bool = False,
-    origem: str | None = None,
-    uf: str | None = None,
+    origens: Sequence[str] | None = None,
+    ufs: Sequence[str] | None = None,
 ) -> list[LinhaPendente]:
     """Seleciona as linhas a processar: pendentes e, opcionalmente, com erro.
 
-    Consulta estática, só com parâmetros nomeados: `incluir_erros` liga/desliga
-    o ramo de erros; `limite` nulo vira `-1` (sem limite no SQLite); `lote`,
-    `origem` e `uf` nulos desativam o respectivo filtro.
+    Consulta com parâmetros nomeados: `incluir_erros` liga/desliga o ramo de
+    erros; `limite` nulo vira `-1` (sem limite no SQLite); `lote` nulo desativa
+    esse filtro; `origens`/`ufs` restringem por origem e/ou UF (listas, sem
+    diferenciar maiúsc./minúsc.).
     """
     linhas = cast(
         list[sqlite3.Row],
@@ -892,17 +937,17 @@ def selecionar_pendentes(
                 OR (:incluir_erros AND json_extract(resposta_llm, '$.erro') IS NOT NULL)
               )
               AND (:lote IS NULL OR lote = :lote)
-              AND (:origem IS NULL OR origem = :origem)
-              AND (:uf IS NULL OR coalesce(uf, '') = :uf)
+              AND (:origens IS NULL OR instr(:origens, ',' || lower(origem) || ',') > 0)
+              AND (:ufs IS NULL OR instr(:ufs, ',' || upper(coalesce(uf, '')) || ',') > 0)
             ORDER BY random()
             LIMIT COALESCE(:limite, -1)
             """,
             {
                 "incluir_erros": incluir_erros,
                 "lote": lote,
-                "origem": origem,
-                "uf": uf,
                 "limite": limite,
+                "origens": _lista_delimitada(origens, caixa="lower"),
+                "ufs": _lista_delimitada(ufs, caixa="upper"),
             },
         ).fetchall(),
     )
@@ -1070,6 +1115,16 @@ def executar_lote(
 
 # --- CLI ------------------------------------------------------------------
 
+
+def _dividir_filtros(valores: list[str] | None) -> list[str] | None:
+    """Divide valores repetidos/CSV de uma opção em uma lista limpa (ou None)."""
+    if not valores:
+        return None
+    itens = [item.strip() for valor in valores for item in valor.split(",")]
+    limpos = [item for item in itens if item]
+    return limpos or None
+
+
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
 
@@ -1169,6 +1224,20 @@ def lote(
         str | None,
         typer.Option("--lote", help="Filtra as linhas por lote (coluna `lote`)."),
     ] = None,
+    uf: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--uf",
+            help="Filtra o lote por UF (repita ou separe por vírgula).",
+        ),
+    ] = None,
+    origem: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--origem",
+            help="Filtra o lote por origem (repita ou separe por vírgula).",
+        ),
+    ] = None,
     concorrencia: Annotated[
         int,
         typer.Option("--concorrencia", "-c", min=1, help="Chamadas simultâneas à LLM."),
@@ -1197,6 +1266,8 @@ def lote(
     """Processa em lote os endereços pendentes do dataset de etiquetagem."""
     config = carregar_config(env)
     console_llm = console if verboso else Console(quiet=True)
+    ufs_filtro = _dividir_filtros(uf)
+    origens_filtro = _dividir_filtros(origem)
 
     # Valida o ambiente (CNEFE, municipios) uma vez, antes de começar o lote.
     Contexto.criar(config, console).fechar()
@@ -1209,10 +1280,14 @@ def lote(
                 limite=limite,
                 lote=lote_id,
                 incluir_erros=retentar_erros,
+                ufs=ufs_filtro,
+                origens=origens_filtro,
             )
             agrupado: dict[str, list[tuple[str, int]]] = {}
-            for uf, origem, quantidade in alocacao:
-                agrupado.setdefault(uf.chave, []).append((origem.chave, quantidade))
+            for estrato_uf, estrato_origem, quantidade in alocacao:
+                agrupado.setdefault(estrato_uf.chave, []).append(
+                    (estrato_origem.chave, quantidade)
+                )
             for uf_chave, itens in agrupado.items():
                 total_uf = sum(quantidade for _, quantidade in itens)
                 detalhe = " ".join(
@@ -1226,6 +1301,8 @@ def lote(
                 limite=limite,
                 lote=lote_id,
                 incluir_erros=retentar_erros,
+                ufs=ufs_filtro,
+                origens=origens_filtro,
             )
         if not linhas:
             console.print("[yellow]Nenhum endereço pendente para processar.[/yellow]")
