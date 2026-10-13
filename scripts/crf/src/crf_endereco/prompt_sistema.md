@@ -38,6 +38,39 @@ Watch out for false friends: `FRENTE`/`FUNDOS` are `complemento` (front/rear of 
 
 Organization/establishment names: many raw addresses carry the name of an organization, company, association or venue (common in entity registries, e.g. CNEAS): "ASSOCIAÇÃO …", "INSTITUTO …", "APAE …", "CIEE-PR", "CLUBE …", "HOTEL …". When such a name shows up as a standalone snippet, label the WHOLE name as ONE `empreendimento` span (it names the place and is a geocodable anchor), regardless of where it appears. Keep it as a single span even if it contains tokens that look like other fields ("de/da", a number, a "PR" inside "CIEE/PR"). Do NOT merge it into an adjacent `logradouro`/`complemento`, and do not use `denominacao`/`referencia` for it. Only when the name is attached to a street type (e.g. "RUA APAE") does it stay part of the `logradouro`.
 
+## Common unit types abbreviations
+
+Some addresses carry a short, typically with 2-letter, unit code, right after the
+house number, optionally followed by a value. That code abbreviates the unit
+**type**, so it is always a `complemento` (the type, plus its value when
+present) — never `modificador_numero`, `ruido` or `outros`. Non-exhaustive
+glossary:
+
+| code | unit type   | code | unit type |
+| ---- | ----------- | ---- | --------- |
+| AP   | apartamento | SL   | sala      |
+| CA   | casa        | SA   | sala      |
+| SB   | sobrado     | CB   | cobertura |
+| FD   | fundos      | QT   | quitinete |
+| FT   | frente      | AD   | andar     |
+| LJ   | loja        |      |           |
+
+Rules:
+
+1. "<número> <código>" is ONE `complemento` span over the code (and the value
+   when there is one).
+2. A single-letter suffix glued to the number ("11A", "163A") stays
+   `modificador_numero` — do not confuse it with the unit codes above.
+3. In DF, the same letters can belong to the sector code ("SHIN CA 11" is one `logradouro`).
+
+Examples:
+
+- "R MONTAURI 260 FD REALENGO" → `logradouro` "R MONTAURI"; `numero` "260"; `complemento` "FD"; `localidade` "REALENGO"
+- "R CENTRALINA 21 SB BRAZ DE PINA" → `logradouro` "R CENTRALINA"; `numero` "21"; `complemento` "SB"; `localidade` "BRAZ DE PINA"
+- "R MARIANA 3 CA B FAV RIO DAS PEDRAS" → `logradouro` "R MARIANA"; `numero` "3"; `complemento` "CA B"; `localidade` "FAV RIO DAS PEDRAS"
+- "AV RIBEIRO DANTAS 369 CA 2 BANGU" → `logradouro` "AV RIBEIRO DANTAS"; `numero` "369"; `complemento` "CA 2"; `localidade` "BANGU"
+- "R CENTRALINA 21 CA 5 BRAZ DE PINA" → `logradouro` "R CENTRALINA"; `numero` "21"; `complemento` "CA 5"; `localidade` "BRAZ DE PINA"
+
 ## Regional pattern: Distrito Federal (Brasília) sectors
 
 Many DF addresses are not "street + number": they use a sector code — superquadras and commercial blocks (SQN, SQS, SCLN, SCLS, SHN, SHS, SHIS, SQNW, SQSW...), residential quadras (QNM, QNN, QNP, QNO, QI, QE, QS, QR...), sectors (SH, ST...), optionally followed by CONJUNTO and/or BLOCO. In the CNEFE these codes are NOT a street: `nom_seglogr` holds the whole sector identifier INCLUDING the BLOCO/CONJUNTO (e.g. 'SQN 302 BLOCO B', 'SQS 116 BLOCO C', 'QNM 34 CONJUNTO J', 'QI 20 CONJUNTO I'), `num_adress` is 0 ('SN'), and the unit (APARTAMENTO, CASA...) is the complement.
