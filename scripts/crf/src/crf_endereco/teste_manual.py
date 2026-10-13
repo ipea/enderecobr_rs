@@ -1,6 +1,11 @@
-import sklearn_crfsuite
-from crf_endereco.preproc import ExtratorFeature, tokenize
+from pathlib import Path
 from pprint import pprint
+from typing import Annotated
+
+import sklearn_crfsuite
+import typer
+
+from crf_endereco.preproc import ExtratorFeature, tokenize
 
 
 def extrair_campos(crf: sklearn_crfsuite.CRF, extrator: ExtratorFeature, frase: str):
@@ -30,12 +35,20 @@ def coletar_segmentos(tokens_classificados: list[tuple[str, str]]):
     return segmentos
 
 
-def main():
+app = typer.Typer(no_args_is_help=True, add_completion=False)
+
+
+@app.command()
+def main(
+    tagger: Annotated[Path, typer.Argument(help="Path do tagger treinado")] = Path(
+        "./tagger.crf"
+    ),
+):
     # Por algum motivo, basta só importar isso para a função
     # input funcionar adequadamente.
     import readline as _
 
-    crf = sklearn_crfsuite.CRF(model_filename="./tagger.crf")
+    crf = sklearn_crfsuite.CRF(model_filename=str(tagger))
     extrator = ExtratorFeature()
 
     while True:
@@ -50,4 +63,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    app()
