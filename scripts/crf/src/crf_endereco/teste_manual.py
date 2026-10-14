@@ -1,5 +1,4 @@
 from pathlib import Path
-from pprint import pprint
 from typing import Annotated
 
 import sklearn_crfsuite
@@ -59,7 +58,12 @@ def main(
         if not line:
             continue
         campos = extrair_campos(crf, extrator, line)
-        pprint(coletar_segmentos(campos))
+        segmentos = coletar_segmentos(campos)
+
+        print("-----------------")
+        for seg in segmentos:
+            print(f"{seg.get('tipo', '').title()}: {seg.get('valor', '')}")
+        print("=================")
 
 
 if __name__ == "__main__":
