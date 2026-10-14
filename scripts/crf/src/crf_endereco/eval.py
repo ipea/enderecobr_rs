@@ -1,17 +1,15 @@
-from collections import Counter
-from pprint import pprint
+import json
 import random
+import sqlite3
+from collections import Counter, defaultdict
+from pprint import pprint
 
 import duckdb
 import sklearn_crfsuite
 from sklearn_crfsuite import metrics
 
-from crf_endereco.endereco import (
-    Endereco,
-    EnderecoGerador,
-    EnderecoParametros,
-)
-from crf_endereco.preproc import RotuladorEnderecoBIO, tokenize, tokens2features
+from crf_endereco.preproc import ExtratorFeature, tokenize
+from crf_endereco.treinamento import mergear
 
 
 def erros_mais_comuns_feature(x, y_true, y_pred, n=20):
@@ -100,45 +98,15 @@ def show(sent: list[str], y_true: list[str], y_pred: list[str]):
     print("################################")
 
 
-def avaliar(enderecos: list[Endereco]):
-    rotulador = RotuladorEnderecoBIO(tokenize)
-
-    x: list[list[dict[str, float]]] = []
-    y: list[list[str]] = []
-    categorias: list[list[str]] = []
-    tokens: list[list[str]] = []
-
-    parametros: list[EnderecoParametros] = []
-    for f in (
-        # "logradouro numero complemento",
-        # "logradouro numero complemento bairro",
-        "logradouro numero complemento bairro municipio",
-        # "logradouro numero complemento bairro municipio cep",
-        # "logradouro numero complemento cep bairro municipio",
-        # "logradouro numero complemento bairro cep municipio",
-        # "municipio bairro logradouro numero complemento",
-        # "logradouro bairro numero complemento municipio",
-        # "logradouro numero bairro complemento",
-    ):
-        for sep in (" ",):
-            parametros.append(EnderecoParametros(formato=f, separador=sep))
-
-    print("Processando dados...")
-    gerador = EnderecoGerador()
-    for endereco in enderecos:
-        for p in parametros:
-            novo_endereco = gerador.gerar_endereco(endereco, p)
-            toks, tags = rotulador.obter_tokenizado(novo_endereco)
-            feats = tokens2features(toks)
-            x.append(feats)
-            y.append(tags)
-            tokens.append(toks)
-
-            cats = [p.formato, p.separador]
-            categorias.append(cats)
+def avaliar(
+    x: list[list[dict[str, float]]],
+    y: list[list[str]],
+    categorias: list[list[str]],
+    tokens: list[list[str]],
+):
 
     print("Executando modelo...")
-    crf = sklearn_crfsuite.CRF(model_filename="./dados/tagger.crf")
+    crf = sklearn_crfsuite.CRF(model_filename="./tagger.crf")
 
     y_pred = crf.predict(x)
     print(metrics.flat_classification_report(y, y_pred, zero_division=0.0))
@@ -149,7 +117,23 @@ def avaliar(enderecos: list[Endereco]):
 
     print()
 
-    for l in (("B-LOG", "I-LOG"), ("B-NUM", "I-NUM"), ("B-COM", "I-COM")):
+    pares_labels: dict[str, set[str]] = defaultdict(set)
+    for y_i in y:
+        for y_token in y_i:
+            if "_" in y_token:
+                pos_bio, tipo = y_token.split("_", 1)
+                pares_labels[tipo].add(pos_bio)
+            else:
+                pares_labels[y_token] = set()
+
+    labels = []
+    for tipo, bios in pares_labels.items():
+        if len(bios) == 0:
+            labels.append((tipo,))
+        else:
+            labels.append(tuple(sorted(f"{bio}_{tipo}" for bio in bios)))
+
+    for l in labels:
         acertos, n = acuracia_labels(y, y_pred, l)
         print(f"Acurácia de {l}: {acertos}/{n} = {acertos / n:.2}")
 
@@ -172,7 +156,7 @@ def avaliar(enderecos: list[Endereco]):
     #     show(*a)
 
     print()
-    for classes in (("B-LOG"), ("I-LOG"), ("B-NUM"), ("I-NUM"), ("B-COM", "I-COM")):
+    for classes in labels:
         amostra = amostra_erros(tokens, y, y_pred, n=5, classes=list(classes))
         print(f"Amostra de Erros de {classes!s}")
         for a in amostra:
@@ -180,8 +164,8 @@ def avaliar(enderecos: list[Endereco]):
 
 
 def consulta_duckdb(query: str, batch_size: int = 1000):
-    con = duckdb.connect()
-    consulta = con.sql(query)
+    con = sqlite3.connect("./dataset.sqlite")
+    consulta = con.execute(query)
 
     while batch := consulta.fetchmany(batch_size):
         for b in batch:
@@ -191,32 +175,31 @@ def consulta_duckdb(query: str, batch_size: int = 1000):
 
 
 def main():
-    iter = consulta_duckdb("""
-select 
-    coalesce(logradouro, ''), 
-    coalesce(numero, ''),
-    coalesce(complemento, ''),
-    coalesce(localidade, ''),
-    coalesce(cep, ''),
-    coalesce(municipio, ''),
-    coalesce(uf, ''),
-    coalesce(origem, ''),
-from './dados/teste.parquet'
+    dados = consulta_duckdb("""select endereco, resposta_llm, origem, uf
+from enderecos
+where resposta_llm is not null 
+  and (resposta_llm ->> '$.erro') is null;
 """)
-    avaliar(
-        [
-            Endereco(
-                logradouro=str(d[0]),
-                numero=str(d[1]),
-                complemento=str(d[2]),
-                bairro=str(d[3]),
-                cep=str(d[4]),
-                municipio=str(d[5]),
-                uf=str(d[6]),
-            )
-            for d in iter
-        ]
-    )
+
+    extrator_features = ExtratorFeature()
+
+    x: list[list[dict[str, float]]] = []
+    y: list[list[str]] = []
+    categorias: list[list[str]] = []
+    tokens: list[list[str]] = []
+
+    for endereco, resposta_str, origem, uf in dados:
+        resposta = json.loads(resposta_str)
+        segmentos = resposta.get("segmentos", [])
+        toks, labels = mergear(endereco, segmentos, tokenize)
+        features = extrator_features.tokens2features(toks)
+
+        x.append(features)
+        y.append(labels)
+        categorias.append([origem, uf])
+        tokens.append(toks)
+
+    avaliar(x, y, categorias, tokens)
 
 
 if __name__ == "__main__":
