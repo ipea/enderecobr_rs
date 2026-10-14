@@ -61,6 +61,11 @@ pub struct ExtratorFeature {
     regex_tokenizer: Regex,
 }
 
+pub struct SegmentoEndereco {
+    pub valor: String,
+    pub tipo: String,
+}
+
 impl ExtratorFeature {
     pub fn new(distancias_vizinhaca: Option<Vec<i32>>) -> Self {
         Self {
@@ -229,7 +234,7 @@ fn normalize(text: &str) -> String {
 
 impl SeparadorEndereco {
     pub fn new() -> Self {
-        let modelo_bin = include_bytes!("../scripts/crf/dados/tagger.crf");
+        let modelo_bin = include_bytes!("../scripts/crf/tagger.crf");
         let model = Model::from_memory(modelo_bin).unwrap();
 
         SeparadorEndereco {
@@ -244,6 +249,37 @@ impl SeparadorEndereco {
             .iter()
             .map(|toks| toks.iter().map(|feat| Attribute::new(feat, 1.0)).collect())
             .collect()
+    }
+
+    pub fn segmentar_endereco(&self, tokens: &[String], tags: &[String]) -> Vec<SegmentoEndereco> {
+        let segmentos = Vec::new();
+        let mut ultimo_segmento_opt: Option<SegmentoEndereco> = None;
+        for (tok, tok_tipo) in tokens.iter().zip(tags) {
+            if tok_tipo == "O" {
+                continue;
+            }
+
+            let Some((bio, tipo)) = tok_tipo.split_once("_") else {
+                continue; // Não deveria acontecer
+            };
+
+            if bio == "B" {
+                segmento = SegmentoEndereco {
+                    valor: tok.to_owned(),
+                    tipo: tipo.to_string().to_lowercase(),
+                };
+                segmentos.push(segmento);
+                ultimo_segmento_opt = Some(segmento);
+            }
+            if bio == "I" {
+                if let Some(mut ultimo_segmento) = ultimo_segmento_opt {
+                    ultimo_segmento.valor.push(' ');
+                    ultimo_segmento.valor.push_str(tok);
+                }
+            }
+        }
+
+        return segmentos;
     }
 
     // TODO: tornar lógica mais legível: muitos níveis de indentação.
@@ -299,6 +335,15 @@ impl SeparadorEndereco {
 
         let tags = tagger.tag(&atributos).unwrap();
         self.extrair_campos(tokens, tags)
+    }
+
+    fn segmentar_endereco(&self, texto: &str) -> Vec<SegmentoEndereco> {
+        let mut tagger = self.model.tagger().unwrap();
+        let tokens = self.extrator.tokenize(texto);
+        let atributos = self.tokens2attributes(&tokens);
+
+        let tags = tagger.tag(&atributos).unwrap();
+        self.segmentar_endereco(&tokens, &tags)
     }
 }
 
