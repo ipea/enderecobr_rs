@@ -15,7 +15,7 @@ You segment raw Brazilian addresses into labeled fields to generate training dat
 
 | tipo               | what to mark                                                                                                                                                         | example                                                                                                                               |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| logradouro         | street type + title + name, verbatim; absorbs rodovia; in DF sector addresses, the sector code + BLOCO/CONJUNTO (see Regional pattern)                               | "R ALCIDES CARNEIRO LEAL", "AV OCEANICA", "ROD BR-116"                                                                                |
+| logradouro         | street type + title + name, verbatim; absorbs rodovia; in DF/Palmas coded cities, the sector/quadra code + BLOCO/CONJUNTO/alameda (see Regional pattern)             | "R ALCIDES CARNEIRO LEAL", "AV OCEANICA", "ROD BR-116"                                                                                |
 | logradouro_interno | way/area internal to a development (not an official municipal street)                                                                                                | "RUA PROJETADA GH", "Rua 7 do Condomínio X"                                                                                           |
 | numero             | property number, including absence of a number                                                                                                                       | "71", "S/N", "SN", "S/Nº"                                                                                                             |
 | modificador_numero | suffix/marker attached to the number                                                                                                                                 | "A", "504-B1", "POSTE"                                                                                                                |
@@ -114,6 +114,89 @@ Examples:
 - "EPTG QE 03 BL A08 AP ZL" → `logradouro` "EPTG"; `logradouro` "QE 03 BL A08"; `complemento` "AP ZL"
 - "SAUN Q 05 LT B" → `logradouro` "SAUN Q 05 LT B" (CNEFE `nom_seglogr` = 'SAUN QUADRA 5 LOTE B', so the LOTE is absorbed)
 
+## Regional pattern: Palmas (Tocantins) — quadras, alamedas e QI
+
+Palmas (TO) is also a planned, code-based city, but unlike DF its Plano Diretor
+(Norte/Sul) has NO street names. An address is a chain of coded elements: the
+quadra (`QUADRA` + sigla + number), an internal way (`ALAMEDA` / `AVENIDA`
+`NS`/`LO` / `RUA` + number), the `QI` (quadra interna) and the `LOTE`. The
+official government/Correios `logradouro` is EXACTLY "Quadra + SIGLA + n + way +
+k" — verified through ViaCEP, e.g.: CEP `77020-526` → `logradouro "Quadra ARSE 22 Alameda 10"`,
+`bairro "Plano Diretor Sul"`; CEP `77015212` → "Quadra ARSO 21 Avenida LO 5";
+CEP `77001226` → "Quadra ACSU NO 40 Avenida Siqueira Campos". The Correios
+`logradouro` DROPS the QI, the LOTE, the APM/HM/AE/ALC codes and the CONJUNTO —
+only the quadra + the internal way survive in it.
+
+Every block is a quadra named by a sigla (Área) + number. Known families
+(illustrative, NOT exhaustive — ANY such code behaves the same):
+
+- Residencial: **ARSE** (Sudeste), **ARSO** (Sudoeste), **ARNE** (Nordeste), **ARNO** (Noroeste) — Área Residencial.
+- Comércio/serviço: **ACSE/ACSO/ACNE/ACNO** (Área de Comércio e Serviço SE/SO/NE/NO), **ACSU** (… Urbano), **ACSV** (… Vicinal), **ASR** (Área de Serviço Regional), **AC** (… Central).
+- Administrativa: **AA**, **AAF/AAE/AAM** (Federal/Estadual/Municipal), **AANE/AANO/AASE/AASO** (NE/NO/SE/SO).
+- Especial/lazer/verde: **AE** (Área Especial), **ALC** (Área de Lazer e Cultura), **AVNE/AVNO/AVSE/AVSO** (Área Verde Urbana).
+- Públicas/moradia: **APM** (Área Pública Municipal), **HM** (Habitação Multifamiliar).
+- Subdivisões internas: **QI** (Quadra Interna), **QD**, **QR**, **QC**.
+- Vias principais: **LO** (Leste-Oeste), **NS** (Norte-Sul).
+
+Each quadra has TWO names. The new system (Portaria 144/1998, used by Correios
+1998–2018) is "number + Norte/Sul"; the original system (kept in the cartórios,
+restored by Lei 2.370/2018 and official since 2020) is "sigla + number".
+Equivalences (verified in CNEFE `desc_localidade`): ARSE 21 = 204 Sul, ARNO 21 =
+203 Norte, ARSE 32 = 306 Sul, ARNO 12 = 105 Norte, ARSE 71 = 704 Sul, AVNO 30 =
+301 Norte. Both systems are valid address elements: "Quadra 203 Sul", "Q 711
+SUL", "301 NORTE" all name the same quadra. Even = leste da Av. Teotônio
+Segurado, odd = oeste.
+
+Rules for these addresses:
+
+1. The quadra identifier (`QUADRA` + sigla + number, `QD`/`Q` + sigla, a bare
+   `ARNO 42`, or the new-system `Quadra 203 Sul` / `Q 711 SUL` / `301 NORTE`)
+   is ONE `logradouro` span — and the leading `QUADRA`/`QD`/`Q` marker IS part
+   of it (Correios writes "Quadra …"), unlike the DF stray marker. The internal
+   way (`ALAMEDA` / `AVENIDA` `NS`/`LO` / `RUA` + number) is a SEPARATE
+   `logradouro` span. A spelled-out QUADRA/ALAMEDA behaves like QD/AL. A letter
+   suffix on the quadra number ("ARSO 132 A", "ARSE 132A") stays inside the span.
+2. A `QI` / `QR` / `QC` (quadra interna) is a locator INSIDE the quadra → `complemento`
+   (never `logradouro`; it is NOT the DF "QI n" sector). A letter is the value:
+   "QI K", "QI F".
+3. `LOTE` / `LT` → `parcela`. `CONJUNTO` / `CJ` → `complemento` (as in DF).
+   `APM`, `HM`, `AE`, `ALC …` codes → `complemento`.
+4. Units are the usual `complemento` (CASA, APARTAMENTO, SALA, LOJA, QUITINETE,
+   BLOCO, ANDAR, FUNDOS, FRENTE, EDIFICIO…); a named building/establishment →
+   `empreendimento`.
+5. "PLANO DIRETOR NORTE/SUL" and "ST SUDESTE/NORTE/…" (setor) → `localidade`
+   (bairro). A `QUADRA` + new-system number naming the address quadra stays
+   `logradouro`.
+6. Roads are normal: TO-010/020/030/050, "ROD … VICINAL" → `logradouro`; the
+   "KM n" is `quilometragem_via`.
+7. CNEFE FALSE FRIEND: for Palmas `nom_seglogr` bundles alameda + QI + quadra
+   into the STREET NAME ('12 QI 19 ARNO 42', 'DAS AROEIRAS HM 02 ARNO 12') and
+   `desc_localidade` holds the new-system quadra ('QUADRA 405 NORTE'). Do NOT
+   read that placement as proof that QI/HM/APM belong to the `logradouro` — the
+   Correios `logradouro` drops them.
+8. OUTSIDE the Plano Diretor (Taquaralto, Jardim Aureny I–IV, Jardim Taquari/
+   Taquari, Santa Bárbara, Santa Fé, Morada do Sol, Bela Vista, Taquaruçu,
+   Buritirana…) addressing is conventional: "RUA 28 QD 75 LT 23" → `logradouro`
+   "RUA 28"; `parcela` "QD 75 LT 23" (quadra+lote = parcela, the general rule).
+   Rural heads: CH (Chácara), FAZ (Fazenda), GB/GL (Gleba), LOTEAMENTO, PA
+   (Projeto de Assentamento), plus the rural section below.
+
+Examples:
+
+- "QUADRA ARSE 71 ALAMEDA 06" → `logradouro` "QUADRA ARSE 71"; `logradouro` "ALAMEDA 06"
+- "QD ARNE 12 ALAMEDA 14" → `logradouro` "QD ARNE 12"; `logradouro` "ALAMEDA 14"
+- "QUADRA 1106 SUL ALAMEDA 25, APM 06." → `logradouro` "QUADRA 1106 SUL"; `logradouro` "ALAMEDA 25"; `complemento` "APM 06"
+- "Quadra 203 Sul, Av. LO 05, APM 01, 01" → `logradouro` "Quadra 203 Sul"; `logradouro` "Av. LO 05"; `complemento` "APM 01"; `numero` "01"
+- "Q 711 SUL ALAMEDA 3 7 CONJUNTO QD-01" → `logradouro` "Q 711 SUL"; `logradouro` "ALAMEDA 3"; `numero` "7"; `complemento` "CONJUNTO QD-01"
+- "QUADRA ARSE 51 QI K" → `logradouro` "QUADRA ARSE 51"; `complemento` "QI K"
+- "Q. 405 norte, Al 13, QI 17 Plano Diretor Norte" → `logradouro` "Q. 405 norte"; `logradouro` "Al 13"; `complemento` "QI 17"; `localidade` "Plano Diretor Norte"
+- "QUADRA ARNE 81 ALAMEDA 12, APM 06/07." → `logradouro` "QUADRA ARNE 81"; `logradouro` "ALAMEDA 12"; `complemento` "APM 06/07"
+- "QUADRA ASR SE 65  QI 07" → `logradouro` "QUADRA ASR SE 65"; `complemento` "QI 07"
+- "QUADRA ACSE 01, RUA SE 05, LOTE 01, CONJUNTO 04, S/N" → `logradouro` "QUADRA ACSE 01"; `logradouro` "RUA SE 05"; `parcela` "LOTE 01"; `complemento` "CONJUNTO 04"; `numero` "S/N"
+- "QUADRA ACNO I, RUA 1, CONJUNTO 02, LOTE 44" → `logradouro` "QUADRA ACNO I"; `logradouro` "RUA 1"; `complemento` "CONJUNTO 02"; `parcela` "LOTE 44"
+- "QUADRA AV 301 NORTE AVENIDA NS 1, CJ 02 LOTE 3/5" → `logradouro` "QUADRA AV 301 NORTE"; `logradouro` "AVENIDA NS 1"; `complemento` "CJ 02"; `parcela` "LOTE 3/5"
+- "RUA 10, 414 QUADRA 49. TAQUARUSSU." → `logradouro` "RUA 10"; `numero` "414"; `parcela` "QUADRA 49"; `localidade` "TAQUARUSSU" (non-Plano-Diretor bairro)
+
 ## Regional pattern: rural addresses (ribeirinho, assentamentos, ...)
 
 Many rural raw addresses have no street type and read as a routing description.
@@ -163,6 +246,7 @@ Base with ~110.6 million rows and ~106.4 million unique addresses (code_address)
 - cod_especie: 1=private household (82% of rows), 3=agricultural establishment, 6=establishment for other purposes, 7=building under construction. dsc_estabelecimento is the establishment name (BAR, IGREJA, 'VAGO', 'SEM NOME'...), not the street.
 - code_muni is the 7-digit IBGE code.
 - Distrito Federal (code_state 53) is almost all buildings: 96% `nom_tipo_seglogr='EDF'` and 97% `dsc_modificador='SN'`. The sector identifier WITH its QUADRA/CONJUNTO/BLOCO lives in `nom_seglogr`; LOTE/CASA/APARTAMENTO/ENTRADA/BLOCO go to `nom_comp_elem*`, where LOTE is the single most common (60%).
+- Palmas (TO, `code_muni` 1721000) is the other coded city: `nom_tipo_seglogr` is mostly 'ALAMEDA' and `nom_seglogr` CONCATENATES the alameda + QI + quadra code (e.g. '12 QI 19 ARNO 42', 'DAS AROEIRAS HM 02 ARNO 12'); the quadra's new-system name is the `desc_localidade` ('QUADRA 405 NORTE', '303 NORTE'). Residential quadra codes are ARSE/ARSO/ARNE/ARNO, plus commercial/administrative siglas (ACSE, ACSU, ASR, ALC, APM, AANE…); QI/QD are the most frequent tokens.
 
 Try to restrict your queries by municipio and/or uf, and always use a LIMIT and avoid SELECT \*.
 
