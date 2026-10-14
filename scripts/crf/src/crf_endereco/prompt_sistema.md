@@ -123,9 +123,12 @@ quadra (`QUADRA` + sigla + number), an internal way (`ALAMEDA` / `AVENIDA`
 official government/Correios `logradouro` is EXACTLY "Quadra + SIGLA + n + way +
 k" — verified through ViaCEP, e.g.: CEP `77020-526` → `logradouro "Quadra ARSE 22 Alameda 10"`,
 `bairro "Plano Diretor Sul"`; CEP `77015212` → "Quadra ARSO 21 Avenida LO 5";
-CEP `77001226` → "Quadra ACSU NO 40 Avenida Siqueira Campos". The Correios
-`logradouro` DROPS the QI, the LOTE, the APM/HM/AE/ALC codes and the CONJUNTO —
-only the quadra + the internal way survive in it.
+CEP `77001226` → "Quadra ACSU NO 40 Avenida Siqueira Campos". And the CNEFE
+keeps the whole chain TOGETHER in `nom_seglogr` (`nom_tipo_seglogr='ALAMEDA'`,
+e.g. '12 QI 19 ARNO 42', 'DAS AROEIRAS HM 02 ARNO 12'), with the quadra's
+new-system name in `desc_localidade`; only LOTE/CONJUNTO/CASA/APARTAMENTO go to
+the complement. Because the goal is to JOIN with CNEFE, keep the chain TOGETHER
+— never split the quadra from its alameda/QI.
 
 Every block is a quadra named by a sigla (Área) + number. Known families
 (illustrative, NOT exhaustive — ANY such code behaves the same):
@@ -149,32 +152,27 @@ Segurado, odd = oeste.
 
 Rules for these addresses:
 
-1. The quadra identifier (`QUADRA` + sigla + number, `QD`/`Q` + sigla, a bare
-   `ARNO 42`, or the new-system `Quadra 203 Sul` / `Q 711 SUL` / `301 NORTE`)
-   is ONE `logradouro` span — and the leading `QUADRA`/`QD`/`Q` marker IS part
-   of it (Correios writes "Quadra …"), unlike the DF stray marker. The internal
-   way (`ALAMEDA` / `AVENIDA` `NS`/`LO` / `RUA` + number) is a SEPARATE
-   `logradouro` span. A spelled-out QUADRA/ALAMEDA behaves like QD/AL. A letter
-   suffix on the quadra number ("ARSO 132 A", "ARSE 132A") stays inside the span.
-2. A `QI` / `QR` / `QC` (quadra interna) is a locator INSIDE the quadra → `complemento`
-   (never `logradouro`; it is NOT the DF "QI n" sector). A letter is the value:
-   "QI K", "QI F".
-3. `LOTE` / `LT` → `parcela`. `CONJUNTO` / `CJ` → `complemento` (as in DF).
-   `APM`, `HM`, `AE`, `ALC …` codes → `complemento`.
-4. Units are the usual `complemento` (CASA, APARTAMENTO, SALA, LOJA, QUITINETE,
+1. The WHOLE localization chain is ONE `logradouro` span, verbatim — the quadra
+   identifier (`QUADRA` + sigla + number, `QD`/`Q` + sigla, a bare `ARNO 42`, or
+   the new-system `Quadra 203 Sul` / `Q 711 SUL` / `301 NORTE`) TOGETHER WITH
+   the internal via (`ALAMEDA` / `AVENIDA` `NS`/`LO` / `RUA` + number), the
+   `QI`/`QR`/`QC` and the area codes the CNEFE keeps in the same `nom_seglogr`
+   (`HM`, `APM`, `ALC`). Do NOT emit the quadra and the alameda as two segments.
+   Internal separators (spaces, commas, and the "E" joining two QIs) stay INSIDE
+   the span; a leading `QUADRA`/`QD`/`Q` marker is part of it (Correios writes
+   "Quadra …"), unlike the DF stray marker. A spelled-out QUADRA/ALAMEDA behaves
+   like QD/AL; a letter suffix on the quadra number ("ARSO 132 A", "ARSE 132A")
+   stays inside the span.
+2. `LOTE` / `LT` → `parcela` (the CNEFE puts it in the complement, NOT in the
+   seglogr). `CONJUNTO` / `CJ` → `complemento` (as in DF).
+3. Units are the usual `complemento` (CASA, APARTAMENTO, SALA, LOJA, QUITINETE,
    BLOCO, ANDAR, FUNDOS, FRENTE, EDIFICIO…); a named building/establishment →
    `empreendimento`.
-5. "PLANO DIRETOR NORTE/SUL" and "ST SUDESTE/NORTE/…" (setor) → `localidade`
-   (bairro). A `QUADRA` + new-system number naming the address quadra stays
-   `logradouro`.
-6. Roads are normal: TO-010/020/030/050, "ROD … VICINAL" → `logradouro`; the
+4. "PLANO DIRETOR NORTE/SUL" and "ST SUDESTE/NORTE/…" (setor) → `localidade`
+   (bairro).
+5. Roads are normal: TO-010/020/030/050, "ROD … VICINAL" → `logradouro`; the
    "KM n" is `quilometragem_via`.
-7. CNEFE FALSE FRIEND: for Palmas `nom_seglogr` bundles alameda + QI + quadra
-   into the STREET NAME ('12 QI 19 ARNO 42', 'DAS AROEIRAS HM 02 ARNO 12') and
-   `desc_localidade` holds the new-system quadra ('QUADRA 405 NORTE'). Do NOT
-   read that placement as proof that QI/HM/APM belong to the `logradouro` — the
-   Correios `logradouro` drops them.
-8. OUTSIDE the Plano Diretor (Taquaralto, Jardim Aureny I–IV, Jardim Taquari/
+6. OUTSIDE the Plano Diretor (Taquaralto, Jardim Aureny I–IV, Jardim Taquari/
    Taquari, Santa Bárbara, Santa Fé, Morada do Sol, Bela Vista, Taquaruçu,
    Buritirana…) addressing is conventional: "RUA 28 QD 75 LT 23" → `logradouro`
    "RUA 28"; `parcela` "QD 75 LT 23" (quadra+lote = parcela, the general rule).
@@ -183,18 +181,17 @@ Rules for these addresses:
 
 Examples:
 
-- "QUADRA ARSE 71 ALAMEDA 06" → `logradouro` "QUADRA ARSE 71"; `logradouro` "ALAMEDA 06"
-- "QD ARNE 12 ALAMEDA 14" → `logradouro` "QD ARNE 12"; `logradouro` "ALAMEDA 14"
-- "QUADRA 1106 SUL ALAMEDA 25, APM 06." → `logradouro` "QUADRA 1106 SUL"; `logradouro` "ALAMEDA 25"; `complemento` "APM 06"
-- "Quadra 203 Sul, Av. LO 05, APM 01, 01" → `logradouro` "Quadra 203 Sul"; `logradouro` "Av. LO 05"; `complemento` "APM 01"; `numero` "01"
-- "Q 711 SUL ALAMEDA 3 7 CONJUNTO QD-01" → `logradouro` "Q 711 SUL"; `logradouro` "ALAMEDA 3"; `numero` "7"; `complemento` "CONJUNTO QD-01"
-- "QUADRA ARSE 51 QI K" → `logradouro` "QUADRA ARSE 51"; `complemento` "QI K"
-- "Q. 405 norte, Al 13, QI 17 Plano Diretor Norte" → `logradouro` "Q. 405 norte"; `logradouro` "Al 13"; `complemento` "QI 17"; `localidade` "Plano Diretor Norte"
-- "QUADRA ARNE 81 ALAMEDA 12, APM 06/07." → `logradouro` "QUADRA ARNE 81"; `logradouro` "ALAMEDA 12"; `complemento` "APM 06/07"
-- "QUADRA ASR SE 65  QI 07" → `logradouro` "QUADRA ASR SE 65"; `complemento` "QI 07"
-- "QUADRA ACSE 01, RUA SE 05, LOTE 01, CONJUNTO 04, S/N" → `logradouro` "QUADRA ACSE 01"; `logradouro` "RUA SE 05"; `parcela` "LOTE 01"; `complemento` "CONJUNTO 04"; `numero` "S/N"
-- "QUADRA ACNO I, RUA 1, CONJUNTO 02, LOTE 44" → `logradouro` "QUADRA ACNO I"; `logradouro` "RUA 1"; `complemento` "CONJUNTO 02"; `parcela` "LOTE 44"
-- "QUADRA AV 301 NORTE AVENIDA NS 1, CJ 02 LOTE 3/5" → `logradouro` "QUADRA AV 301 NORTE"; `logradouro` "AVENIDA NS 1"; `complemento` "CJ 02"; `parcela` "LOTE 3/5"
+- "QUADRA ARSE 71 ALAMEDA 06" → `logradouro` "QUADRA ARSE 71 ALAMEDA 06"
+- "QD ARNE 12 ALAMEDA 14" → `logradouro` "QD ARNE 12 ALAMEDA 14"
+- "QUADRA ARSE 22 ALAMEDA 10 QI 5" → `logradouro` "QUADRA ARSE 22 ALAMEDA 10 QI 5"
+- "QUADRA ASR SE 65  QI 07" → `logradouro` "QUADRA ASR SE 65  QI 07" (double space kept)
+- "QUADRA ARSE 51 QI K" → `logradouro` "QUADRA ARSE 51 QI K"
+- "QUADRA ARNE 81 ALAMEDA 12, APM 06/07." → `logradouro` "QUADRA ARNE 81 ALAMEDA 12, APM 06/07"
+- "QUADRA 1106 SUL ALAMEDA 25, APM 06." → `logradouro` "QUADRA 1106 SUL ALAMEDA 25, APM 06"
+- "Quadra 203 Sul, Av. LO 05, APM 01, 01" → `logradouro` "Quadra 203 Sul, Av. LO 05, APM 01"; `numero` "01"
+- "QUADRA ACSE 01, RUA SE 05, LOTE 01, CONJUNTO 04, S/N" → `logradouro` "QUADRA ACSE 01, RUA SE 05"; `parcela` "LOTE 01"; `complemento` "CONJUNTO 04"; `numero` "S/N"
+- "QUADRA ACNO I, RUA 1, CONJUNTO 02, LOTE 44" → `logradouro` "QUADRA ACNO I, RUA 1"; `complemento` "CONJUNTO 02"; `parcela` "LOTE 44"
+- "QUADRA AV 301 NORTE AVENIDA NS 1, CJ 02 LOTE 3/5" → `logradouro` "QUADRA AV 301 NORTE AVENIDA NS 1"; `complemento` "CJ 02"; `parcela` "LOTE 3/5"
 - "RUA 10, 414 QUADRA 49. TAQUARUSSU." → `logradouro` "RUA 10"; `numero` "414"; `parcela` "QUADRA 49"; `localidade` "TAQUARUSSU" (non-Plano-Diretor bairro)
 
 ## Regional pattern: rural addresses (ribeirinho, assentamentos, ...)

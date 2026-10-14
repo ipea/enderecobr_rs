@@ -1,11 +1,9 @@
 import re
+import unicodedata
+from collections.abc import Callable, Iterable
 from dataclasses import asdict
-from collections.abc import Iterable
-from typing import Callable
 
 from crf_endereco.endereco import Endereco
-
-import unicodedata
 
 
 MARCADORES_CONHECIDOS_DF = {
@@ -105,6 +103,50 @@ MARCADORES_CONHECIDOS_DF = {
     "SIND",
     "SGCV",
     "SCE",
+}
+
+MARCADORES_CONHECIDOS_PALMAS = {
+    # Residenciais (quadrantes)
+    "ARSE",
+    "ARSO",
+    "ARNE",
+    "ARNO",
+    # Comércio e serviço
+    "AC",
+    "ACSE",
+    "ACSO",
+    "ACNE",
+    "ACNO",
+    "ACSU",
+    "ACSV",
+    "ASR",
+    # Administrativas
+    "AA",
+    "AAF",
+    "AAE",
+    "AAM",
+    "AANE",
+    "AANO",
+    "AASE",
+    "AASO",
+    # Especiais / lazer / verde
+    "AE",
+    "ALC",
+    "AVNE",
+    "AVNO",
+    "AVSE",
+    "AVSO",
+    # Públicas / moradia
+    "APM",
+    "HM",
+    # Subdivisões internas (quadra interna)
+    "QI",
+    "QD",
+    "QR",
+    "QC",
+    # Vias estruturais
+    "LO",
+    "NS",
 }
 
 SIGLAS_ESTADOS = {
@@ -214,7 +256,7 @@ class ExtratorFeature:
     # uso direto quando já tokenizado
     def tokens2features(self, toks: list[str]) -> list[dict[str, float]]:
         return [
-            {feat: 1.0 for feat in self._features_posicao(toks, i)}
+            dict.fromkeys(self._features_posicao(toks, i), 1.0)
             for i in range(len(toks))
         ]
 
@@ -251,6 +293,8 @@ class ExtratorFeature:
 
         if token in MARCADORES_CONHECIDOS_DF:
             feats.append("marcador_df")
+        if token in MARCADORES_CONHECIDOS_PALMAS:
+            feats.append("marcador_palmas")
         if token in SIGLAS_ESTADOS:
             feats.append("sigla_estado")
 
