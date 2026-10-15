@@ -39,6 +39,11 @@ pub struct SegmentoEndereco {
     pub tipo: String,
 }
 
+pub struct EnderecoSegmentado {
+    pub endereco: String,
+    pub segmentos: Vec<SegmentoEndereco>,
+}
+
 impl ExtratorFeature {
     pub fn new(distancias_vizinhaca: Option<Vec<i32>>) -> Self {
         Self {
@@ -237,7 +242,7 @@ impl SeparadorEndereco {
             .collect()
     }
 
-    pub fn segmentar(&self, tokens: &[String], tags: &[String]) -> Vec<SegmentoEndereco> {
+    fn segmentar(&self, tokens: &[String], tags: &[String]) -> Vec<SegmentoEndereco> {
         let mut segmentos = Vec::new();
         for (tok, tok_tipo) in tokens.iter().zip(tags) {
             if tok_tipo == "O" {
@@ -268,68 +273,16 @@ impl SeparadorEndereco {
         return segmentos;
     }
 
-    // TODO: tornar lógica mais legível: muitos níveis de indentação.
-    pub fn extrair_campos(&self, tokens: Vec<String>, tags: Vec<String>) -> Endereco {
-        let mut logradouro = None;
-        let mut numero = None;
-        let mut complemento = None;
-        let mut localidade = None;
-
-        let mut tipo_tag_atual: Option<String> = None;
-
-        for (tok, tag) in tokens.into_iter().zip(tags.into_iter()) {
-            if let Some(sufixo) = tag.strip_prefix("B-") {
-                tipo_tag_atual = Some(sufixo.to_string());
-                match tipo_tag_atual.as_deref() {
-                    Some("LOG") if logradouro.is_none() => logradouro = Some(tok),
-                    Some("NUM") if numero.is_none() => numero = Some(tok),
-                    Some("COM") if complemento.is_none() => complemento = Some(tok),
-                    Some("LOC") if localidade.is_none() => localidade = Some(tok),
-                    _ => {}
-                }
-            } else if tag.strip_prefix("I-").is_some() {
-                if let Some(tipo_atual) = &tipo_tag_atual {
-                    let destino = match tipo_atual.as_str() {
-                        "LOG" => &mut logradouro,
-                        "NUM" => &mut numero,
-                        "COM" => &mut complemento,
-                        "LOC" => &mut localidade,
-                        _ => continue,
-                    };
-                    if let Some(last) = destino {
-                        last.push(' ');
-                        last.push_str(&tok);
-                    }
-                }
-            } else {
-                tipo_tag_atual = None;
-            }
-        }
-
-        Endereco {
-            logradouro,
-            numero,
-            complemento,
-            localidade,
-        }
-    }
-
-    fn separar_endereco(&self, texto: &str) -> Endereco {
+    fn segmentar_endereco(&self, texto: &str) -> EnderecoSegmentado {
         let mut tagger = self.model.tagger().unwrap();
         let tokens = self.extrator.tokenize(texto);
         let atributos = self.tokens2attributes(&tokens);
 
         let tags = tagger.tag(&atributos).unwrap();
-        self.extrair_campos(tokens, tags)
-    }
-
-    fn segmentar_endereco(&self, texto: &str) -> Vec<SegmentoEndereco> {
-        let mut tagger = self.model.tagger().unwrap();
-        let tokens = self.extrator.tokenize(texto);
-        let atributos = self.tokens2attributes(&tokens);
-
-        let tags = tagger.tag(&atributos).unwrap();
-        self.segmentar(&tokens, &tags)
+        EnderecoSegmentado {
+            endereco: texto.to_string(),
+            segmentos: self.segmentar(&tokens, &tags),
+        }
     }
 }
 
@@ -342,57 +295,47 @@ fn criar_separador() -> SeparadorEndereco {
     SeparadorEndereco::new()
 }
 
-pub fn segmentar_endereco(texto: &str) -> Vec<SegmentoEndereco> {
+pub fn segmentar_endereco(texto: &str) -> EnderecoSegmentado {
     SEPARADOR.segmentar_endereco(texto)
 }
 
-pub fn segmentar_endereco_json(texto: &str) -> String {
-    let segmentos = SEPARADOR.segmentar_endereco(texto);
+impl EnderecoSegmentado {
+    pub fn obter_segmentos_json(&self) -> String {
+        let json = self
+            .segmentos
+            .iter()
+            .map(|segmento| {
+                format!(
+                    "{{\"tipo\": \"{}\", \"valor\": \"{}\"}}",
+                    segmento.tipo,
+                    segmento.valor.replace("\\", "\\\\").replace("\"", "\\\"")
+                )
+            })
+            .join(", ");
 
-    let json = segmentos
-        .iter()
-        .map(|segmento| {
-            format!(
-                "{{\"tipo\": \"{}\", \"valor\": \"{}\"}}",
-                segmento.tipo,
-                segmento.valor.replace("\\", "\\\\").replace("\"", "\\\"")
-            )
-        })
-        .join(", ");
+        return format!("[{}]", json);
+    }
+    pub fn como_endereco(&self) -> Endereco {
+        let mut res = Endereco::default();
+        for seg in &self.segmentos {
+            let atributo_opt = match seg.tipo.as_str() {
+                "logradouro" => Some(res.logradouro.get_or_insert_default()),
+                "numero" => Some(res.numero.get_or_insert_default()),
+                "modificador_numero" => Some(res.numero.get_or_insert_default()),
+                "complemento" => Some(res.complemento.get_or_insert_default()),
+                "localidade" => Some(res.localidade.get_or_insert_default()),
+                _ => None,
+            };
 
-    return format!("[{}]", json);
-}
-
-/// Tenta separa um endereço bruto utilizando um pequeno modelo probabilístico embutido nesta biblioteca.
-///
-/// # Exemplo:
-/// ```
-/// use enderecobr_rs::{separar_endereco, Endereco};
-/// let endereco = separar_endereco("av n sra copacabana, 123, apt 302");
-/// assert_eq!(Endereco {
-///     logradouro: Some("av n sra copacabana".to_string()),
-///     numero: Some("123".to_string()),
-///     complemento: Some("apt 302".to_string()),
-///     localidade: None}, endereco);
-/// ```
-///
-pub fn separar_endereco(texto: &str) -> Endereco {
-    let separador = &*SEPARADOR;
-    separador.separar_endereco(texto)
-}
-
-/// Função utilitária que separa o endereço recebido, padroniza seus campos,
-/// e formata eles numa nova string, separando-os por vírgula.
-///
-/// # Exemplo:
-/// ```
-/// use enderecobr_rs::padronizar_endereco_bruto;
-/// let endereco = padronizar_endereco_bruto("av n sra copacabana, 123, apt 302");
-/// assert_eq!(endereco, "AVENIDA NOSSA SENHORA COPACABANA, 123, APARTAMENTO 302");
-/// ```
-///
-pub fn padronizar_endereco_bruto(texto: &str) -> String {
-    separar_endereco(texto).endereco_padronizado().formatar()
+            if let Some(atributo) = atributo_opt {
+                if !atributo.is_empty() {
+                    atributo.push(' ');
+                }
+                atributo.push_str(seg.valor.as_str());
+            }
+        }
+        return res;
+    }
 }
 
 // Constantes usadas para criar as features do CRF.

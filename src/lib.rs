@@ -402,16 +402,7 @@ pub use numero::padronizar_numeros_para_string;
 pub use tipo_logradouro::padronizar_tipo_logradouro;
 
 #[cfg(feature = "experimental")]
-pub use separador_endereco::padronizar_endereco_bruto;
-
-#[cfg(feature = "experimental")]
-pub use separador_endereco::separar_endereco;
-
-#[cfg(feature = "experimental")]
 pub use separador_endereco::segmentar_endereco;
-
-#[cfg(feature = "experimental")]
-use crate::separador_endereco::segmentar_endereco_json;
 
 /// Função utilitária utilizada nas ferramentas de CLI para selecionar um padronizador facilmente
 /// via uma string descritiva.
@@ -432,18 +423,18 @@ pub fn obter_padronizador_por_tipo(tipo: &str) -> Result<fn(&str) -> String, &st
         "dado_faltante" => Ok(|x| is_dado_faltante(x).to_string()),
 
         #[cfg(feature = "experimental")]
-        "completo" => Ok(padronizar_endereco_bruto),
+        "segmentar" => Ok(|val| segmentar_endereco(val).obter_segmentos_json()),
 
         #[cfg(feature = "experimental")]
-        "separar" => Ok(|val| format!("{:?}", separar_endereco(val))),
+        "separar" => Ok(|val| segmentar_endereco(val).como_endereco().formatar()),
 
         #[cfg(feature = "experimental")]
-        "segmentar" => Ok(|val| segmentar_endereco_json(val)),
-
-        #[cfg(feature = "experimental")]
-        "separar_padronizar" => {
-            Ok(|val| format!("{:?}", separar_endereco(val).endereco_padronizado()))
-        }
+        "separar_padronizar" => Ok(|val| {
+            segmentar_endereco(val)
+                .como_endereco()
+                .endereco_padronizado()
+                .formatar()
+        }),
 
         _ => Err("Nenhum padronizador encontrado"),
     }
