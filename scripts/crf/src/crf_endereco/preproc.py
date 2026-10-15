@@ -1,10 +1,9 @@
-import re
+import regex
 import unicodedata
 from collections.abc import Callable, Iterable
 from dataclasses import asdict
 
 from crf_endereco.endereco import Endereco
-
 
 MARCADORES_CONHECIDOS_DF = {
     "SQN",
@@ -181,7 +180,7 @@ SIGLAS_ESTADOS = {
 
 
 def tokenize(text: str):
-    return re.findall(r"\d+|\w+|[^\s\w]", text)
+    return regex.findall(r"\d+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]", text)
 
 
 class RotuladorEnderecoBIO:
@@ -239,10 +238,11 @@ def normalize(text: str):
     return "".join([c for c in normalized if c.isascii()])
 
 
+PONTUACAO = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~¨´°§¶·«»–—…“”‘’")
+
+
 def is_pontuacao(word: str) -> bool:
-    if len(word) == 0:
-        return False
-    return word[0] in ",.;/:?!@#$%¨&*()-+[]{}\"'\\|"
+    return bool(word) and word[0] in PONTUACAO
 
 
 class ExtratorFeature:
@@ -287,8 +287,8 @@ class ExtratorFeature:
         feats.append(token)
 
         tam_palavra = len(token)
-        if tam_palavra >= 7:
-            tam_palavra = "7+"
+        if tam_palavra >= 10:
+            tam_palavra = "10+"
         feats.append(f"tam:{tam_palavra}")
 
         if token in MARCADORES_CONHECIDOS_DF:
@@ -309,7 +309,7 @@ class ExtratorFeature:
             feats.append(token[0])
         elif token.isdigit():
             feats.remove(token)
-            token = re.sub("^0+", "", token)
+            token = regex.sub("^0+", "", token)
             feats.append("is_digit")
             tam_palavra = len(token)
             if tam_palavra >= 7:
@@ -351,13 +351,15 @@ class ExtratorFeature:
 
         feats += self._features_token(sent[posicao_vizinho], sufixo)
 
-        # Caso o vizinho solicitado não seja na posição esperada
-        if posicao_vizinho != indice_inicial + distancia:
-            tem_pontuacao = [
-                is_pontuacao(tok)
-                for tok in sent[posicao_vizinho_anterior:posicao_vizinho]
-            ]
-            if tem_pontuacao:
+        # Caso o vizinho solicitado não esteja na posição esperada, algum token
+        # (tipicamente pontuação) foi pulado pela busca de próxima palavra.
+        if (
+            posicao_vizinho != indice_inicial + distancia
+            and posicao_vizinho_anterior is not None
+        ):
+            inicio = min(posicao_vizinho_anterior, posicao_vizinho)
+            fim = max(posicao_vizinho_anterior, posicao_vizinho)
+            if any(is_pontuacao(tok) for tok in sent[inicio : fim + 1]):
                 feats.append(f"tem_pontuacao:{sufixo}")
 
         return feats

@@ -21,36 +21,7 @@ use crate::{estado::ESTADOS, Endereco};
 use unicode_normalization::UnicodeNormalization;
 
 fn is_pontuacao(word: &str) -> bool {
-    let primeiro_char = word.as_bytes().first();
-    matches!(
-        primeiro_char,
-        Some(
-            b',' | b'.'
-                | b';'
-                | b':'
-                | b'/'
-                | b'?'
-                | b'!'
-                | b'@'
-                | b'#'
-                | b'$'
-                | b'%'
-                | b'&'
-                | b'_'
-                | b'('
-                | b')'
-                | b'-'
-                | b'+'
-                | b'['
-                | b']'
-                | b'{'
-                | b'}'
-                | b'"'
-                | b'\''
-                | b'\\'
-                | b'|'
-        )
-    )
+    word.chars().next().is_some_and(|c| PONTUACAO.contains(&c))
 }
 
 pub struct SeparadorEndereco {
@@ -72,7 +43,10 @@ impl ExtratorFeature {
     pub fn new(distancias_vizinhaca: Option<Vec<i32>>) -> Self {
         Self {
             distancias_vizinhaca: distancias_vizinhaca.unwrap_or(vec![-2, -1, 1, 2]),
-            regex_tokenizer: Regex::new(r"\d+|\w+|[^\s\w]").unwrap(),
+            // \p{L} => caracteres unicode
+            // \p{N} => números unicode
+            // Parece que tinha diferença entre as implementações devido às regexes
+            regex_tokenizer: Regex::new(r"\d+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]").unwrap(),
         }
     }
 
@@ -115,8 +89,8 @@ impl ExtratorFeature {
         feats.push(token_norm.clone());
 
         let mut tam = token_norm.len();
-        let mut feat_tam = if tam >= 7 {
-            "7+".to_string()
+        let mut feat_tam = if tam >= 10 {
+            "10+".to_string()
         } else {
             tam.to_string()
         };
@@ -217,7 +191,7 @@ impl ExtratorFeature {
         let mut i = indice_inicial as i32 + direcao;
         while i >= 0 && (i as usize) < sent.len() {
             let tok = &sent[i as usize];
-            if tok.bytes().all(|c| c.is_ascii_alphanumeric()) {
+            if !tok.is_empty() && tok.chars().all(|c| c.is_alphanumeric()) {
                 return Some(i as usize);
             }
             i += direcao;
@@ -283,8 +257,10 @@ impl SeparadorEndereco {
             }
             if bio == "I" {
                 if let Some(ultimo_segmento) = segmentos.last_mut() {
-                    ultimo_segmento.valor.push(' ');
-                    ultimo_segmento.valor.push_str(tok);
+                    if ultimo_segmento.tipo == tipo.to_lowercase() {
+                        ultimo_segmento.valor.push(' ');
+                        ultimo_segmento.valor.push_str(tok);
+                    }
                 }
             }
         }
@@ -453,6 +429,10 @@ static MARCADORES_CONHECIDOS_PALMAS: LazyLock<FxHashSet<String>> = LazyLock::new
 
 static SIGLAS_ESTADOS: LazyLock<FxHashSet<String>> =
     LazyLock::new(|| FxHashSet::from_iter(ESTADOS.iter().map(|e| e.sigla.to_string())));
+
+static PONTUACAO: LazyLock<FxHashSet<char>> = LazyLock::new(|| {
+    FxHashSet::from_iter("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~¨´°§¶·«»–—…“”‘’".chars())
+});
 
 #[cfg(test)]
 mod tests {
