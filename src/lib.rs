@@ -407,6 +407,12 @@ pub use separador_endereco::padronizar_endereco_bruto;
 #[cfg(feature = "experimental")]
 pub use separador_endereco::separar_endereco;
 
+#[cfg(feature = "experimental")]
+pub use separador_endereco::segmentar_endereco;
+
+#[cfg(feature = "experimental")]
+use crate::separador_endereco::segmentar_endereco_json;
+
 /// Função utilitária utilizada nas ferramentas de CLI para selecionar um padronizador facilmente
 /// via uma string descritiva.
 pub fn obter_padronizador_por_tipo(tipo: &str) -> Result<fn(&str) -> String, &str> {
@@ -430,6 +436,9 @@ pub fn obter_padronizador_por_tipo(tipo: &str) -> Result<fn(&str) -> String, &st
 
         #[cfg(feature = "experimental")]
         "separar" => Ok(|val| format!("{:?}", separar_endereco(val))),
+
+        #[cfg(feature = "experimental")]
+        "segmentar" => Ok(|val| segmentar_endereco_json(val)),
 
         #[cfg(feature = "experimental")]
         "separar_padronizar" => {

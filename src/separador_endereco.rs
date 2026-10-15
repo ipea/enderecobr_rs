@@ -12,9 +12,11 @@ use std::sync::LazyLock;
 
 use crfsuite::{Attribute, Model};
 
+use itertools::Itertools;
 use regex::Regex;
+use rustc_hash::FxHashSet;
 
-use crate::Endereco;
+use crate::{estado::ESTADOS, Endereco};
 
 use unicode_normalization::UnicodeNormalization;
 
@@ -119,6 +121,16 @@ impl ExtratorFeature {
             tam.to_string()
         };
         feats.push(format!("tam:{}", feat_tam));
+
+        if MARCADORES_CONHECIDOS_DF.contains(&token_norm) {
+            feats.push("marcador_df".to_string());
+        }
+        if MARCADORES_CONHECIDOS_PALMAS.contains(&token_norm) {
+            feats.push("marcador_palmas".to_string());
+        }
+        if SIGLAS_ESTADOS.contains(&token_norm) {
+            feats.push("sigla_estado".to_string());
+        }
 
         if token_norm.is_empty() {
             feats.push("is_unknown".to_string());
@@ -251,9 +263,8 @@ impl SeparadorEndereco {
             .collect()
     }
 
-    pub fn segmentar_endereco(&self, tokens: &[String], tags: &[String]) -> Vec<SegmentoEndereco> {
-        let segmentos = Vec::new();
-        let mut ultimo_segmento_opt: Option<SegmentoEndereco> = None;
+    pub fn segmentar(&self, tokens: &[String], tags: &[String]) -> Vec<SegmentoEndereco> {
+        let mut segmentos = Vec::new();
         for (tok, tok_tipo) in tokens.iter().zip(tags) {
             if tok_tipo == "O" {
                 continue;
@@ -264,15 +275,14 @@ impl SeparadorEndereco {
             };
 
             if bio == "B" {
-                segmento = SegmentoEndereco {
-                    valor: tok.to_owned(),
+                let segmento = SegmentoEndereco {
+                    valor: tok.to_string(),
                     tipo: tipo.to_string().to_lowercase(),
                 };
                 segmentos.push(segmento);
-                ultimo_segmento_opt = Some(segmento);
             }
             if bio == "I" {
-                if let Some(mut ultimo_segmento) = ultimo_segmento_opt {
+                if let Some(ultimo_segmento) = segmentos.last_mut() {
                     ultimo_segmento.valor.push(' ');
                     ultimo_segmento.valor.push_str(tok);
                 }
@@ -343,7 +353,7 @@ impl SeparadorEndereco {
         let atributos = self.tokens2attributes(&tokens);
 
         let tags = tagger.tag(&atributos).unwrap();
-        self.segmentar_endereco(&tokens, &tags)
+        self.segmentar(&tokens, &tags)
     }
 }
 
@@ -354,6 +364,26 @@ static SEPARADOR: LazyLock<SeparadorEndereco> = LazyLock::new(criar_separador);
 
 fn criar_separador() -> SeparadorEndereco {
     SeparadorEndereco::new()
+}
+
+pub fn segmentar_endereco(texto: &str) -> Vec<SegmentoEndereco> {
+    SEPARADOR.segmentar_endereco(texto)
+}
+
+pub fn segmentar_endereco_json(texto: &str) -> String {
+    let segmentos = SEPARADOR.segmentar_endereco(texto);
+
+    let json = segmentos
+        .iter()
+        .map(|segmento| {
+            format!(
+                "{{\"tipo\": \"{}\", \"valor\": \"{}\"}}",
+                segmento.tipo, segmento.valor
+            )
+        })
+        .join(", ");
+
+    return format!("[{}]", json);
 }
 
 /// Tenta separa um endereço bruto utilizando um pequeno modelo probabilístico embutido nesta biblioteca.
@@ -388,6 +418,41 @@ pub fn padronizar_endereco_bruto(texto: &str) -> String {
     separar_endereco(texto).endereco_padronizado().formatar()
 }
 
+// Constantes usadas para criar as features do CRF.
+
+static MARCADORES_CONHECIDOS_DF: LazyLock<FxHashSet<String>> = LazyLock::new(|| {
+    FxHashSet::from_iter(
+        [
+            "SQN", "SQS", "SQNW", "SQSW", "SCLN", "SCLS", "SCN", "SCS", "SGAN", "SGAS", "SEPN",
+            "SEPS", "SRTVN", "SRTVS", "SHN", "SHS", "SHIS", "SHIN", "SHLS", "SHLN", "SHCGN",
+            "SHCES", "SHCE", "SHTQ", "SMPW", "SAAN", "SAS", "SAUS", "SAUN", "SBS", "SDS", "SDN",
+            "SDMC", "SIG", "SIA", "SIBS", "SCES", "SMHN", "SMLN", "SRES", "SRL", "SO", "SOPI",
+            "SOFS", "CLN", "CLS", "CLNW", "ADE", "AOS", "AR", "CCSW", "CSG", "CRS", "CSA", "CSB",
+            "CSD", "CNB", "CND", "CNG", "CNL", "CNM", "EQ", "EQNM", "EQNO", "EQNP", "EQS", "QI",
+            "QE", "QS", "QR", "QN", "QD", "QNM", "QNN", "QNO", "QNP", "QNA", "QNC", "QND", "QNE",
+            "QNF", "QNG", "QNH", "QNJ", "QNL", "QMS", "QMSW", "QRC", "QRSW", "QSB", "QSC", "QSE",
+            "QRO", "SIND", "SGCV", "SCE",
+        ]
+        .iter()
+        .map(|x| x.to_string()),
+    )
+});
+
+static MARCADORES_CONHECIDOS_PALMAS: LazyLock<FxHashSet<String>> = LazyLock::new(|| {
+    FxHashSet::from_iter(
+        [
+            "ARSE", "ARSO", "ARNE", "ARNO", "AC", "ACSE", "ACSO", "ACNE", "ACNO", "ACSU", "ACSV",
+            "ASR", "AA", "AAF", "AAE", "AAM", "AANE", "AANO", "AASE", "AASO", "AE", "ALC", "AVNE",
+            "AVNO", "AVSE", "AVSO", "APM", "HM", "QI", "QD", "QR", "QC", "LO", "NS",
+        ]
+        .iter()
+        .map(|x| x.to_string()),
+    )
+});
+
+static SIGLAS_ESTADOS: LazyLock<FxHashSet<String>> =
+    LazyLock::new(|| FxHashSet::from_iter(ESTADOS.iter().map(|e| e.sigla.to_string())));
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,17 +473,17 @@ mod tests {
 
     #[test]
     fn test_normalize_remove_acentos() {
-        assert_eq!(normalize("ação"), "acao");
+        assert_eq!(normalize("ação"), "ACAO");
     }
 
     #[test]
     fn test_normalize_maiusculas_e_minusculas() {
-        assert_eq!(normalize("ÁbÇ"), "AbC");
+        assert_eq!(normalize("ÁbÇ"), "ABC");
     }
 
     #[test]
     fn test_normalize_sem_acentos_retorna_igual() {
-        assert_eq!(normalize("Rua"), "Rua");
+        assert_eq!(normalize("RUA"), "RUA");
     }
 
     #[test]

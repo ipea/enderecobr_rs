@@ -6,7 +6,7 @@ use crate::{normalizar, Padronizador};
 // TODO: ver se essa é a melhor forma de definir essa struct
 
 #[derive(Debug, Clone, Copy)]
-struct Estado {
+pub struct Estado {
     pub codigo: &'static str,
     pub nome: &'static str,
     pub sigla: &'static str,
@@ -156,7 +156,7 @@ pub fn padronizar_estados_para_nome(valor: &str) -> &'static str {
 
 // ============ Dados Brutos ============
 
-const ESTADOS: [Estado; 27] = [
+pub const ESTADOS: [Estado; 27] = [
     Estado {
         codigo: "11",
         nome: "RONDONIA",
