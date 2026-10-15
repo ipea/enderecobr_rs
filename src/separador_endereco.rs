@@ -378,7 +378,8 @@ pub fn segmentar_endereco_json(texto: &str) -> String {
         .map(|segmento| {
             format!(
                 "{{\"tipo\": \"{}\", \"valor\": \"{}\"}}",
-                segmento.tipo, segmento.valor
+                segmento.tipo,
+                segmento.valor.replace("\"", "\\\"")
             )
         })
         .join(", ");
