@@ -4,7 +4,6 @@ import sqlite3
 from collections import Counter, defaultdict
 from pprint import pprint
 
-import duckdb
 import sklearn_crfsuite
 from sklearn_crfsuite import metrics
 
@@ -86,6 +85,31 @@ def erros_mais_comuns_por_categoria(x, y_true, y_pred, categorias, n=20):
     return errors.most_common(n)
 
 
+def acuracia_completa_por_categoria(y_true, y_pred, categorias):
+    for categoria_pos in range(len(categorias[0])):
+        cat_dict = defaultdict(lambda: (list(), list()))
+
+        for y_t, y_p, cs in zip(y_true, y_pred, categorias):
+            categoria = cs[categoria_pos]
+            cat_dict[categoria][0].append(y_t)
+            cat_dict[categoria][1].append(y_p)
+
+        resultado = []
+        for categoria, dados in cat_dict.items():
+            resultado.append(
+                (
+                    categoria,
+                    metrics.sequence_accuracy_score(dados[0], dados[1]),
+                    acuracia_proporcional(dados[0], dados[1]),
+                )
+            )
+        resultado.sort(key=lambda x: x[1], reverse=True)
+
+        for cat, acc_total, acc_prop in resultado:
+            print(f"{cat:<15} | {100.0 * acc_total:.2f} | {100.0 * acc_prop:.2f}")
+        print()
+
+
 def show(sent: list[str], y_true: list[str], y_pred: list[str]):
     if len(sent) == 0:
         return
@@ -136,9 +160,12 @@ def avaliar(
     for l in labels:
         acertos, n = acuracia_labels(y, y_pred, l)
         print(f"Acurácia de {l}: {acertos}/{n} = {acertos / n:.2}")
-
     print()
 
+    print("Acurácia Completa por categorias:")
+    acuracia_completa_por_categoria(y, y_pred, categorias)
+
+    print()
     print("Erros Token:")
     pprint(erros_mais_comuns_token(x, y, y_pred))
 
