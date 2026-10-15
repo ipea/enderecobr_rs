@@ -379,7 +379,7 @@ pub fn segmentar_endereco_json(texto: &str) -> String {
             format!(
                 "{{\"tipo\": \"{}\", \"valor\": \"{}\"}}",
                 segmento.tipo,
-                segmento.valor.replace("\"", "\\\"")
+                segmento.valor.replace("\\", "\\\\").replace("\"", "\\\"")
             )
         })
         .join(", ");

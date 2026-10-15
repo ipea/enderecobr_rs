@@ -28,7 +28,7 @@ def main(
     extrator = ExtratorFeature()
 
     con = sqlite3.connect("./dataset.sqlite")
-    consulta = con.execute("select endereco from enderecos limit 10999;")
+    consulta = con.execute("select endereco from enderecos;")
 
     enderecos = [str(e[0]) for e in consulta.fetchall()]
     segmentos_python: list[list[dict[str, str]]] = []
@@ -63,7 +63,14 @@ def main(
     for endereco, resposta_rust_str, segmento_python in zip(
         enderecos, saida.splitlines(), segmentos_python, strict=True
     ):
-        segmento_rust = json.loads(resposta_rust_str)
+        try:
+            segmento_rust = json.loads(resposta_rust_str)
+        except Exception as e:
+            print("=============")
+            print(f"Erro ao processar '{endereco}': {e}")
+            print(f"Bruto: {resposta_rust_str}")
+            break
+
         diferente = False
         for seg_rust, seg_python in zip(segmento_rust, segmento_python):
             if seg_rust.get("tipo") != seg_python.get("tipo") or seg_rust.get(
@@ -85,7 +92,9 @@ def main(
 
     con.close()
     print("------")
-    print(f"Total Casos Diferentes: {n_diferentes}")
+    print(
+        f"Total Casos Diferentes: {n_diferentes}/{len(enderecos)} - {n_diferentes / len(enderecos):.2f}%"
+    )
 
 
 if __name__ == "__main__":
