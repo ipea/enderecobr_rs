@@ -16,7 +16,7 @@ struct Resultado {
 
 fn temporizar(separador: &SeparadorEndereco, texto: &str) -> Resultado {
     let mut tagger = separador.model.tagger().unwrap();
-    let tokens = separador.extrator.tokenize(texto);
+    let (tokens, _) = separador.extrator.tokenize(texto);
 
     let inicio_feats = Instant::now();
     let atributos = separador.tokens2attributes(&tokens);

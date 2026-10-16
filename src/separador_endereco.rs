@@ -1,12 +1,14 @@
 #![cfg(feature = "experimental")]
 //! # Exemplo de uso
 //! ```
-//! use enderecobr_rs::{Endereco, padronizar_endereco_bruto, separar_endereco};
-//! let endereco_separado = Endereco { logradouro: Some("av n sra copacabana".to_string()), numero: Some("123".to_string()), complemento: Some("apt 301".to_string()), ..Default::default() };
-//! assert_eq!(separar_endereco("av n sra copacabana, 123, apt 301"), endereco_separado);
+//! use enderecobr_rs::{Endereco, segmentar_endereco};
+//! let endereco_segmentado = segmentar_endereco("av n sra copacabana, 123, apt
+//! 301").como_endereco();
+//! let endereco_esperado = Endereco { logradouro: Some("av n sra copacabana".to_string()), numero: Some("123".to_string()), complemento: Some("apt 301".to_string()), ..Default::default() };
+//! assert_eq!(endereco_segmentado, endereco_esperado);
 //!
 //! let endereco_padronizado_esperado = Endereco { logradouro: Some("AVENIDA NOSSA SENHORA COPACABANA".to_string()), numero: Some("123".to_string()), complemento: Some("APARTAMENTO 301".to_string()), ..Default::default() };
-//! assert_eq!(endereco_separado.endereco_padronizado(), endereco_padronizado_esperado);
+//! assert_eq!(endereco_segmentado.endereco_padronizado(), endereco_padronizado_esperado);
 //! ```
 use std::sync::LazyLock;
 
@@ -546,7 +548,7 @@ mod tests {
     fn test_token2features_palavra_longa() {
         let feats = token2features(&["Inconstitucionalissimamente"], 0);
         assert!(feats.contains(&"0:INCONSTITUCIONALISSIMAMENTE".to_string()));
-        assert!(feats.contains(&"0:tam:7+".to_string()));
+        assert!(feats.contains(&"0:tam:10+".to_string()));
         assert!(feats.contains(&"0:is_alpha".to_string()));
         assert!(feats.contains(&"BOS".to_string()));
         assert!(feats.contains(&"EOS".to_string()));
