@@ -58,7 +58,7 @@ impl ExtratorFeature {
     }
 
     pub fn sent2features(&self, text: &str) -> Vec<Vec<String>> {
-        let toks = self.tokenize(text);
+        let (toks, _) = self.tokenize(text);
         self.tokens2features(&toks)
     }
 
@@ -207,11 +207,11 @@ impl ExtratorFeature {
     }
 
     // Funções auxiliares de exemplo
-    pub fn tokenize(&self, text: &str) -> Vec<String> {
+    pub fn tokenize(&self, text: &str) -> (Vec<String>, Vec<usize>) {
         self.regex_tokenizer
             .find_iter(text)
-            .map(|m| m.as_str().to_string())
-            .collect()
+            .map(|m| (m.as_str().to_string(), m.start()))
+            .unzip()
     }
 }
 
@@ -244,9 +244,15 @@ impl SeparadorEndereco {
             .collect()
     }
 
-    fn segmentar(&self, tokens: &[String], tags: &[String]) -> Vec<SegmentoEndereco> {
+    fn segmentar(
+        &self,
+        original: &str,
+        tokens: &[String],
+        tags: &[String],
+        offsets: &[usize],
+    ) -> Vec<SegmentoEndereco> {
         let mut segmentos = Vec::new();
-        for (tok, tok_tipo) in tokens.iter().zip(tags) {
+        for ((tok, tok_tipo), offset) in tokens.iter().zip(tags).zip(offsets) {
             if tok_tipo == "O" {
                 continue;
             }
@@ -265,7 +271,15 @@ impl SeparadorEndereco {
             if bio == "I" {
                 if let Some(ultimo_segmento) = segmentos.last_mut() {
                     if ultimo_segmento.tipo == tipo.to_lowercase() {
-                        ultimo_segmento.valor.push(' ');
+                        if *offset > 0usize
+                            && original
+                                .chars()
+                                .nth(offset - 1)
+                                .map(|c| c.is_whitespace())
+                                .unwrap_or(false)
+                        {
+                            ultimo_segmento.valor.push(' ');
+                        }
                         ultimo_segmento.valor.push_str(tok);
                     }
                 }
@@ -277,13 +291,13 @@ impl SeparadorEndereco {
 
     fn segmentar_endereco(&self, texto: &str) -> EnderecoSegmentado {
         let mut tagger = self.model.tagger().unwrap();
-        let tokens = self.extrator.tokenize(texto);
+        let (tokens, offsets) = self.extrator.tokenize(texto);
         let atributos = self.tokens2attributes(&tokens);
 
         let tags = tagger.tag(&atributos).unwrap();
         EnderecoSegmentado {
             endereco: texto.to_string(),
-            segmentos: self.segmentar(&tokens, &tags),
+            segmentos: self.segmentar(texto, &tokens, &tags, &offsets),
         }
     }
 }
@@ -314,11 +328,12 @@ impl EnderecoSegmentado {
                 }
                 "numero" => Some(res.numero.get_or_insert_default()),
                 "parcela"
-                    if self
-                        .segmentos
-                        .get(i - 1)
-                        .filter(|anterior| anterior.tipo == "logradouro")
-                        .is_some() =>
+                    if i > 0
+                        && self
+                            .segmentos
+                            .get(i - 1)
+                            .filter(|anterior| anterior.tipo == "logradouro")
+                            .is_some() =>
                 {
                     Some(res.logradouro.get_or_insert_default())
                 }
@@ -399,7 +414,7 @@ mod tests {
     }
 
     fn tokenize(sent: &str) -> Vec<String> {
-        ExtratorFeature::new(None).tokenize(sent)
+        ExtratorFeature::new(None).tokenize(sent).0
     }
 
     #[test]
