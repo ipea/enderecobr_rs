@@ -4,12 +4,12 @@ use clap::Parser;
 use enderecobr_rs::{
     padronizar_bairros, padronizar_cep_leniente, padronizar_complementos,
     padronizar_estados_para_nome, padronizar_logradouros, padronizar_municipios,
-    padronizar_numeros, padronizar_tipo_logradouro,
+    padronizar_numeros, padronizar_tipo_logradouro, separador_endereco,
 };
 use polars::prelude::{
-    col, sync_on_close::SyncOnCloseType, Column, DataType, Field, IntoColumn, LazyFrame,
-    ParquetCompression, ParquetWriteOptions, PlPath, ScanArgsParquet, Schema, SinkOptions,
-    StatisticsOptions, StringChunked,
+    col, sync_on_close::SyncOnCloseType, Column, DataFrame, DataType, Field, IntoColumn, LazyFrame,
+    ParquetCompression, ParquetWriteOptions, PlPath, PlSmallStr, PolarsError, PolarsResult,
+    ScanArgsParquet, Schema, SinkOptions, StatisticsOptions, StringChunked,
 };
 
 #[derive(Debug, Clone)]
@@ -94,6 +94,9 @@ struct Args {
     #[arg(short('n'), long)]
     limite: Option<u32>,
 
+    #[arg(short('e'), long)]
+    endereco: Option<String>,
+
     /// Especificação dos campos a serem processados.
     #[arg(
         short('c'),
@@ -137,6 +140,50 @@ fn processar_campo(df: LazyFrame, campo: &EspecificacaoCampo, schema: &Arc<Schem
     )
 }
 
+fn expandir_endereco(col: Column) -> Result<Column, PolarsError> {
+    let enderecos_chunk = col.str().unwrap();
+
+    let mut logr_vec = Vec::with_capacity(enderecos_chunk.len());
+    let mut num_vec = Vec::with_capacity(enderecos_chunk.len());
+    let mut comp_vec = Vec::with_capacity(enderecos_chunk.len());
+    let mut loc_vec = Vec::with_capacity(enderecos_chunk.len());
+    let mut cep_vec = Vec::with_capacity(enderecos_chunk.len());
+
+    for opt in enderecos_chunk {
+        if let Some(endereco_str) = opt {
+            let endereco = separador_endereco::segmentar_endereco(endereco_str)
+                .como_endereco()
+                .endereco_padronizado();
+
+            logr_vec.push(endereco.logradouro);
+            num_vec.push(endereco.numero);
+            comp_vec.push(endereco.complemento);
+            loc_vec.push(endereco.localidade);
+            cep_vec.push(endereco.cep);
+        } else {
+            logr_vec.push(None);
+            num_vec.push(None);
+            comp_vec.push(None);
+            loc_vec.push(None);
+            cep_vec.push(None);
+        }
+    }
+
+    let df = DataFrame::new(vec![
+        Column::new(PlSmallStr::from_str("logradouro"), logr_vec),
+        Column::new(PlSmallStr::from_str("numero"), num_vec),
+        Column::new(PlSmallStr::from_str("complemento"), comp_vec),
+        Column::new(PlSmallStr::from_str("localidade"), loc_vec),
+        Column::new(PlSmallStr::from_str("cep"), cep_vec),
+    ])
+    .unwrap();
+
+    PolarsResult::Ok(
+        df.into_struct(PlSmallStr::from_str("endereco_processado"))
+            .into_column(),
+    )
+}
+
 fn main() {
     let args = Args::parse();
     // println!("{:#?}", args);
@@ -174,7 +221,56 @@ fn main() {
             .map(col)
             .collect();
 
-        df = df.select(colunas_finais);
+        // Evita `select([])`, que zeraria o dataframe quando nenhum campo foi
+        // computado nem solicitado para manter (ex.: apenas `-e`).
+        if !colunas_finais.is_empty() {
+            df = df.select(colunas_finais);
+        }
+    }
+
+    if let Some(campo_endereco) = args.endereco {
+        df = df
+            .select([col(campo_endereco.as_str())])
+            // .limit(10000)
+            .with_column(
+                col(campo_endereco.as_str())
+                    .map(expandir_endereco, |_, _| {
+                        Ok(Field::new(
+                            "endereco_processado".into(),
+                            DataType::Struct(vec![
+                                Field::new("logradouro".into(), DataType::String),
+                                Field::new("numero".into(), DataType::String),
+                                Field::new("complemento".into(), DataType::String),
+                                Field::new("localidade".into(), DataType::String),
+                                Field::new("cep".into(), DataType::String),
+                            ]),
+                        ))
+                    })
+                    .alias("endereco_processado"),
+            )
+            .with_columns(vec![
+                col("endereco_processado")
+                    .struct_()
+                    .field_by_name("logradouro")
+                    .alias("logradouro_extraido"),
+                col("endereco_processado")
+                    .struct_()
+                    .field_by_name("numero")
+                    .alias("numero_extraido"),
+                col("endereco_processado")
+                    .struct_()
+                    .field_by_name("complemento")
+                    .alias("complemento_extraido"),
+                col("endereco_processado")
+                    .struct_()
+                    .field_by_name("localidade")
+                    .alias("localidade_extraido"),
+                col("endereco_processado")
+                    .struct_()
+                    .field_by_name("cep")
+                    .alias("cep_extraido"),
+            ])
+            .drop(col("endereco_processado").into_selector().unwrap());
     }
 
     let resultado = df
