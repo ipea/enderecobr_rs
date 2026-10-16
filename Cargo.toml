@@ -61,6 +61,8 @@ itertools = "0.15.0"
 polars = { version = "0.52.0", features = ["lazy", "parquet", "timezones"], optional = true }
 regex = "1.13.1"
 rustc-hash = "2.1.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json =  { version = "1.0" }
 unicode-normalization = "0.1.25"
 
 # Perfil de release mais otimizado, porém muito mais lento de compilar.

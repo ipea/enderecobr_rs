@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+use serde::Serialize;
 use std::borrow::Cow;
 use unicode_normalization::UnicodeNormalization;
 
@@ -20,7 +21,7 @@ pub mod separador_endereco;
 pub mod tipo_logradouro;
 
 /// Representa um endereço separado em seus atributos constituintes.
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default, Serialize)]
 pub struct Endereco {
     pub logradouro: Option<String>,
     pub numero: Option<String>,
@@ -29,6 +30,9 @@ pub struct Endereco {
 }
 
 impl Endereco {
+    pub fn como_json(&self) -> String {
+        serde_json::to_string(&self).unwrap_or_else(|_| "{}".to_string())
+    }
     /// Obtém o logradouro padronizado, utilizando a função [padronizar_logradouros].
     pub fn logradouro_padronizado(&self) -> Option<String> {
         self.logradouro
@@ -423,13 +427,21 @@ pub fn obter_padronizador_por_tipo(tipo: &str) -> Result<fn(&str) -> String, &st
         "dado_faltante" => Ok(|x| is_dado_faltante(x).to_string()),
 
         #[cfg(feature = "experimental")]
-        "segmentar" => Ok(|val| segmentar_endereco(val).obter_segmentos_json()),
+        "segmentacao" => Ok(|val| segmentar_endereco(val).como_json()),
 
         #[cfg(feature = "experimental")]
-        "separar" => Ok(|val| segmentar_endereco(val).como_endereco().formatar()),
+        "estruturacao" => Ok(|val| {
+            format!(
+                "{}",
+                segmentar_endereco(val)
+                    .como_endereco()
+                    .endereco_padronizado()
+                    .como_json()
+            )
+        }),
 
         #[cfg(feature = "experimental")]
-        "separar_padronizar" => Ok(|val| {
+        "formatacao" => Ok(|val| {
             segmentar_endereco(val)
                 .como_endereco()
                 .endereco_padronizado()

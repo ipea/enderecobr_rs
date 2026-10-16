@@ -12,9 +12,9 @@ use std::sync::LazyLock;
 
 use crfsuite::{Attribute, Model};
 
-use itertools::Itertools;
 use regex::Regex;
 use rustc_hash::FxHashSet;
+use serde::Serialize;
 
 use crate::{estado::ESTADOS, Endereco};
 
@@ -34,11 +34,13 @@ pub struct ExtratorFeature {
     regex_tokenizer: Regex,
 }
 
+#[derive(Serialize)]
 pub struct SegmentoEndereco {
     pub valor: String,
     pub tipo: String,
 }
 
+#[derive(Serialize)]
 pub struct EnderecoSegmentado {
     pub endereco: String,
     pub segmentos: Vec<SegmentoEndereco>,
@@ -300,28 +302,32 @@ pub fn segmentar_endereco(texto: &str) -> EnderecoSegmentado {
 }
 
 impl EnderecoSegmentado {
-    pub fn obter_segmentos_json(&self) -> String {
-        let json = self
-            .segmentos
-            .iter()
-            .map(|segmento| {
-                format!(
-                    "{{\"tipo\": \"{}\", \"valor\": \"{}\"}}",
-                    segmento.tipo,
-                    segmento.valor.replace("\\", "\\\\").replace("\"", "\\\"")
-                )
-            })
-            .join(", ");
-
-        return format!("[{}]", json);
+    pub fn como_json(&self) -> String {
+        serde_json::to_string(&self.segmentos).unwrap_or_else(|_| "[]".to_string())
     }
     pub fn como_endereco(&self) -> Endereco {
         let mut res = Endereco::default();
-        for seg in &self.segmentos {
+        for (i, seg) in self.segmentos.iter().enumerate() {
             let atributo_opt = match seg.tipo.as_str() {
-                "logradouro" => Some(res.logradouro.get_or_insert_default()),
+                "logradouro" if res.logradouro.is_none() => {
+                    Some(res.logradouro.get_or_insert_default())
+                }
                 "numero" => Some(res.numero.get_or_insert_default()),
+                "parcela"
+                    if self
+                        .segmentos
+                        .get(i - 1)
+                        .filter(|anterior| anterior.tipo == "logradouro")
+                        .is_some() =>
+                {
+                    Some(res.logradouro.get_or_insert_default())
+                }
+                "parcela" => Some(res.complemento.get_or_insert_default()),
                 "modificador_numero" => Some(res.numero.get_or_insert_default()),
+                "quilometragem_via" if res.numero.is_none() => {
+                    Some(res.numero.get_or_insert_default())
+                }
+                "quilometragem_via" => Some(res.complemento.get_or_insert_default()),
                 "complemento" => Some(res.complemento.get_or_insert_default()),
                 "localidade" => Some(res.localidade.get_or_insert_default()),
                 _ => None,
