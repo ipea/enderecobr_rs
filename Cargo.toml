@@ -20,16 +20,6 @@ members = [
 ]
 
 [[bin]]
-name = "separacao-lote"
-path = "src/bin/separacao-lote.rs"
-required-features = ["experimental", "polars_cli"]
-
-[[bin]]
-name = "bench-separacao"
-path = "src/bin/bench-separacao.rs"
-required-features = ["experimental", "polars_cli"]
-
-[[bin]]
 name = "padronizar"
 path = "src/bin/padronizar.rs"
 required-features = ["cli"]
@@ -43,7 +33,7 @@ required-features = ["polars_cli"]
 [[bin]]
 name = "padronizacao-lote"
 path = "src/bin/padronizacao-lote.rs"
-required-features = ["polars_cli"]
+required-features = ["experimental", "polars_cli"]
 
 [features] 
 default = []
@@ -57,9 +47,7 @@ crfsuite = { version = "0.3.2", optional = true}
 diacritics = "0.2.2"
 dirs = "7.0.0"
 itertools = "0.15.0"
-# Feature de timezone é temporário até corrigirem a issue abaixo
-# https://github.com/pola-rs/polars/issues/25148
-polars = { version = "0.52.0", features = ["lazy", "parquet", "timezones"], optional = true }
+polars = { version = "0.55.2", features = ["lazy", "parquet"], optional = true }
 regex = "1.13.1"
 reqwest = { version = "0.13.3", features = ["blocking"]}
 rustc-hash = "2.1.3"

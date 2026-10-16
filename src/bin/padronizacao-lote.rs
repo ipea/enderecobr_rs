@@ -1,15 +1,19 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use clap::Parser;
 use enderecobr_rs::{
     padronizar_bairros, padronizar_cep_leniente, padronizar_complementos,
     padronizar_estados_para_nome, padronizar_logradouros, padronizar_municipios,
-    padronizar_numeros, padronizar_tipo_logradouro, separador_endereco,
+    padronizar_numeros, padronizar_tipo_logradouro,
+    separador_endereco::{segmentar_endereco, segmentar_endereco_com_timing},
+    Endereco,
 };
 use polars::prelude::{
-    col, sync_on_close::SyncOnCloseType, Column, DataFrame, DataType, Field, IntoColumn, LazyFrame,
-    ParquetCompression, ParquetWriteOptions, PlPath, PlSmallStr, PolarsError, PolarsResult,
-    ScanArgsParquet, Schema, SinkOptions, StatisticsOptions, StringChunked,
+    col, sync_on_close::SyncOnCloseType, Column, DataFrame, DataType, Field, FileWriteFormat,
+    IntoColumn, LazyFrame, ParquetCompression, ParquetWriteOptions, PlRefPath, PolarsResult,
+    ScanArgsParquet, Schema, SinkDestination, SinkTarget, StatisticsOptions, StringChunked,
+    UnifiedSinkArgs,
 };
 
 #[derive(Debug, Clone)]
@@ -97,6 +101,16 @@ struct Args {
     #[arg(short('e'), long)]
     endereco: Option<String>,
 
+    /// Mede e imprime o tempo gasto na extração de features vs. na inferência do
+    /// CRF. Só tem efeito combinado com `-e/--endereco`.
+    #[arg(long, default_value = "false")]
+    timing: bool,
+
+    /// Leitura de baixa memória do parquet de entrada. Desative com
+    /// `--low-memory=false`.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    low_memory: bool,
+
     /// Especificação dos campos a serem processados.
     #[arg(
         short('c'),
@@ -140,58 +154,95 @@ fn processar_campo(df: LazyFrame, campo: &EspecificacaoCampo, schema: &Arc<Schem
     )
 }
 
-fn expandir_endereco(col: Column) -> Result<Column, PolarsError> {
-    let enderecos_chunk = col.str().unwrap();
+/// Nomes das colunas (e dos campos do struct) extraídos pelo `-e/--endereco`.
+const CAMPOS_ENDERECO: [&str; 5] = [
+    "logradouro_extraido",
+    "numero_extraido",
+    "complemento_extraido",
+    "localidade_extraido",
+    "cep_extraido",
+];
 
-    let mut logr_vec = Vec::with_capacity(enderecos_chunk.len());
-    let mut num_vec = Vec::with_capacity(enderecos_chunk.len());
-    let mut comp_vec = Vec::with_capacity(enderecos_chunk.len());
-    let mut loc_vec = Vec::with_capacity(enderecos_chunk.len());
-    let mut cep_vec = Vec::with_capacity(enderecos_chunk.len());
+/// Acumuladores do modo `--timing` (nanossegundos gastos e nº de endereços).
+static TEMPO_FEATURES_NS: AtomicU64 = AtomicU64::new(0);
+static TEMPO_INFERENCIA_NS: AtomicU64 = AtomicU64::new(0);
+static NUM_ENDERECOS: AtomicU64 = AtomicU64::new(0);
 
-    for opt in enderecos_chunk {
-        if let Some(endereco_str) = opt {
-            let endereco = separador_endereco::segmentar_endereco(endereco_str)
-                .como_endereco()
-                .endereco_padronizado();
+fn campo_endereco_processado() -> Field {
+    let campos = CAMPOS_ENDERECO
+        .iter()
+        .map(|&nome| Field::new(nome.into(), DataType::String))
+        .collect();
+    Field::new("endereco_processado".into(), DataType::Struct(campos))
+}
 
-            logr_vec.push(endereco.logradouro);
-            num_vec.push(endereco.numero);
-            comp_vec.push(endereco.complemento);
-            loc_vec.push(endereco.localidade);
-            cep_vec.push(endereco.cep);
-        } else {
-            logr_vec.push(None);
-            num_vec.push(None);
-            comp_vec.push(None);
-            loc_vec.push(None);
-            cep_vec.push(None);
-        }
+/// Segmenta o endereço e padroniza os campos; no modo `--timing`, acumula ainda os
+/// tempos de extração de features e de inferência.
+fn segmentar_padronizado(texto: &str, timing: bool) -> Endereco {
+    if timing {
+        let (segmentado, tempo_features, tempo_inferencia) = segmentar_endereco_com_timing(texto);
+        TEMPO_FEATURES_NS.fetch_add(tempo_features.as_nanos() as u64, Ordering::Relaxed);
+        TEMPO_INFERENCIA_NS.fetch_add(tempo_inferencia.as_nanos() as u64, Ordering::Relaxed);
+        NUM_ENDERECOS.fetch_add(1, Ordering::Relaxed);
+        segmentado.como_endereco().endereco_padronizado()
+    } else {
+        segmentar_endereco(texto)
+            .como_endereco()
+            .endereco_padronizado()
     }
+}
 
-    let df = DataFrame::new(vec![
-        Column::new(PlSmallStr::from_str("logradouro"), logr_vec),
-        Column::new(PlSmallStr::from_str("numero"), num_vec),
-        Column::new(PlSmallStr::from_str("complemento"), comp_vec),
-        Column::new(PlSmallStr::from_str("localidade"), loc_vec),
-        Column::new(PlSmallStr::from_str("cep"), cep_vec),
-    ])
-    .unwrap();
+fn expandir_endereco(col: Column, timing: bool) -> PolarsResult<Column> {
+    let enderecos: Vec<Option<Endereco>> = col
+        .str()
+        .unwrap()
+        .iter()
+        .map(|opt| opt.map(|texto| segmentar_padronizado(texto, timing)))
+        .collect();
 
-    PolarsResult::Ok(
-        df.into_struct(PlSmallStr::from_str("endereco_processado"))
-            .into_column(),
-    )
+    let extratores: [fn(&Endereco) -> Option<String>; 5] = [
+        |e| e.logradouro.clone(),
+        |e| e.numero.clone(),
+        |e| e.complemento.clone(),
+        |e| e.localidade.clone(),
+        |e| e.cep.clone(),
+    ];
+    let colunas: Vec<Column> = CAMPOS_ENDERECO
+        .iter()
+        .zip(extratores)
+        .map(|(&nome, extrair)| {
+            let valores: Vec<Option<String>> = enderecos
+                .iter()
+                .map(|endereco| endereco.as_ref().and_then(extrair))
+                .collect();
+            Column::new(nome.into(), valores)
+        })
+        .collect();
+
+    let df = DataFrame::new_infer_height(colunas)?;
+    Ok(df.into_struct("endereco_processado".into()).into_column())
+}
+
+fn imprimir_timing() {
+    let n = NUM_ENDERECOS.load(Ordering::Relaxed);
+    if n == 0 {
+        return;
+    }
+    let features_us = TEMPO_FEATURES_NS.load(Ordering::Relaxed) as f64 / 1000.0 / n as f64;
+    let inferencia_us = TEMPO_INFERENCIA_NS.load(Ordering::Relaxed) as f64 / 1000.0 / n as f64;
+    println!(
+        "Timing (média por endereço, n={n}): features≈{features_us:.2} µs, inferência≈{inferencia_us:.2} µs"
+    );
 }
 
 fn main() {
     let args = Args::parse();
-    // println!("{:#?}", args);
+    let timing = args.timing;
 
     let mut df = LazyFrame::scan_parquet(
-        PlPath::new(&args.arquivo_entrada),
+        PlRefPath::new(args.arquivo_entrada.as_str()),
         ScanArgsParquet {
-            low_memory: true,
+            low_memory: args.low_memory,
             parallel: polars::prelude::ParallelStrategy::RowGroups,
             use_statistics: true,
             rechunk: true,
@@ -199,7 +250,7 @@ fn main() {
         },
     )
     .unwrap()
-    .with_new_streaming(true);
+    .with_streaming(true);
 
     if let Some(limite) = args.limite {
         df = df.limit(limite);
@@ -231,65 +282,42 @@ fn main() {
     if let Some(campo_endereco) = args.endereco {
         df = df
             .select([col(campo_endereco.as_str())])
-            // .limit(10000)
             .with_column(
                 col(campo_endereco.as_str())
-                    .map(expandir_endereco, |_, _| {
-                        Ok(Field::new(
-                            "endereco_processado".into(),
-                            DataType::Struct(vec![
-                                Field::new("logradouro".into(), DataType::String),
-                                Field::new("numero".into(), DataType::String),
-                                Field::new("complemento".into(), DataType::String),
-                                Field::new("localidade".into(), DataType::String),
-                                Field::new("cep".into(), DataType::String),
-                            ]),
-                        ))
-                    })
+                    .map(
+                        move |coluna: Column| expandir_endereco(coluna, timing),
+                        |_, _| Ok(campo_endereco_processado()),
+                    )
                     .alias("endereco_processado"),
             )
-            .with_columns(vec![
-                col("endereco_processado")
-                    .struct_()
-                    .field_by_name("logradouro")
-                    .alias("logradouro_extraido"),
-                col("endereco_processado")
-                    .struct_()
-                    .field_by_name("numero")
-                    .alias("numero_extraido"),
-                col("endereco_processado")
-                    .struct_()
-                    .field_by_name("complemento")
-                    .alias("complemento_extraido"),
-                col("endereco_processado")
-                    .struct_()
-                    .field_by_name("localidade")
-                    .alias("localidade_extraido"),
-                col("endereco_processado")
-                    .struct_()
-                    .field_by_name("cep")
-                    .alias("cep_extraido"),
-            ])
+            .with_columns(
+                CAMPOS_ENDERECO
+                    .iter()
+                    .map(|&nome| col("endereco_processado").struct_().field_by_name(nome))
+                    .collect::<Vec<_>>(),
+            )
             .drop(col("endereco_processado").into_selector().unwrap());
     }
 
     let resultado = df
-        .sink_parquet(
-            polars::prelude::SinkTarget::Path(PlPath::new(&args.arquivo_saida)),
-            ParquetWriteOptions {
+        .sink(
+            SinkDestination::File {
+                target: SinkTarget::Path(PlRefPath::new(args.arquivo_saida.as_str())),
+            },
+            FileWriteFormat::Parquet(Arc::new(ParquetWriteOptions {
                 compression: ParquetCompression::Zstd(None),
                 statistics: StatisticsOptions {
                     min_value: true,
                     max_value: true,
                     distinct_count: true,
                     null_count: true,
+                    ..Default::default()
                 },
                 row_group_size: Some(10_000),
                 data_page_size: Some(1024 * 1024),
                 ..Default::default()
-            },
-            None,
-            SinkOptions {
+            })),
+            UnifiedSinkArgs {
                 sync_on_close: SyncOnCloseType::All,
                 maintain_order: false,
                 ..Default::default()
@@ -299,10 +327,15 @@ fn main() {
         .collect_with_engine(polars::prelude::Engine::Streaming);
 
     match resultado {
-        Ok(_) => println!(
-            "Arquivo \"{}\" foi processado com sucesso e salvo em \"{}\".",
-            args.arquivo_entrada, args.arquivo_saida
-        ),
+        Ok(_) => {
+            println!(
+                "Arquivo \"{}\" foi processado com sucesso e salvo em \"{}\".",
+                args.arquivo_entrada, args.arquivo_saida
+            );
+            if timing {
+                imprimir_timing();
+            }
+        }
         Err(err) => println!("{}", err),
     }
 }

@@ -10,7 +10,12 @@
 //! let endereco_padronizado_esperado = Endereco { logradouro: Some("AVENIDA NOSSA SENHORA COPACABANA".to_string()), numero: Some("123".to_string()), complemento: Some("APARTAMENTO 301".to_string()), ..Default::default() };
 //! assert_eq!(endereco_segmentado.endereco_padronizado(), endereco_padronizado_esperado);
 //! ```
-use std::{fs, path::PathBuf, sync::LazyLock};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::LazyLock,
+    time::{Duration, Instant},
+};
 
 use crfsuite::{Attribute, Model};
 
@@ -295,15 +300,31 @@ impl SeparadorEndereco {
     }
 
     fn segmentar_endereco(&self, texto: &str) -> EnderecoSegmentado {
+        self.segmentar_endereco_com_timing(texto).0
+    }
+
+    /// Igual a [`Self::segmentar_endereco`], mas devolve também o tempo gasto na
+    /// extração de features e na inferência (tagging) do CRF.
+    pub fn segmentar_endereco_com_timing(
+        &self,
+        texto: &str,
+    ) -> (EnderecoSegmentado, Duration, Duration) {
         let mut tagger = self.model.tagger().unwrap();
         let (tokens, offsets) = self.extrator.tokenize(texto);
-        let atributos = self.tokens2attributes(&tokens);
 
+        let inicio_features = Instant::now();
+        let atributos = self.tokens2attributes(&tokens);
+        let duracao_features = inicio_features.elapsed();
+
+        let inicio_inferencia = Instant::now();
         let tags = tagger.tag(&atributos).unwrap();
-        EnderecoSegmentado {
+        let duracao_inferencia = inicio_inferencia.elapsed();
+
+        let segmentado = EnderecoSegmentado {
             endereco: texto.to_string(),
             segmentos: self.segmentar(texto, &tokens, &tags, &offsets),
-        }
+        };
+        (segmentado, duracao_features, duracao_inferencia)
     }
 }
 
@@ -316,6 +337,12 @@ static SEPARADOR: LazyLock<SeparadorEndereco> = LazyLock::new(|| {
 
 pub fn segmentar_endereco(texto: &str) -> EnderecoSegmentado {
     SEPARADOR.segmentar_endereco(texto)
+}
+
+/// Igual a [`segmentar_endereco`], mas devolve também os tempos gastos na extração
+/// de features e na inferência do CRF (útil para medir desempenho).
+pub fn segmentar_endereco_com_timing(texto: &str) -> (EnderecoSegmentado, Duration, Duration) {
+    SEPARADOR.segmentar_endereco_com_timing(texto)
 }
 
 impl EnderecoSegmentado {

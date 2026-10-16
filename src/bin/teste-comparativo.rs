@@ -3,8 +3,8 @@ use std::num::NonZero;
 use clap::Parser;
 use enderecobr_rs::obter_padronizador_por_tipo;
 use polars::prelude::{
-    col, Column, CsvWriterOptions, DataType, Field, IntoColumn, LazyFrame, PlPath, ScanArgsParquet,
-    SinkOptions, SinkTarget, StringChunked,
+    col, Column, CsvWriterOptions, DataType, Field, FileWriteFormat, IntoColumn, LazyFrame,
+    PlRefPath, ScanArgsParquet, SinkDestination, SinkTarget, StringChunked, UnifiedSinkArgs,
 };
 
 /// Utilitário que serve para comparar o resultado desta lib com os valores de um
@@ -38,7 +38,7 @@ fn main() {
     let padronizador = obter_padronizador_por_tipo(&args.tipo_padronizador).unwrap();
 
     let res = LazyFrame::scan_parquet(
-        PlPath::from_string(args.arquivo_entrada),
+        PlRefPath::new(args.arquivo_entrada.as_str()),
         ScanArgsParquet {
             low_memory: true,
             parallel: polars::prelude::ParallelStrategy::RowGroups,
@@ -48,7 +48,7 @@ fn main() {
         },
     )
     .unwrap()
-    .with_new_streaming(true)
+    .with_streaming(true)
     .select([col(&args.campo_bruto), col(&args.campo_referencia)])
     .with_column(
         col(&args.campo_bruto)
@@ -68,16 +68,15 @@ fn main() {
             .not(),
     )
     .unique(None, polars::frame::UniqueKeepStrategy::First)
-    .sink_csv(
-        SinkTarget::Path(PlPath::new(&args.arquivo_saida)),
-        CsvWriterOptions {
+    .sink(
+        SinkDestination::File {
+            target: SinkTarget::Path(PlRefPath::new(args.arquivo_saida.as_str())),
+        },
+        FileWriteFormat::Csv(CsvWriterOptions {
             batch_size: NonZero::new(100).unwrap(),
             ..Default::default()
-        },
-        None,
-        SinkOptions {
-            ..Default::default()
-        },
+        }),
+        UnifiedSinkArgs::default(),
     )
     .unwrap()
     .collect_with_engine(polars::prelude::Engine::Streaming);
