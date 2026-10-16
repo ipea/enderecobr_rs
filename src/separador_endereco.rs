@@ -10,7 +10,7 @@
 //! let endereco_padronizado_esperado = Endereco { logradouro: Some("AVENIDA NOSSA SENHORA COPACABANA".to_string()), numero: Some("123".to_string()), complemento: Some("APARTAMENTO 301".to_string()), ..Default::default() };
 //! assert_eq!(endereco_segmentado.endereco_padronizado(), endereco_padronizado_esperado);
 //! ```
-use std::sync::LazyLock;
+use std::{fs, path::PathBuf, sync::LazyLock};
 
 use crfsuite::{Attribute, Model};
 
@@ -21,6 +21,9 @@ use serde::Serialize;
 use crate::{estado::ESTADOS, Endereco};
 
 use unicode_normalization::UnicodeNormalization;
+
+const MODEL_DOWNLOAD_PATH: &'static str =
+    "https://github.com/ipea/enderecobr_rs/releases/download/modelo-crf-v0.1/tagger.crf";
 
 fn is_pontuacao(word: &str) -> bool {
     word.chars().next().is_some_and(|c| PONTUACAO.contains(&c))
@@ -228,14 +231,14 @@ fn normalize(text: &str) -> String {
 }
 
 impl SeparadorEndereco {
-    pub fn new() -> Self {
-        let modelo_bin = include_bytes!("../scripts/crf/tagger.crf");
-        let model = Model::from_memory(modelo_bin).unwrap();
+    pub fn carregar(caminho: Option<PathBuf>) -> Result<SeparadorEndereco, String> {
+        let modelo_path = caminho.map(Ok).unwrap_or_else(baixar_modelo)?;
+        let model = Model::from_file(&modelo_path.to_string_lossy()).map_err(|x| x.to_string())?;
 
-        SeparadorEndereco {
-            model,
+        Ok(SeparadorEndereco {
+            model: model,
             extrator: ExtratorFeature::new(None),
-        }
+        })
     }
 
     pub fn tokens2attributes(&self, tokens: &[String]) -> Vec<Vec<Attribute>> {
@@ -307,11 +310,9 @@ impl SeparadorEndereco {
 // Em Rust, a constant é criada durante a compilação, então só posso chamar funções muito restritas
 // quando uso `const`. Nesse caso,  como tenho uma construção complexa da struct `Padronizador`,
 // tenho que usar static com inicialização Lazy (o LazyLock aqui previne condições de corrida).
-static SEPARADOR: LazyLock<SeparadorEndereco> = LazyLock::new(criar_separador);
-
-fn criar_separador() -> SeparadorEndereco {
-    SeparadorEndereco::new()
-}
+static SEPARADOR: LazyLock<SeparadorEndereco> = LazyLock::new(|| {
+    SeparadorEndereco::carregar(None).expect("Não foi possível carregar o modelo de CRF.")
+});
 
 pub fn segmentar_endereco(texto: &str) -> EnderecoSegmentado {
     SEPARADOR.segmentar_endereco(texto)
@@ -360,6 +361,37 @@ impl EnderecoSegmentado {
         }
         return res;
     }
+}
+
+pub fn baixar_modelo() -> Result<PathBuf, String> {
+    let versao_modelo = MODEL_DOWNLOAD_PATH
+        .rsplitn(3, "/")
+        .nth(1)
+        .ok_or("Não foi possivel obter a versão do modelo")?;
+
+    let dir = dirs::cache_dir()
+        .ok_or("Diretório de cache indisponível".to_string())?
+        .join("enderecobr_rs")
+        .join(versao_modelo);
+
+    let path = dir.join("tagger.crf");
+
+    if path.exists() {
+        return Ok(path);
+    }
+
+    fs::create_dir_all(&dir).map_err(|x| x.to_string())?;
+
+    let bytes = reqwest::blocking::get(MODEL_DOWNLOAD_PATH)
+        .map_err(|x| x.to_string())?
+        .bytes()
+        .map_err(|x| x.to_string())?;
+
+    let tmp = dir.join("tagger.crf.tmp");
+    fs::write(&tmp, &bytes).map_err(|x| x.to_string())?;
+    fs::rename(&tmp, &path).map_err(|x| x.to_string())?;
+
+    Ok(path)
 }
 
 // Constantes usadas para criar as features do CRF.

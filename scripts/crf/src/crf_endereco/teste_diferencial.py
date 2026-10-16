@@ -47,7 +47,7 @@ def main(
             "--bin",
             "padronizar",
             "--features=experimental,cli",
-            "segmentar",
+            "segmentacao",
         ],
         input=enderecos_string,
         capture_output=True,
