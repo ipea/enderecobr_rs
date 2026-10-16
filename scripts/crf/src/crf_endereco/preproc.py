@@ -180,7 +180,7 @@ SIGLAS_ESTADOS = {
 
 
 def tokenize(text: str):
-    return regex.findall(r"\d+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]", text)
+    return regex.findall(r"\p{N}+|\p{L}+|[^\s\p{L}\p{N}]", text)
 
 
 class RotuladorEnderecoBIO:

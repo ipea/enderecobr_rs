@@ -53,7 +53,7 @@ impl ExtratorFeature {
             // \p{L} => caracteres unicode
             // \p{N} => números unicode
             // Parece que tinha diferença entre as implementações devido às regexes
-            regex_tokenizer: Regex::new(r"\d+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]").unwrap(),
+            regex_tokenizer: Regex::new(r"\p{N}+|\p{L}+|[^\s\p{L}\p{N}]").unwrap(),
         }
     }
 
@@ -330,6 +330,7 @@ impl EnderecoSegmentado {
                 "quilometragem_via" => Some(res.complemento.get_or_insert_default()),
                 "complemento" => Some(res.complemento.get_or_insert_default()),
                 "localidade" => Some(res.localidade.get_or_insert_default()),
+                "cep" => Some(res.cep.get_or_insert_default()),
                 _ => None,
             };
 

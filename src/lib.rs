@@ -27,6 +27,7 @@ pub struct Endereco {
     pub numero: Option<String>,
     pub complemento: Option<String>,
     pub localidade: Option<String>,
+    pub cep: Option<String>,
 }
 
 impl Endereco {
@@ -59,6 +60,13 @@ impl Endereco {
             .map(|x| padronizar_bairros(x.as_str()))
     }
 
+    /// Obtém o CEP padronizado, utilizando a função [padronizar_bairros].
+    pub fn cep_padronizado(&self) -> Option<String> {
+        self.cep
+            .as_ref()
+            .map(|x| padronizar_cep_leniente(x.as_str()))
+    }
+
     /// Obtém uma nova struct [Endereco] com todos os campos padronizados,
     /// utilizando os métodos anteriores.
     pub fn endereco_padronizado(&self) -> Endereco {
@@ -67,6 +75,7 @@ impl Endereco {
             numero: self.numero_padronizado(),
             complemento: self.complemento_padronizado(),
             localidade: self.localidade_padronizada(),
+            cep: self.cep_padronizado(),
         }
     }
 
@@ -539,6 +548,7 @@ mod tests {
             numero: Some("001".to_string()),
             complemento: Some("apto. 405".to_string()),
             localidade: Some("jd botânico".to_string()),
+            cep: None,
         };
 
         assert_eq!(
@@ -563,6 +573,7 @@ mod tests {
             numero: Some("210".to_string()),
             complemento: Some("qd 5".to_string()),
             localidade: Some("prq ind".to_string()),
+            cep: None,
         };
 
         let esperado = Endereco {
@@ -570,6 +581,7 @@ mod tests {
             numero: Some("210".to_string()),
             complemento: Some("QUADRA 5".to_string()),
             localidade: Some("PARQUE INDUSTRIAL".to_string()),
+            cep: None,
         };
         assert_eq!(endereco.endereco_padronizado(), esperado);
     }
@@ -599,6 +611,7 @@ mod tests {
             numero: Some("123".to_string()),
             complemento: None,
             localidade: Some("CENTRO".to_string()),
+            cep: None,
         };
         assert_eq!(endereco.formatar(), "RUA A, 123, CENTRO");
     }
