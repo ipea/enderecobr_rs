@@ -8,7 +8,6 @@ from crf_endereco.preproc import (
     tokenize,
 )
 
-
 mapa_tipo_segmento = {
     # "logradouro_interno": "logradouro",
     # "modificador_numero": None,
@@ -60,16 +59,28 @@ def mergear(endereco: str, segmentos: list[dict[str, str]], tokenizer):
     return toks_endereco, toks_labels
 
 
-def main():
-    query = """select endereco, resposta_llm 
+CAMINHO_DATASET = "./dataset.sqlite"
+
+
+def carregar_dados(
+    caminho: str = CAMINHO_DATASET,
+) -> tuple[list[list[dict[str, float]]], list[list[str]]]:
+    """Lê o dataset etiquetado e devolve (features, rótulos) prontos para o CRF.
+
+    Compartilhado entre `treinamento.py` e `tunning.py` para que os dois usem
+    exatamente o mesmo caminho de dados e de etiquetagem.
+    """
+    try:
+        con = sqlite3.connect(caminho)
+        print("Coletando dados...")
+        dados = con.execute("""select endereco, resposta_llm
 from enderecos
-where resposta_llm is not null 
+where resposta_llm is not null
   and (resposta_llm ->> '$.erro') is null;
-"""
-    con = sqlite3.connect("./dataset.sqlite")
-    print("Coletando dados...")
-    dados = con.execute(query).fetchall()
-    con.close()
+""").fetchall()
+        con.close()
+    except sqlite3.Error as erro:
+        raise RuntimeError(f"Falha ao ler {caminho}: {erro}") from erro
 
     extrator_features = ExtratorFeature()
 
@@ -78,13 +89,24 @@ where resposta_llm is not null
 
     print("Preprocessando dados...")
     for endereco, resposta_str in dados:
-        resposta = json.loads(resposta_str)
+        try:
+            resposta = json.loads(resposta_str)
+        except json.JSONDecodeError as erro:
+            raise RuntimeError(
+                f"Resposta inválida no endereço {endereco!r}: {erro}"
+            ) from erro
         segmentos = resposta.get("segmentos", [])
         tokens, labels = mergear(endereco, segmentos, tokenize)
         features = extrator_features.tokens2features(tokens)
 
         x.append(features)
         y.append(labels)
+
+    return x, y
+
+
+def main():
+    x, y = carregar_dados()
 
     print(f"Realizando treinamento (n={len(x)})...")
     crf = sklearn_crfsuite.CRF(

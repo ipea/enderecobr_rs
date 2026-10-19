@@ -1,9 +1,7 @@
-import regex
 import unicodedata
-from collections.abc import Callable, Iterable
-from dataclasses import asdict
+from collections.abc import Iterable
 
-from crf_endereco.endereco import Endereco
+import regex
 
 MARCADORES_CONHECIDOS_DF = {
     "SQN",
@@ -183,56 +181,6 @@ def tokenize(text: str):
     return regex.findall(r"\p{N}+|\p{L}+|[^\s\p{L}\p{N}]", text)
 
 
-class RotuladorEnderecoBIO:
-    map_tags: dict[str, str] = {
-        "logradouro": "LOG",
-        "numero": "NUM",
-        "complemento": "COM",
-        "bairro": "LOC",
-        "municipio": "MUN",
-        "cep": "CEP",
-    }
-
-    def __init__(self, tokenizer: Callable[[str], list[str]]):
-        self.tokenizer: Callable[[str], list[str]] = tokenizer
-
-    def obter_tokenizado(self, endereco: Endereco) -> tuple[list[str], list[str]]:
-        tokens: list[str] = []
-        targets: list[str] = []
-
-        ordem_campos = endereco.formato.split(" ")
-        separador_toks = self.tokenizer(endereco.separador)
-        tam_separador = len(separador_toks)
-
-        # Transforma num dicionario para facilitar manipulação
-        reg = {
-            k: v.upper() if isinstance(v, str) else v
-            for k, v in asdict(endereco).items()
-        }
-
-        for campo in ordem_campos:
-            valor_campo = reg.get(campo)
-            tag_atual = self.map_tags.get(campo)
-
-            if not valor_campo or not tag_atual:
-                continue
-
-            # Adiciona separador no fim antes de adicionar os novos tokens,
-            # senão estiver no início e se o separador "existir"
-            if len(tokens) and tam_separador:
-                tokens += separador_toks
-                targets += ["O"] * tam_separador
-
-            tokens_atuais = self.tokenizer(valor_campo)
-            targets_atuais = [f"I-{tag_atual}"] * len(tokens_atuais)
-            targets_atuais[0] = f"B-{tag_atual}"
-
-            tokens += tokens_atuais
-            targets += targets_atuais
-
-        return tokens, targets
-
-
 def normalize(text: str):
     normalized = unicodedata.normalize("NFKD", text)
     return "".join([c for c in normalized if c.isascii()])
@@ -281,15 +229,19 @@ class ExtratorFeature:
         return feats
 
     def _features_token(self, token: str, prefixo: str) -> list[str]:
-        """Gerador de feature para um token específico."""
-        feats: list[str] = []
-        token = normalize(token).upper().strip()
-        feats.append(token)
+        """Gerador de feature para um token específico.
 
-        tam_palavra = len(token)
-        if tam_palavra >= 10:
-            tam_palavra = "10+"
-        feats.append(f"tam:{tam_palavra}")
+        A ordem e o critério de classificação espelham o `ExtratorFeature` do
+        Rust (`src/separador_endereco.rs`), que é a implementação de referência.
+        """
+        token = normalize(token).upper().strip()
+
+        # `tam` usa o comprimento sem zeros à esquerda: "000123" e "123" caem
+        # no mesmo bucket. O Rust abandonou a feature `digit_len`.
+        sem_zeros = token.lstrip("0") if token.isdigit() else token
+        tam_palavra = min(len(sem_zeros), 10)
+
+        feats: list[str] = [token, f"tam:{tam_palavra}"]
 
         if token in MARCADORES_CONHECIDOS_DF:
             feats.append("marcador_df")
@@ -303,23 +255,16 @@ class ExtratorFeature:
             feats.append("is_unknown")
         elif is_pontuacao(token):
             feats.append("is_punct")
-            # Não acontece na prática de ter mais de uma pontuação por token,
-            # mas o tokenizador em si pode mudar e isso virar um erro silencioso.
-            feats.remove(token)
-            feats.append(token[0])
+            # O tokenizador emite uma pontuação por token; o Rust trunca para um
+            # caractere por segurança e aqui seguimos a mesma regra.
+            feats[0] = token[0]
         elif token.isdigit():
-            feats.remove(token)
-            token = regex.sub("^0+", "", token)
             feats.append("is_digit")
-            tam_palavra = len(token)
-            if tam_palavra >= 7:
-                tam_palavra = "7+"
-            feats.append(f"digit_len:{tam_palavra!s}")
-        elif token.isalnum():
+        elif token.isalpha():
             feats.append("is_alpha")
-            if any(char.isdigit() for char in token):
-                feats.append("has_digit")
         else:
+            # Alcança os alfanuméricos, que o tokenizador nunca gera (ele separa
+            # letras de números) e que o Rust também trata como desconhecidos.
             feats.append("is_unknown")
 
         return [f"{prefixo}:{f}" for f in feats]
@@ -346,8 +291,9 @@ class ExtratorFeature:
             return []
 
         feats: list[str] = []
-        sinal = "+" if direcao == 1 else "-"
-        sufixo = f"{sinal}{abs(distancia)}"
+        # Prefixo com o sinal do próprio inteiro ("1", "-1"): igual ao Rust, evita
+        # uma concatenação por token e mantém as duas implementações idênticas.
+        sufixo = str(distancia)
 
         feats += self._features_token(sent[posicao_vizinho], sufixo)
 

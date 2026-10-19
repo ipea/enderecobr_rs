@@ -96,9 +96,14 @@ impl ExtratorFeature {
         let tok_info: Vec<TokenInfo> = toks.iter().map(|tok| self._token_info(tok)).collect();
         (0..toks.len())
             .map(|i| {
-                self._features_posicao(toks, &tok_info, i)
-                    .into_iter()
-                    .collect()
+                // Capacidade típica: bias + posição + token + 4 vizinhos.
+                let mut feats: Vec<String> = Vec::with_capacity(32);
+                self._features_posicao(toks, &tok_info, i, &mut feats);
+                // Espelha o `dict.fromkeys` do `preproc.py`: a deduplicação não
+                // aloca e a ordem das features é irrelevante para o CRF (soma de pesos).
+                feats.sort_unstable();
+                feats.dedup();
+                feats
             })
             .collect()
     }
@@ -108,13 +113,14 @@ impl ExtratorFeature {
         sent: &[String],
         tokens_info: &[TokenInfo],
         i: usize,
-    ) -> Vec<String> {
-        let mut feats = vec!["bias".to_string()];
+        feats: &mut Vec<String>,
+    ) {
+        feats.push("bias".to_string());
         feats.push(format!(
             "{}_pos",
             (i as f64 / sent.len() as f64 * 4.0) as i32
         ));
-        feats.extend(self._token_info_posicional(&tokens_info[i], 0));
+        self._token_info_posicional(&tokens_info[i], 0, feats);
 
         if i == 0 {
             feats.push("BOS".to_string());
@@ -124,16 +130,18 @@ impl ExtratorFeature {
         }
 
         for &distancia in &self.distancias_vizinhaca {
-            feats.extend(self._features_vizinhanca(sent, tokens_info, i, distancia));
+            self._features_vizinhanca(sent, tokens_info, i, distancia, feats);
         }
-
-        feats
     }
 
     fn _token_info<'a>(&self, token: &'a str) -> TokenInfo<'a> {
         let mut normalizado = normalizar(token);
 
-        let tipo = if is_pontuacao(&normalizado) {
+        // O `all()` de um iterador vazio é `true`, então o token vazio precisa
+        // ser tratado antes de tudo (espelha o `if len(token) == 0` do `preproc.py`).
+        let tipo = if normalizado.is_empty() {
+            Desconhecido
+        } else if is_pontuacao(&normalizado) {
             Pontuacao
         } else if normalizado.bytes().all(|c| c.is_ascii_digit()) {
             Digito
@@ -165,66 +173,9 @@ impl ExtratorFeature {
         }
     }
 
-    // fn _features_token(&self, token: &str, prefixo: &str) -> Vec<String> {
-    //     let mut feats = Vec::new();
-    //     let token_norm: String = normalizar(token).to_string();
-    //     feats.push(token_norm.clone());
-    //
-    //     let mut tam = token_norm.len();
-    //     let mut feat_tam = if tam >= 10 {
-    //         "10+".to_string()
-    //     } else {
-    //         tam.to_string()
-    //     };
-    //     feats.push(format!("tam:{}", feat_tam));
-    //
-    //     if MARCADORES_CONHECIDOS_DF.contains(&token_norm) {
-    //         feats.push("marcador_df".to_string());
-    //     }
-    //     if MARCADORES_CONHECIDOS_PALMAS.contains(&token_norm) {
-    //         feats.push("marcador_palmas".to_string());
-    //     }
-    //     if SIGLAS_ESTADOS.contains(&token_norm) {
-    //         feats.push("sigla_estado".to_string());
-    //     }
-    //
-    //     if token_norm.is_empty() {
-    //         feats.push("is_unknown".to_string());
-    //     } else if is_pontuacao(&token_norm) {
-    //         feats.push("is_punct".to_string());
-    //         let t = feats.iter().position(|x| x == &token_norm);
-    //         if let Some(idx) = t {
-    //             feats.remove(idx);
-    //         }
-    //         feats.push(token_norm.chars().next().unwrap().to_string());
-    //     } else if token_norm.bytes().all(|c| c.is_ascii_digit()) {
-    //         let token_sem_zero = token_norm.trim_start_matches('0');
-    //         feats.retain(|x| x != &token_norm);
-    //         feats.push("is_digit".to_string());
-    //         tam = token_sem_zero.len();
-    //         feat_tam = if tam >= 7 {
-    //             "7+".to_string()
-    //         } else {
-    //             tam.to_string()
-    //         };
-    //         feats.push(format!("digit_len:{}", feat_tam));
-    //     } else if token_norm.bytes().all(|c| c.is_ascii_alphanumeric()) {
-    //         feats.push("is_alpha".to_string());
-    //         if token_norm.bytes().any(|c| c.is_ascii_digit()) {
-    //             feats.push("has_digit".to_string());
-    //         }
-    //     } else {
-    //         feats.push("is_unknown".to_string());
-    //     }
-    //
-    //     feats
-    //         .into_iter()
-    //         .map(|f| format!("{}:{}", prefixo, f))
-    //         .collect()
-    // }
-
-    fn _token_info_posicional(&self, tok_info: &TokenInfo, pos: i8) -> Vec<String> {
-        let mut res: Vec<String> = Vec::with_capacity(5);
+    /// Empilha as features de um token já com o prefixo posicional. Escreve
+    /// direto no vetor da posição para não alocar um `Vec` por vizinho.
+    fn _token_info_posicional(&self, tok_info: &TokenInfo, pos: i8, res: &mut Vec<String>) {
         res.push(format!("{}:{}", pos, tok_info.normalizado));
         res.push(format!("{}:tam:{}", pos, tok_info.tam_bucket));
 
@@ -245,8 +196,6 @@ impl ExtratorFeature {
             Digito => "is_digit",
         };
         res.push(format!("{}:{}", pos, tipo));
-
-        res
     }
 
     fn _features_vizinhanca(
@@ -255,7 +204,8 @@ impl ExtratorFeature {
         tokens_info: &[TokenInfo],
         indice_inicial: usize,
         distancia: i32,
-    ) -> Vec<String> {
+        feats: &mut Vec<String>,
+    ) {
         assert!(distancia != 0);
 
         let direcao = if distancia > 0 { 1 } else { -1 };
@@ -270,11 +220,11 @@ impl ExtratorFeature {
         }
 
         if posicao_vizinho.is_none() {
-            return vec![];
+            return;
         }
 
         let pos_viz = posicao_vizinho.unwrap();
-        let mut feats = self._token_info_posicional(&tokens_info[pos_viz], distancia as i8);
+        self._token_info_posicional(&tokens_info[pos_viz], distancia as i8, feats);
 
         if pos_viz != ((indice_inicial as i32) + distancia) as usize {
             if let Some(pa) = posicao_anterior {
@@ -285,8 +235,6 @@ impl ExtratorFeature {
                 }
             }
         }
-
-        feats
     }
 
     fn _pos_prox_palavra(
@@ -329,8 +277,10 @@ impl SeparadorEndereco {
     pub fn tokens2attributes(&self, tokens: &[String]) -> Vec<Vec<Attribute>> {
         self.extrator
             .tokens2features(tokens)
-            .iter()
-            .map(|toks| toks.iter().map(|feat| Attribute::new(feat, 1.0)).collect())
+            .into_iter()
+            // `Attribute::from(String)` move a String; `Attribute::new(&str, 1.0)`
+            // clonaria cada feature, dobrando as alocações por token.
+            .map(|feats| feats.into_iter().map(Attribute::from).collect())
             .collect()
     }
 
@@ -613,11 +563,13 @@ mod tests {
     fn test_token2features_token_meio_com_digito() {
         let feats = token2features(&["Rua", "123", "Centro"], 1);
         assert!(feats.contains(&"0:is_digit".to_string()));
-        assert!(feats.contains(&"0:digit_len:3".to_string()));
+        assert!(feats.contains(&"0:tam:3".to_string()));
         assert!(feats.contains(&"-1:RUA".to_string()));
         assert!(feats.contains(&"1:CENTRO".to_string()));
         assert!(feats.contains(&"1:is_alpha".to_string()));
-        assert!(!feats.contains(&"0:123".to_string()));
+        // O token bruto continua entrando; só `digit_len` deixou de existir.
+        assert!(feats.contains(&"0:123".to_string()));
+        assert!(!feats.iter().any(|f| f.contains("digit_len")));
         assert!(!feats.contains(&"BOS".to_string()));
         assert!(!feats.contains(&"EOS".to_string()));
     }
@@ -636,10 +588,12 @@ mod tests {
 
     #[test]
     fn test_token2features_com_token_alfanumerico() {
+        // O tokenizador separa letras de números, então um token alfanumérico
+        // não passa de um caso desconhecido (mesma regra do `preproc.py`).
         let feats = token2features(&["Rua", "A1", "Centro"], 1);
         assert!(feats.contains(&"0:A1".to_string()));
-        assert!(feats.contains(&"0:is_alpha".to_string()));
-        assert!(feats.contains(&"0:has_digit".to_string()));
+        assert!(feats.contains(&"0:is_unknown".to_string()));
+        assert!(!feats.contains(&"0:is_alpha".to_string()));
         assert!(feats.contains(&"0:tam:2".to_string()));
         assert!(feats.contains(&"-1:RUA".to_string()));
         assert!(feats.contains(&"1:CENTRO".to_string()));
@@ -694,20 +648,21 @@ mod tests {
 
     #[test]
     fn test_token2features_com_token_numerico_longo_zeros() {
+        // O `tam` de um dígito usa o comprimento sem zeros à esquerda.
         let feats = token2features(&["000000000000012345"], 0);
         assert!(feats.contains(&"0:is_digit".to_string()));
-        assert!(feats.contains(&"0:digit_len:5".to_string()));
-        assert!(!feats.contains(&"0:123456789".to_string()));
+        assert!(feats.contains(&"0:tam:5".to_string()));
+        assert!(feats.contains(&"0:000000000000012345".to_string()));
     }
 
     #[test]
     fn test_token2features_com_token_numerico_longo() {
         let feats = token2features(&["123456789"], 0);
         assert!(feats.contains(&"0:is_digit".to_string()));
-        assert!(feats.contains(&"0:digit_len:7".to_string()));
+        assert!(feats.contains(&"0:tam:9".to_string()));
         assert!(feats.contains(&"BOS".to_string()));
         assert!(feats.contains(&"EOS".to_string()));
-        assert!(!feats.contains(&"0:123456789".to_string()));
+        assert!(feats.contains(&"0:123456789".to_string()));
     }
 
     #[test]
@@ -764,5 +719,16 @@ mod tests {
         assert!(feats[0].contains(&"bias".to_string()));
         assert!(feats[1].contains(&"bias".to_string()));
         assert!(feats[2].contains(&"bias".to_string()));
+    }
+
+    #[test]
+    fn test_tokens2features_sem_duplicatas() {
+        let feats = tokens2features(&["Rua", ",", "das", "Flores", "123"]);
+        for item in &feats {
+            let mut ordenado = item.clone();
+            ordenado.sort_unstable();
+            ordenado.dedup();
+            assert_eq!(ordenado.len(), item.len());
+        }
     }
 }
