@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use clap::Parser;
+use enderecobr_rs::padronizar_estados_para_sigla;
 use enderecobr_rs::{
     padronizar_bairros, padronizar_cep_leniente, padronizar_complementos,
     padronizar_estados_para_nome, padronizar_logradouros, padronizar_municipios,
@@ -9,6 +10,7 @@ use enderecobr_rs::{
     separador_endereco::{segmentar_endereco, segmentar_endereco_com_timing},
     Endereco,
 };
+use itertools::Itertools;
 use polars::prelude::{
     col, sync_on_close::SyncOnCloseType, Column, DataFrame, DataType, Field, FileWriteFormat,
     IntoColumn, LazyFrame, ParquetCompression, ParquetWriteOptions, PlRefPath, PolarsResult,
@@ -70,7 +72,7 @@ fn obter_padronizador(tipo: &TipoCampo) -> fn(&str) -> String {
         TipoCampo::Complemento => padronizar_complementos,
         TipoCampo::Localidade => padronizar_bairros,
         TipoCampo::Municipio => padronizar_municipios,
-        TipoCampo::Estado => |x| padronizar_estados_para_nome(x).to_string(),
+        TipoCampo::Estado => |x| padronizar_estados_para_sigla(x).to_string(),
         TipoCampo::Cep => padronizar_cep_leniente,
     }
 }
@@ -223,6 +225,25 @@ fn expandir_endereco(col: Column, timing: bool) -> PolarsResult<Column> {
     Ok(df.into_struct("endereco_processado".into()).into_column())
 }
 
+fn segmentar_endereco_df(df: LazyFrame, campo_endereco: &str, timing: bool) -> LazyFrame {
+    // df.select([col(campo_endereco)])
+    df.with_column(
+        col(campo_endereco)
+            .map(
+                move |coluna: Column| expandir_endereco(coluna, timing),
+                |_, _| Ok(campo_endereco_processado()),
+            )
+            .alias("endereco_processado"),
+    )
+    .with_columns(
+        CAMPOS_ENDERECO
+            .iter()
+            .map(|&nome| col("endereco_processado").struct_().field_by_name(nome))
+            .collect::<Vec<_>>(),
+    )
+    .drop(col("endereco_processado").into_selector().unwrap())
+}
+
 fn imprimir_timing() {
     let n = NUM_ENDERECOS.load(Ordering::Relaxed);
     if n == 0 {
@@ -238,6 +259,7 @@ fn imprimir_timing() {
 fn main() {
     let args = Args::parse();
     let timing = args.timing;
+    let mut colunas_finais: Vec<String> = Vec::default();
 
     let mut df = LazyFrame::scan_parquet(
         PlRefPath::new(args.arquivo_entrada.as_str()),
@@ -259,44 +281,32 @@ fn main() {
     let schema = df.collect_schema().unwrap();
     for campo in &args.campos {
         df = processar_campo(df, campo, &schema);
+
+        args.campos
+            .iter()
+            .for_each(|c| colunas_finais.push(c.destino.to_string()));
+    }
+
+    if let Some(campo_endereco) = args.endereco {
+        df = segmentar_endereco_df(df, &campo_endereco, timing);
+
+        CAMPOS_ENDERECO
+            .iter()
+            .for_each(|x| colunas_finais.push(x.to_string()));
     }
 
     if !args.manter_todos {
-        let colunas_finais: Vec<_> = args
-            .campos
+        args.manter
             .iter()
-            // Colunas criadas pela execução atual
-            .map(|c| c.destino.as_str())
-            // Colunas que foram solicitadas para serem mantidas.
-            .chain(args.manter.iter().map(|c| c.as_str()))
-            .map(col)
-            .collect();
+            .for_each(|x| colunas_finais.push(x.to_owned()));
+
+        let cols: Vec<_> = colunas_finais.iter().unique().map(col).collect();
 
         // Evita `select([])`, que zeraria o dataframe quando nenhum campo foi
         // computado nem solicitado para manter (ex.: apenas `-e`).
         if !colunas_finais.is_empty() {
-            df = df.select(colunas_finais);
+            df = df.select(cols);
         }
-    }
-
-    if let Some(campo_endereco) = args.endereco {
-        df = df
-            .select([col(campo_endereco.as_str())])
-            .with_column(
-                col(campo_endereco.as_str())
-                    .map(
-                        move |coluna: Column| expandir_endereco(coluna, timing),
-                        |_, _| Ok(campo_endereco_processado()),
-                    )
-                    .alias("endereco_processado"),
-            )
-            .with_columns(
-                CAMPOS_ENDERECO
-                    .iter()
-                    .map(|&nome| col("endereco_processado").struct_().field_by_name(nome))
-                    .collect::<Vec<_>>(),
-            )
-            .drop(col("endereco_processado").into_selector().unwrap());
     }
 
     let resultado = df
