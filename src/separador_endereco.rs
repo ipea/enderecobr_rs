@@ -10,6 +10,7 @@
 //! assert_eq!(endereco_segmentado.endereco_padronizado(), endereco_padronizado_esperado);
 //! ```
 use std::{
+    borrow::Cow,
     fs,
     path::PathBuf,
     sync::LazyLock,
@@ -22,9 +23,12 @@ use regex::Regex;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 
-use crate::{estado::ESTADOS, Endereco};
-
-use unicode_normalization::UnicodeNormalization;
+use crate::{
+    estado::ESTADOS,
+    normalizar,
+    separador_endereco::TipoToken::{Alpha, Desconhecido, Digito, Pontuacao},
+    Endereco,
+};
 
 const MODEL_DOWNLOAD_PATH: &'static str =
     "https://github.com/ipea/enderecobr_rs/releases/download/modelo-crf-v0.1/tagger.crf";
@@ -55,6 +59,23 @@ pub struct EnderecoSegmentado {
     pub segmentos: Vec<SegmentoEndereco>,
 }
 
+#[derive(PartialEq)]
+enum TipoToken {
+    Pontuacao,
+    Digito,
+    Alpha,
+    Desconhecido,
+}
+
+struct TokenInfo<'a> {
+    normalizado: Cow<'a, str>,
+    tam_bucket: u8,
+    tipo: TipoToken,
+    marcador_df: bool,
+    marcador_palmas: bool,
+    uf: bool,
+}
+
 impl ExtratorFeature {
     pub fn new(distancias_vizinhaca: Option<Vec<i32>>) -> Self {
         Self {
@@ -72,18 +93,28 @@ impl ExtratorFeature {
     }
 
     pub fn tokens2features(&self, toks: &[String]) -> Vec<Vec<String>> {
+        let tok_info: Vec<TokenInfo> = toks.iter().map(|tok| self._token_info(tok)).collect();
         (0..toks.len())
-            .map(|i| self._features_posicao(toks, i).into_iter().collect())
+            .map(|i| {
+                self._features_posicao(toks, &tok_info, i)
+                    .into_iter()
+                    .collect()
+            })
             .collect()
     }
 
-    fn _features_posicao(&self, sent: &[String], i: usize) -> Vec<String> {
+    fn _features_posicao(
+        &self,
+        sent: &[String],
+        tokens_info: &[TokenInfo],
+        i: usize,
+    ) -> Vec<String> {
         let mut feats = vec!["bias".to_string()];
         feats.push(format!(
             "{}_pos",
             (i as f64 / sent.len() as f64 * 4.0) as i32
         ));
-        feats.extend(self._features_token(&sent[i], "0"));
+        feats.extend(self._token_info_posicional(&tokens_info[i], 0));
 
         if i == 0 {
             feats.push("BOS".to_string());
@@ -93,73 +124,135 @@ impl ExtratorFeature {
         }
 
         for &distancia in &self.distancias_vizinhaca {
-            feats.extend(self._features_vizinhanca(sent, i, distancia));
+            feats.extend(self._features_vizinhanca(sent, tokens_info, i, distancia));
         }
 
         feats
     }
 
-    fn _features_token(&self, token: &str, prefixo: &str) -> Vec<String> {
-        let mut feats = Vec::new();
-        let token_norm: String = normalize(token).trim().to_string();
-        feats.push(token_norm.clone());
+    fn _token_info<'a>(&self, token: &'a str) -> TokenInfo<'a> {
+        let mut normalizado = normalizar(token);
 
-        let mut tam = token_norm.len();
-        let mut feat_tam = if tam >= 10 {
-            "10+".to_string()
+        let tipo = if is_pontuacao(&normalizado) {
+            Pontuacao
+        } else if normalizado.bytes().all(|c| c.is_ascii_digit()) {
+            Digito
+        } else if normalizado.bytes().all(|c| c.is_ascii_alphabetic()) {
+            Alpha
         } else {
-            tam.to_string()
+            Desconhecido
         };
-        feats.push(format!("tam:{}", feat_tam));
 
-        if MARCADORES_CONHECIDOS_DF.contains(&token_norm) {
-            feats.push("marcador_df".to_string());
-        }
-        if MARCADORES_CONHECIDOS_PALMAS.contains(&token_norm) {
-            feats.push("marcador_palmas".to_string());
-        }
-        if SIGLAS_ESTADOS.contains(&token_norm) {
-            feats.push("sigla_estado".to_string());
-        }
-
-        if token_norm.is_empty() {
-            feats.push("is_unknown".to_string());
-        } else if is_pontuacao(&token_norm) {
-            feats.push("is_punct".to_string());
-            let t = feats.iter().position(|x| x == &token_norm);
-            if let Some(idx) = t {
-                feats.remove(idx);
-            }
-            feats.push(token_norm.chars().next().unwrap().to_string());
-        } else if token_norm.bytes().all(|c| c.is_ascii_digit()) {
-            let token_sem_zero = token_norm.trim_start_matches('0');
-            feats.retain(|x| x != &token_norm);
-            feats.push("is_digit".to_string());
-            tam = token_sem_zero.len();
-            feat_tam = if tam >= 7 {
-                "7+".to_string()
-            } else {
-                tam.to_string()
-            };
-            feats.push(format!("digit_len:{}", feat_tam));
-        } else if token_norm.bytes().all(|c| c.is_ascii_alphanumeric()) {
-            feats.push("is_alpha".to_string());
-            if token_norm.bytes().any(|c| c.is_ascii_digit()) {
-                feats.push("has_digit".to_string());
-            }
+        let tam_bucket = if tipo == Digito {
+            normalizado.trim_start_matches('0').len().min(10) as u8
         } else {
-            feats.push("is_unknown".to_string());
+            normalizado.len().min(10) as u8
+        };
+
+        if tipo == Pontuacao {
+            normalizado = Cow::Owned(normalizado.chars().take(1).collect());
         }
 
-        feats
-            .into_iter()
-            .map(|f| format!("{}:{}", prefixo, f))
-            .collect()
+        // Empresta antes de mover: os campos de bool vêm primeiro,
+        // `normalizado` (o move) vem por último. A ordem no literal importa.
+        TokenInfo {
+            marcador_df: MARCADORES_CONHECIDOS_DF.contains(normalizado.as_ref()),
+            marcador_palmas: MARCADORES_CONHECIDOS_PALMAS.contains(normalizado.as_ref()),
+            uf: SIGLAS_ESTADOS.contains(normalizado.as_ref()),
+            normalizado,
+            tam_bucket,
+            tipo,
+        }
+    }
+
+    // fn _features_token(&self, token: &str, prefixo: &str) -> Vec<String> {
+    //     let mut feats = Vec::new();
+    //     let token_norm: String = normalizar(token).to_string();
+    //     feats.push(token_norm.clone());
+    //
+    //     let mut tam = token_norm.len();
+    //     let mut feat_tam = if tam >= 10 {
+    //         "10+".to_string()
+    //     } else {
+    //         tam.to_string()
+    //     };
+    //     feats.push(format!("tam:{}", feat_tam));
+    //
+    //     if MARCADORES_CONHECIDOS_DF.contains(&token_norm) {
+    //         feats.push("marcador_df".to_string());
+    //     }
+    //     if MARCADORES_CONHECIDOS_PALMAS.contains(&token_norm) {
+    //         feats.push("marcador_palmas".to_string());
+    //     }
+    //     if SIGLAS_ESTADOS.contains(&token_norm) {
+    //         feats.push("sigla_estado".to_string());
+    //     }
+    //
+    //     if token_norm.is_empty() {
+    //         feats.push("is_unknown".to_string());
+    //     } else if is_pontuacao(&token_norm) {
+    //         feats.push("is_punct".to_string());
+    //         let t = feats.iter().position(|x| x == &token_norm);
+    //         if let Some(idx) = t {
+    //             feats.remove(idx);
+    //         }
+    //         feats.push(token_norm.chars().next().unwrap().to_string());
+    //     } else if token_norm.bytes().all(|c| c.is_ascii_digit()) {
+    //         let token_sem_zero = token_norm.trim_start_matches('0');
+    //         feats.retain(|x| x != &token_norm);
+    //         feats.push("is_digit".to_string());
+    //         tam = token_sem_zero.len();
+    //         feat_tam = if tam >= 7 {
+    //             "7+".to_string()
+    //         } else {
+    //             tam.to_string()
+    //         };
+    //         feats.push(format!("digit_len:{}", feat_tam));
+    //     } else if token_norm.bytes().all(|c| c.is_ascii_alphanumeric()) {
+    //         feats.push("is_alpha".to_string());
+    //         if token_norm.bytes().any(|c| c.is_ascii_digit()) {
+    //             feats.push("has_digit".to_string());
+    //         }
+    //     } else {
+    //         feats.push("is_unknown".to_string());
+    //     }
+    //
+    //     feats
+    //         .into_iter()
+    //         .map(|f| format!("{}:{}", prefixo, f))
+    //         .collect()
+    // }
+
+    fn _token_info_posicional(&self, tok_info: &TokenInfo, pos: i8) -> Vec<String> {
+        let mut res: Vec<String> = Vec::with_capacity(5);
+        res.push(format!("{}:{}", pos, tok_info.normalizado));
+        res.push(format!("{}:tam:{}", pos, tok_info.tam_bucket));
+
+        if tok_info.marcador_df {
+            res.push(format!("{}:marcador_df", pos));
+        }
+        if tok_info.marcador_palmas {
+            res.push(format!("{}:marcador_palmas", pos));
+        }
+        if tok_info.uf {
+            res.push(format!("{}:sigla_estado", pos));
+        }
+
+        let tipo = match tok_info.tipo {
+            Alpha => "is_alpha",
+            Desconhecido => "is_unknown",
+            Pontuacao => "is_punct",
+            Digito => "is_digit",
+        };
+        res.push(format!("{}:{}", pos, tipo));
+
+        res
     }
 
     fn _features_vizinhanca(
         &self,
         sent: &[String],
+        tokens_info: &[TokenInfo],
         indice_inicial: usize,
         distancia: i32,
     ) -> Vec<String> {
@@ -181,16 +274,14 @@ impl ExtratorFeature {
         }
 
         let pos_viz = posicao_vizinho.unwrap();
-        let sinal = if direcao == 1 { "+" } else { "-" };
-        let sufixo = format!("{}{}", sinal, distancia.abs());
-        let mut feats = self._features_token(&sent[pos_viz], &sufixo);
+        let mut feats = self._token_info_posicional(&tokens_info[pos_viz], distancia as i8);
 
         if pos_viz != ((indice_inicial as i32) + distancia) as usize {
             if let Some(pa) = posicao_anterior {
                 let faixa = &sent[pa.min(pos_viz)..=pa.max(pos_viz)];
                 let tem_pontuacao = faixa.iter().any(|t| is_pontuacao(t));
                 if tem_pontuacao {
-                    feats.push(format!("tem_pontuacao:{}", sufixo));
+                    feats.push(format!("tem_pontuacao:{}", distancia));
                 }
             }
         }
@@ -222,16 +313,6 @@ impl ExtratorFeature {
             .map(|m| (m.as_str().to_string(), m.start()))
             .unzip()
     }
-}
-
-fn normalize(text: &str) -> String {
-    if text.is_ascii() {
-        return text.to_ascii_uppercase().to_string();
-    }
-    text.nfkd()
-        .filter(|c| c.is_ascii())
-        .map(|b| b.to_ascii_uppercase())
-        .collect()
 }
 
 impl SeparadorEndereco {
@@ -282,9 +363,10 @@ impl SeparadorEndereco {
                     if ultimo_segmento.tipo == tipo.to_lowercase() {
                         if *offset > 0usize
                             && original
-                                .chars()
-                                .nth(offset - 1)
-                                .map(|c| c.is_whitespace())
+                                .as_bytes()
+                                .get(offset - 1)
+                                .copied()
+                                .map(|c| c.is_ascii_whitespace())
                                 .unwrap_or(false)
                         {
                             ultimo_segmento.valor.push(' ');
@@ -295,7 +377,7 @@ impl SeparadorEndereco {
             }
         }
 
-        return segmentos;
+        segmentos
     }
 
     fn segmentar_endereco(&self, texto: &str) -> EnderecoSegmentado {
@@ -478,21 +560,6 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_remove_acentos() {
-        assert_eq!(normalize("ação"), "ACAO");
-    }
-
-    #[test]
-    fn test_normalize_maiusculas_e_minusculas() {
-        assert_eq!(normalize("ÁbÇ"), "ABC");
-    }
-
-    #[test]
-    fn test_normalize_sem_acentos_retorna_igual() {
-        assert_eq!(normalize("RUA"), "RUA");
-    }
-
-    #[test]
     fn test_tokenize_basico() {
         assert_eq!(
             tokenize("Rua das Flores!"),
@@ -520,10 +587,10 @@ mod tests {
         assert!(feats.contains(&"0:is_alpha".to_string()));
         assert!(feats.contains(&"0:tam:3".to_string()));
         assert!(feats.contains(&"BOS".to_string()));
-        assert!(feats.contains(&"+1:DAS".to_string()));
-        assert!(feats.contains(&"+1:is_alpha".to_string()));
-        assert!(feats.contains(&"+2:FLORES".to_string()));
-        assert!(feats.contains(&"+2:is_alpha".to_string()));
+        assert!(feats.contains(&"1:DAS".to_string()));
+        assert!(feats.contains(&"1:is_alpha".to_string()));
+        assert!(feats.contains(&"2:FLORES".to_string()));
+        assert!(feats.contains(&"2:is_alpha".to_string()));
         assert!(!feats.contains(&"EOS".to_string()));
     }
 
@@ -548,8 +615,8 @@ mod tests {
         assert!(feats.contains(&"0:is_digit".to_string()));
         assert!(feats.contains(&"0:digit_len:3".to_string()));
         assert!(feats.contains(&"-1:RUA".to_string()));
-        assert!(feats.contains(&"+1:CENTRO".to_string()));
-        assert!(feats.contains(&"+1:is_alpha".to_string()));
+        assert!(feats.contains(&"1:CENTRO".to_string()));
+        assert!(feats.contains(&"1:is_alpha".to_string()));
         assert!(!feats.contains(&"0:123".to_string()));
         assert!(!feats.contains(&"BOS".to_string()));
         assert!(!feats.contains(&"EOS".to_string()));
@@ -562,8 +629,8 @@ mod tests {
         assert!(feats.contains(&"0:is_punct".to_string()));
         assert!(feats.contains(&"-1:RUA".to_string()));
         assert!(feats.contains(&"-1:is_alpha".to_string()));
-        assert!(feats.contains(&"+1:CENTRO".to_string()));
-        assert!(feats.contains(&"+1:is_alpha".to_string()));
+        assert!(feats.contains(&"1:CENTRO".to_string()));
+        assert!(feats.contains(&"1:is_alpha".to_string()));
         assert!(!feats.contains(&"EOS".to_string()));
     }
 
@@ -575,7 +642,7 @@ mod tests {
         assert!(feats.contains(&"0:has_digit".to_string()));
         assert!(feats.contains(&"0:tam:2".to_string()));
         assert!(feats.contains(&"-1:RUA".to_string()));
-        assert!(feats.contains(&"+1:CENTRO".to_string()));
+        assert!(feats.contains(&"1:CENTRO".to_string()));
         assert!(!feats.contains(&"BOS".to_string()));
         assert!(!feats.contains(&"EOS".to_string()));
     }
@@ -584,9 +651,9 @@ mod tests {
     fn test_token2features_com_pontuacao_entre_palavras() {
         let feats = token2features(&["Rua", ",", "das", "Flores"], 0);
         assert!(feats.contains(&"0:RUA".to_string()));
-        assert!(feats.contains(&"+1:DAS".to_string()));
-        assert!(feats.contains(&"+2:FLORES".to_string()));
-        assert!(feats.contains(&"tem_pontuacao:+1".to_string()));
+        assert!(feats.contains(&"1:DAS".to_string()));
+        assert!(feats.contains(&"2:FLORES".to_string()));
+        assert!(feats.contains(&"tem_pontuacao:1".to_string()));
         assert!(feats.contains(&"BOS".to_string()));
         assert!(!feats.contains(&"EOS".to_string()));
     }
@@ -595,9 +662,9 @@ mod tests {
     fn test_token2features_ignora_pontuacoes_sucessivas() {
         let feats = token2features(&["Rua", ",", ".", "Flores"], 0);
         assert!(feats.contains(&"0:RUA".to_string()));
-        assert!(feats.contains(&"+1:FLORES".to_string()));
-        assert!(feats.contains(&"+1:is_alpha".to_string()));
-        assert!(feats.contains(&"tem_pontuacao:+1".to_string()));
+        assert!(feats.contains(&"1:FLORES".to_string()));
+        assert!(feats.contains(&"1:is_alpha".to_string()));
+        assert!(feats.contains(&"tem_pontuacao:1".to_string()));
         assert!(feats.contains(&"BOS".to_string()));
         assert!(!feats.contains(&"EOS".to_string()));
     }
@@ -606,7 +673,7 @@ mod tests {
     fn test_token2features_palavra_longa() {
         let feats = token2features(&["Inconstitucionalissimamente"], 0);
         assert!(feats.contains(&"0:INCONSTITUCIONALISSIMAMENTE".to_string()));
-        assert!(feats.contains(&"0:tam:10+".to_string()));
+        assert!(feats.contains(&"0:tam:10".to_string()));
         assert!(feats.contains(&"0:is_alpha".to_string()));
         assert!(feats.contains(&"BOS".to_string()));
         assert!(feats.contains(&"EOS".to_string()));
@@ -622,7 +689,7 @@ mod tests {
         assert!(!feats.contains(&"BOS".to_string()));
         assert!(!feats.contains(&"EOS".to_string()));
         assert!(!feats.contains(&"-1:,".to_string()));
-        assert!(!feats.contains(&"+1:;".to_string()));
+        assert!(!feats.contains(&"1:;".to_string()));
     }
 
     #[test]
@@ -637,7 +704,7 @@ mod tests {
     fn test_token2features_com_token_numerico_longo() {
         let feats = token2features(&["123456789"], 0);
         assert!(feats.contains(&"0:is_digit".to_string()));
-        assert!(feats.contains(&"0:digit_len:7+".to_string()));
+        assert!(feats.contains(&"0:digit_len:7".to_string()));
         assert!(feats.contains(&"BOS".to_string()));
         assert!(feats.contains(&"EOS".to_string()));
         assert!(!feats.contains(&"0:123456789".to_string()));
