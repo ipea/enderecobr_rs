@@ -1,4 +1,3 @@
-#![cfg(feature = "experimental")]
 //! # Exemplo de uso
 //! ```
 //! use enderecobr_rs::{Endereco, segmentar_endereco};

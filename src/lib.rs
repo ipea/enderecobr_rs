@@ -414,7 +414,6 @@ pub use numero::padronizar_numeros_para_int;
 pub use numero::padronizar_numeros_para_string;
 pub use tipo_logradouro::padronizar_tipo_logradouro;
 
-#[cfg(feature = "experimental")]
 pub use separador_endereco::segmentar_endereco;
 
 /// Função utilitária utilizada nas ferramentas de CLI para selecionar um padronizador facilmente
@@ -435,10 +434,8 @@ pub fn obter_padronizador_por_tipo(tipo: &str) -> Result<fn(&str) -> String, &st
         "metaphone" => Ok(metaphone::metaphone),
         "dado_faltante" => Ok(|x| is_dado_faltante(x).to_string()),
 
-        #[cfg(feature = "experimental")]
         "segmentacao" => Ok(|val| segmentar_endereco(val).como_json()),
 
-        #[cfg(feature = "experimental")]
         "estruturacao" => Ok(|val| {
             format!(
                 "{}",
@@ -449,7 +446,6 @@ pub fn obter_padronizador_por_tipo(tipo: &str) -> Result<fn(&str) -> String, &st
             )
         }),
 
-        #[cfg(feature = "experimental")]
         "formatacao" => Ok(|val| {
             segmentar_endereco(val)
                 .como_endereco()
