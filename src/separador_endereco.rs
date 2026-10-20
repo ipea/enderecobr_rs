@@ -420,7 +420,10 @@ impl SeparadorEndereco {
 // quando uso `const`. Nesse caso,  como tenho uma construção complexa da struct `Padronizador`,
 // tenho que usar static com inicialização Lazy (o LazyLock aqui previne condições de corrida).
 static SEPARADOR: LazyLock<SeparadorEndereco> = LazyLock::new(|| {
-    SeparadorEndereco::carregar(None).expect("Não foi possível carregar o modelo de CRF.")
+    // Variável de ambiente com o caminho de um modelo CRF já treinado. Quando
+    // ausente, usa o cache local (baixando o modelo publicado se necessário).
+    let caminho = std::env::var_os("ENDERECOBR_MODELO_CRF").map(PathBuf::from);
+    SeparadorEndereco::carregar(caminho).expect("Não foi possível carregar o modelo de CRF.")
 });
 
 thread_local! {
