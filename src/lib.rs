@@ -366,16 +366,22 @@ pub fn normalizar(valor: &str) -> Cow<'_, str> {
             .bytes()
             .all(|c| !c.is_ascii_alphabetic() || c.is_ascii_uppercase())
         {
-            return Cow::Borrowed(valor.trim());
+            return Cow::Borrowed(valor);
         }
-        return Cow::Owned(valor.trim().to_ascii_uppercase());
+        return Cow::Owned(valor.to_ascii_uppercase());
     }
 
-    valor
+    let normalizado: String = valor
         .nfkd()
         .filter(|c| c.is_ascii())
         .map(|c| c.to_ascii_uppercase())
-        .collect()
+        .collect();
+
+    let aparado = normalizado.trim();
+    if aparado.len() == normalizado.len() {
+        return Cow::Owned(normalizado);
+    }
+    Cow::Owned(aparado.to_string())
 }
 
 /// Wrapper fino sobre o RegexSet para permitir localizar padrões rapidamente.
@@ -437,13 +443,10 @@ pub fn obter_padronizador_por_tipo(tipo: &str) -> Result<fn(&str) -> String, &st
         "segmentacao" => Ok(|val| segmentar_endereco(val).como_json()),
 
         "estruturacao" => Ok(|val| {
-            format!(
-                "{}",
-                segmentar_endereco(val)
-                    .como_endereco()
-                    .endereco_padronizado()
-                    .como_json()
-            )
+            segmentar_endereco(val)
+                .como_endereco()
+                .endereco_padronizado()
+                .como_json()
         }),
 
         "formatacao" => Ok(|val| {

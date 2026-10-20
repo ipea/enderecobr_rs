@@ -177,8 +177,20 @@ SIGLAS_ESTADOS = {
 }
 
 
-def tokenize(text: str):
-    return regex.findall(r"\p{N}+|\p{L}+|[^\s\p{L}\p{N}]", text)
+PADRAO_TOKEN = regex.compile(r"\p{N}+|\p{L}+|[^\s\p{L}\p{N}]")
+
+
+def tokenize(text: str) -> list[str]:
+    return PADRAO_TOKEN.findall(text)
+
+
+def tokenize_com_offsets(text: str) -> list[tuple[str, int]]:
+    """Tokens junto do offset (em caracteres) onde cada um começa em `text`.
+
+    O offset é o que permite remontar os segmentos preservando o texto bruto,
+    como o `SeparadorEndereco::segmentar` do Rust faz.
+    """
+    return [(m.group(0), m.start()) for m in PADRAO_TOKEN.finditer(text)]
 
 
 def normalize(text: str):

@@ -4,34 +4,68 @@ from typing import Annotated
 import sklearn_crfsuite
 import typer
 
-from crf_endereco.preproc import ExtratorFeature, tokenize
+from crf_endereco.preproc import ExtratorFeature, tokenize_com_offsets
+
+# `str.isspace()` é mais amplo que o `u8::is_ascii_whitespace` usado pelo Rust
+# (inclui NBSP, por exemplo); o conjunto explícito mantém as duas
+# implementações equivalentes.
+ESPACOS_ASCII = frozenset(" \t\n\x0c\r")
 
 
-def extrair_campos(crf: sklearn_crfsuite.CRF, extrator: ExtratorFeature, frase: str):
-    tokens = tokenize(frase)
-    x = extrator.tokens2features(tokens)
-    pred = crf.predict_single(x)
+def montar_segmentos(
+    frase: str,
+    tokens_com_offset: list[tuple[str, int]],
+    tags: list[str],
+) -> list[dict[str, str]]:
+    """Remonta os segmentos a partir dos rótulos BIO.
 
-    return list(zip(tokens, pred))
-
-
-def coletar_segmentos(tokens_classificados: list[tuple[str, str]]):
+    Espelha `SeparadorEndereco::segmentar` do Rust (`src/separador_endereco.rs`):
+    o separador entre tokens de um mesmo segmento vem do texto bruto, ou seja,
+    só entra um espaço quando o caractere anterior ao token é espaço em branco.
+    Assim "S/N" e "310A" continuam verbatim em vez de virar "S / N" e "310 A".
+    """
     segmentos: list[dict[str, str]] = []
-    ultimo_segmento = None
-    for tok, tok_tipo in tokens_classificados:
-        if tok_tipo == "O":
-            continue
 
-        bos, tipo = tok_tipo.split("_", 1)
+    for (tok, offset), tag in zip(tokens_com_offset, tags, strict=True):
+        partes = tag.split("_", 1)
+        if len(partes) != 2:
+            continue  # "O": token fora de qualquer segmento
+
+        bio, tipo = partes
         tipo = tipo.lower()
 
-        if bos == "B":
-            ultimo_segmento = {"tipo": tipo, "valor": tok}
-            segmentos.append(ultimo_segmento)
-        if bos == "I":
-            if ultimo_segmento is not None and ultimo_segmento["tipo"] == tipo:
-                ultimo_segmento["valor"] += " " + tok
+        if bio == "B":
+            segmentos.append({"tipo": tipo, "valor": tok})
+        elif bio == "I":
+            if not segmentos or segmentos[-1]["tipo"] != tipo:
+                continue
+            if offset > 0 and frase[offset - 1] in ESPACOS_ASCII:
+                segmentos[-1]["valor"] += " "
+            segmentos[-1]["valor"] += tok
+
     return segmentos
+
+
+def extrair_campos(
+    crf: sklearn_crfsuite.CRF, extrator: ExtratorFeature, frase: str
+) -> list[tuple[str, str]]:
+    """Tokens e rótulos previstos pelo CRF para a frase."""
+    toks = tokenize_com_offsets(frase)
+    x = extrator.tokens2features([tok for tok, _ in toks])
+    pred = crf.predict_single(x)
+
+    return list(zip([tok for tok, _ in toks], pred, strict=True))
+
+
+def segmentar(
+    crf: sklearn_crfsuite.CRF, extrator: ExtratorFeature, frase: str
+) -> list[dict[str, str]]:
+    """Pipeline completo do Rust (`segmentar_endereco`) para uma frase."""
+    tokens_com_offset = tokenize_com_offsets(frase)
+    x = extrator.tokens2features([tok for tok, _ in tokens_com_offset])
+    tags = crf.predict_single(x)
+
+    return montar_segmentos(frase, tokens_com_offset, tags)
 
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -57,8 +91,7 @@ def main(
             break
         if not line:
             continue
-        campos = extrair_campos(crf, extrator, line)
-        segmentos = coletar_segmentos(campos)
+        segmentos = segmentar(crf, extrator, line)
 
         print("-----------------")
         for seg in segmentos:

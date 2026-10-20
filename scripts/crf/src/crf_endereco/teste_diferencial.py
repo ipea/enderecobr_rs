@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -9,6 +10,10 @@ import typer
 
 from crf_endereco import teste_manual
 from crf_endereco.preproc import ExtratorFeature
+
+# O binário do Rust precisa usar exatamente o mesmo modelo que o Python, senão
+# a comparação mistura diferenças de features com diferenças de treino.
+VAR_AMBIENTE_MODELO = "ENDERECOBR_MODELO_CRF"
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
@@ -34,8 +39,7 @@ def main(
     segmentos_python: list[list[dict[str, str]]] = []
 
     for e in enderecos:
-        campos = teste_manual.extrair_campos(crf, extrator, e)
-        segmentos_python.append(teste_manual.coletar_segmentos(campos))
+        segmentos_python.append(teste_manual.segmentar(crf, extrator, e))
 
     ##########
     enderecos_string = "\n".join([str(e) for e in enderecos])
@@ -46,7 +50,7 @@ def main(
             "--quiet",
             "--bin",
             "padronizar",
-            "--features=experimental,cli",
+            "--features=cli",
             "segmentacao",
         ],
         input=enderecos_string,
@@ -54,6 +58,10 @@ def main(
         text=True,
         check=True,
         cwd="../../",
+        env={
+            **os.environ,
+            VAR_AMBIENTE_MODELO: str(tagger.resolve()),
+        },
     )
     saida = res.stdout
 
@@ -71,16 +79,8 @@ def main(
             print(f"Bruto: {resposta_rust_str}")
             break
 
-        diferente = False
-        for seg_rust, seg_python in zip(segmento_rust, segmento_python):
-            if seg_rust.get("tipo") != seg_python.get("tipo") or seg_rust.get(
-                "valor"
-            ) != seg_python.get("valor"):
-                diferente = True
-                n_diferentes += 1
-                break
-
-        if diferente:
+        if segmento_rust != segmento_python:
+            n_diferentes += 1
             print("-------------")
             print(endereco)
             print()
