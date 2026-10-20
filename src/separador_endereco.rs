@@ -11,13 +11,14 @@
 //! ```
 use std::{
     borrow::Cow,
+    cell::RefCell,
     fs,
     path::PathBuf,
     sync::LazyLock,
     time::{Duration, Instant},
 };
 
-use crfsuite::{Attribute, Model};
+use crfsuite::{Attribute, Model, Tagger};
 
 use regex::Regex;
 use rustc_hash::FxHashSet;
@@ -269,7 +270,7 @@ impl SeparadorEndereco {
         let model = Model::from_file(&modelo_path.to_string_lossy()).map_err(|x| x.to_string())?;
 
         Ok(SeparadorEndereco {
-            model: model,
+            model,
             extrator: ExtratorFeature::new(None),
         })
     }
@@ -291,47 +292,69 @@ impl SeparadorEndereco {
         tags: &[String],
         offsets: &[usize],
     ) -> Vec<SegmentoEndereco> {
-        let mut segmentos = Vec::new();
+        let mut segmentos = Vec::with_capacity(4);
         for ((tok, tok_tipo), offset) in tokens.iter().zip(tags).zip(offsets) {
-            if tok_tipo == "O" {
-                continue;
-            }
-
-            let Some((bio, tipo)) = tok_tipo.split_once("_") else {
-                continue; // Não deveria acontecer
+            // Rótulos são "B_<TIPO>", "I_<TIPO>" ou "O": comparar o byte do BIO
+            // evita comparações de string no hot path.
+            let Some((bio, tipo)) = tok_tipo.split_once('_') else {
+                continue; // "O"
             };
 
-            if bio == "B" {
-                let segmento = SegmentoEndereco {
+            match bio.as_bytes().first().copied() {
+                Some(b'B') => segmentos.push(SegmentoEndereco {
                     valor: tok.to_string(),
-                    tipo: tipo.to_string().to_lowercase(),
-                };
-                segmentos.push(segmento);
-            }
-            if bio == "I" {
-                if let Some(ultimo_segmento) = segmentos.last_mut() {
-                    if ultimo_segmento.tipo == tipo.to_lowercase() {
-                        if *offset > 0usize
-                            && original
-                                .as_bytes()
-                                .get(offset - 1)
-                                .copied()
-                                .map(|c| c.is_ascii_whitespace())
-                                .unwrap_or(false)
-                        {
-                            ultimo_segmento.valor.push(' ');
-                        }
-                        ultimo_segmento.valor.push_str(tok);
+                    tipo: tipo.to_ascii_lowercase(),
+                }),
+                Some(b'I') => {
+                    let Some(ultimo_segmento) = segmentos.last_mut() else {
+                        continue;
+                    };
+                    // `eq_ignore_ascii_case` compara sem alocar uma string minúscula
+                    // por token "I" (o tipo do segmento já está minúsculo).
+                    if !ultimo_segmento.tipo.eq_ignore_ascii_case(tipo) {
+                        continue;
                     }
+                    let tem_espaco = offset
+                        .checked_sub(1)
+                        .and_then(|anterior| original.as_bytes().get(anterior))
+                        .is_some_and(u8::is_ascii_whitespace);
+                    if tem_espaco {
+                        ultimo_segmento.valor.push(' ');
+                    }
+                    ultimo_segmento.valor.push_str(tok);
                 }
+                _ => continue,
             }
         }
 
         segmentos
     }
 
-    fn segmentar_endereco(&self, texto: &str) -> EnderecoSegmentado {
-        self.segmentar_endereco_com_timing(texto).0
+    /// Pipeline completo (tokenização, features, CRF e remontagem dos segmentos).
+    ///
+    /// `medir` existe para que o caminho sem cronometragem não pague dois
+    /// `Instant::now()` por endereço.
+    fn processar(
+        &self,
+        tagger: &mut Tagger<'_>,
+        texto: &str,
+        medir: bool,
+    ) -> (EnderecoSegmentado, Duration, Duration) {
+        let (tokens, offsets) = self.extrator.tokenize(texto);
+
+        let inicio_features = medir.then(Instant::now);
+        let atributos = self.tokens2attributes(&tokens);
+        let duracao_features = inicio_features.map_or(Duration::ZERO, |i| i.elapsed());
+
+        let inicio_inferencia = medir.then(Instant::now);
+        let tags = tagger.tag(&atributos).unwrap();
+        let duracao_inferencia = inicio_inferencia.map_or(Duration::ZERO, |i| i.elapsed());
+
+        let segmentado = EnderecoSegmentado {
+            endereco: texto.to_string(),
+            segmentos: self.segmentar(texto, &tokens, &tags, &offsets),
+        };
+        (segmentado, duracao_features, duracao_inferencia)
     }
 
     /// Igual a [`Self::segmentar_endereco`], mas devolve também o tempo gasto na
@@ -341,21 +364,7 @@ impl SeparadorEndereco {
         texto: &str,
     ) -> (EnderecoSegmentado, Duration, Duration) {
         let mut tagger = self.model.tagger().unwrap();
-        let (tokens, offsets) = self.extrator.tokenize(texto);
-
-        let inicio_features = Instant::now();
-        let atributos = self.tokens2attributes(&tokens);
-        let duracao_features = inicio_features.elapsed();
-
-        let inicio_inferencia = Instant::now();
-        let tags = tagger.tag(&atributos).unwrap();
-        let duracao_inferencia = inicio_inferencia.elapsed();
-
-        let segmentado = EnderecoSegmentado {
-            endereco: texto.to_string(),
-            segmentos: self.segmentar(texto, &tokens, &tags, &offsets),
-        };
-        (segmentado, duracao_features, duracao_inferencia)
+        self.processar(&mut tagger, texto, true)
     }
 }
 
@@ -366,14 +375,33 @@ static SEPARADOR: LazyLock<SeparadorEndereco> = LazyLock::new(|| {
     SeparadorEndereco::carregar(None).expect("Não foi possível carregar o modelo de CRF.")
 });
 
+thread_local! {
+    /// Um `Tagger` reaproveitado por thread.
+    static TAGGER: RefCell<Option<Tagger<'static>>> = const { RefCell::new(None) };
+}
+
+/// Executa `f` com o tagger da thread atual, criando-o na primeira chamada.
+fn com_tagger<R>(f: impl FnOnce(&mut Tagger<'static>) -> R) -> R {
+    TAGGER.with(|celula| {
+        let mut celula = celula.borrow_mut();
+        let tagger = celula.get_or_insert_with(|| {
+            let modelo: &'static Model = &SEPARADOR.model;
+            modelo
+                .tagger()
+                .expect("Não foi possível criar o tagger do CRF.")
+        });
+        f(tagger)
+    })
+}
+
 pub fn segmentar_endereco(texto: &str) -> EnderecoSegmentado {
-    SEPARADOR.segmentar_endereco(texto)
+    com_tagger(|tagger| SEPARADOR.processar(tagger, texto, false).0)
 }
 
 /// Igual a [`segmentar_endereco`], mas devolve também os tempos gastos na extração
 /// de features e na inferência do CRF (útil para medir desempenho).
 pub fn segmentar_endereco_com_timing(texto: &str) -> (EnderecoSegmentado, Duration, Duration) {
-    SEPARADOR.segmentar_endereco_com_timing(texto)
+    com_tagger(|tagger| SEPARADOR.processar(tagger, texto, true))
 }
 
 impl EnderecoSegmentado {
@@ -417,7 +445,7 @@ impl EnderecoSegmentado {
                 atributo.push_str(seg.valor.as_str());
             }
         }
-        return res;
+        res
     }
 }
 
