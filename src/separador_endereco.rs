@@ -31,12 +31,16 @@ use crate::{
     Endereco,
 };
 
-const MODEL_DOWNLOAD_PATH: &'static str =
+const MODEL_DOWNLOAD_PATH: &str =
     "https://github.com/ipea/enderecobr_rs/releases/download/modelo-crf-v0.1/tagger.crf";
 
 fn is_pontuacao(word: &str) -> bool {
-    word.chars().next().is_some_and(|c| PONTUACAO.contains(&c))
+    word.chars().next().is_some_and(|c| PONTUACAO.contains(c))
 }
+
+// `&str` const: varrer ~30 bytes é bem mais barato no hot path do que um
+// lookup em `FxHashSet<char>`, e não aloca nada na inicialização.
+const PONTUACAO: &str = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~¨´°§¶·«»–—…“”‘’";
 
 pub struct SeparadorEndereco {
     pub model: Model,
@@ -93,25 +97,55 @@ impl ExtratorFeature {
         self.tokens2features(&toks)
     }
 
-    pub fn tokens2features(&self, toks: &[String]) -> Vec<Vec<String>> {
+    pub fn tokens2features(&self, toks: &[&str]) -> Vec<Vec<String>> {
         let tok_info: Vec<TokenInfo> = toks.iter().map(|tok| self._token_info(tok)).collect();
         (0..toks.len())
             .map(|i| {
-                // Capacidade típica: bias + posição + token + 4 vizinhos.
                 let mut feats: Vec<String> = Vec::with_capacity(32);
-                self._features_posicao(toks, &tok_info, i, &mut feats);
-                // Espelha o `dict.fromkeys` do `preproc.py`: a deduplicação não
-                // aloca e a ordem das features é irrelevante para o CRF (soma de pesos).
-                feats.sort_unstable();
-                feats.dedup();
+                self._features_token(toks, &tok_info, i, &mut feats);
                 feats
             })
             .collect()
     }
 
+    /// Features de um token, já deduplicadas, escritas em `feats`.
+    ///
+    /// `feats` é limpo com [`Vec::clear`], que preserva a capacidade alocada,
+    /// permitindo reutilizar o mesmo vetor entre tokens.
+    fn _features_token(
+        &self,
+        sent: &[&str],
+        tokens_info: &[TokenInfo],
+        i: usize,
+        feats: &mut Vec<String>,
+    ) {
+        feats.clear();
+        self._features_posicao(sent, tokens_info, i, feats);
+        feats.sort_unstable();
+        feats.dedup();
+    }
+
+    /// Features de um token, já deduplicadas, convertidas em atributos do CRF.
+    ///
+    /// Internamente reutiliza o mesmo scratch `Vec<String>` entre os tokens:
+    /// o vetor intermediário deixa de ser alocado uma vez por token.
+    pub fn tokens2attributes(&self, tokens: &[&str]) -> Vec<Vec<Attribute>> {
+        let tok_info: Vec<TokenInfo> = tokens.iter().map(|tok| self._token_info(tok)).collect();
+        let mut atributos: Vec<Vec<Attribute>> = Vec::with_capacity(tokens.len());
+        let mut feats: Vec<String> = Vec::with_capacity(32);
+        for i in 0..tokens.len() {
+            self._features_token(tokens, &tok_info, i, &mut feats);
+            // `Attribute::from(String)` move a String; `Attribute::new(&str, 1.0)`
+            // clonaria cada feature, dobrando as alocações por token. O `drain`
+            // esvazia o scratch preservando sua capacidade.
+            atributos.push(feats.drain(..).map(Attribute::from).collect());
+        }
+        atributos
+    }
+
     fn _features_posicao(
         &self,
-        sent: &[String],
+        sent: &[&str],
         tokens_info: &[TokenInfo],
         i: usize,
         feats: &mut Vec<String>,
@@ -201,7 +235,7 @@ impl ExtratorFeature {
 
     fn _features_vizinhanca(
         &self,
-        sent: &[String],
+        sent: &[&str],
         tokens_info: &[TokenInfo],
         indice_inicial: usize,
         distancia: i32,
@@ -220,11 +254,9 @@ impl ExtratorFeature {
             }
         }
 
-        if posicao_vizinho.is_none() {
+        let Some(pos_viz) = posicao_vizinho else {
             return;
-        }
-
-        let pos_viz = posicao_vizinho.unwrap();
+        };
         self._token_info_posicional(&tokens_info[pos_viz], distancia as i8, feats);
 
         if pos_viz != ((indice_inicial as i32) + distancia) as usize {
@@ -240,7 +272,7 @@ impl ExtratorFeature {
 
     fn _pos_prox_palavra(
         &self,
-        sent: &[String],
+        sent: &[&str],
         indice_inicial: usize,
         direcao: i32,
     ) -> Option<usize> {
@@ -256,10 +288,12 @@ impl ExtratorFeature {
     }
 
     // Funções auxiliares de exemplo
-    pub fn tokenize(&self, text: &str) -> (Vec<String>, Vec<usize>) {
+    /// Os tokens são fatias emprestadas do texto de entrada: a extração de
+    /// features não aloca nenhuma `String` por token.
+    pub fn tokenize<'a>(&self, text: &'a str) -> (Vec<&'a str>, Vec<usize>) {
         self.regex_tokenizer
             .find_iter(text)
-            .map(|m| (m.as_str().to_string(), m.start()))
+            .map(|m| (m.as_str(), m.start()))
             .unzip()
     }
 }
@@ -275,20 +309,14 @@ impl SeparadorEndereco {
         })
     }
 
-    pub fn tokens2attributes(&self, tokens: &[String]) -> Vec<Vec<Attribute>> {
-        self.extrator
-            .tokens2features(tokens)
-            .into_iter()
-            // `Attribute::from(String)` move a String; `Attribute::new(&str, 1.0)`
-            // clonaria cada feature, dobrando as alocações por token.
-            .map(|feats| feats.into_iter().map(Attribute::from).collect())
-            .collect()
+    pub fn tokens2attributes(&self, tokens: &[&str]) -> Vec<Vec<Attribute>> {
+        self.extrator.tokens2attributes(tokens)
     }
 
     fn segmentar(
         &self,
         original: &str,
-        tokens: &[String],
+        tokens: &[&str],
         tags: &[String],
         offsets: &[usize],
     ) -> Vec<SegmentoEndereco> {
@@ -480,60 +508,47 @@ pub fn baixar_modelo() -> Result<PathBuf, String> {
     Ok(path)
 }
 
-// Constantes usadas para criar as features do CRF.
+// Constantes usadas para criar as features do CRF. Como são consultadas por
+// texto já normalizado (emprestado), `&'static str` evita as `String` da
+// inicialização sem mudar o custo do lookup (o hash é do conteúdo).
 
-static MARCADORES_CONHECIDOS_DF: LazyLock<FxHashSet<String>> = LazyLock::new(|| {
-    FxHashSet::from_iter(
-        [
-            "SQN", "SQS", "SQNW", "SQSW", "SCLN", "SCLS", "SCN", "SCS", "SGAN", "SGAS", "SEPN",
-            "SEPS", "SRTVN", "SRTVS", "SHN", "SHS", "SHIS", "SHIN", "SHLS", "SHLN", "SHCGN",
-            "SHCES", "SHCE", "SHTQ", "SMPW", "SAAN", "SAS", "SAUS", "SAUN", "SBS", "SDS", "SDN",
-            "SDMC", "SIG", "SIA", "SIBS", "SCES", "SMHN", "SMLN", "SRES", "SRL", "SO", "SOPI",
-            "SOFS", "CLN", "CLS", "CLNW", "ADE", "AOS", "AR", "CCSW", "CSG", "CRS", "CSA", "CSB",
-            "CSD", "CNB", "CND", "CNG", "CNL", "CNM", "EQ", "EQNM", "EQNO", "EQNP", "EQS", "QI",
-            "QE", "QS", "QR", "QN", "QD", "QNM", "QNN", "QNO", "QNP", "QNA", "QNC", "QND", "QNE",
-            "QNF", "QNG", "QNH", "QNJ", "QNL", "QMS", "QMSW", "QRC", "QRSW", "QSB", "QSC", "QSE",
-            "QRO", "SIND", "SGCV", "SCE",
-        ]
-        .iter()
-        .map(|x| x.to_string()),
-    )
+static MARCADORES_CONHECIDOS_DF: LazyLock<FxHashSet<&'static str>> = LazyLock::new(|| {
+    FxHashSet::from_iter([
+        "SQN", "SQS", "SQNW", "SQSW", "SCLN", "SCLS", "SCN", "SCS", "SGAN", "SGAS", "SEPN", "SEPS",
+        "SRTVN", "SRTVS", "SHN", "SHS", "SHIS", "SHIN", "SHLS", "SHLN", "SHCGN", "SHCES", "SHCE",
+        "SHTQ", "SMPW", "SAAN", "SAS", "SAUS", "SAUN", "SBS", "SDS", "SDN", "SDMC", "SIG", "SIA",
+        "SIBS", "SCES", "SMHN", "SMLN", "SRES", "SRL", "SO", "SOPI", "SOFS", "CLN", "CLS", "CLNW",
+        "ADE", "AOS", "AR", "CCSW", "CSG", "CRS", "CSA", "CSB", "CSD", "CNB", "CND", "CNG", "CNL",
+        "CNM", "EQ", "EQNM", "EQNO", "EQNP", "EQS", "QI", "QE", "QS", "QR", "QN", "QD", "QNM",
+        "QNN", "QNO", "QNP", "QNA", "QNC", "QND", "QNE", "QNF", "QNG", "QNH", "QNJ", "QNL", "QMS",
+        "QMSW", "QRC", "QRSW", "QSB", "QSC", "QSE", "QRO", "SIND", "SGCV", "SCE",
+    ])
 });
 
-static MARCADORES_CONHECIDOS_PALMAS: LazyLock<FxHashSet<String>> = LazyLock::new(|| {
-    FxHashSet::from_iter(
-        [
-            "ARSE", "ARSO", "ARNE", "ARNO", "AC", "ACSE", "ACSO", "ACNE", "ACNO", "ACSU", "ACSV",
-            "ASR", "AA", "AAF", "AAE", "AAM", "AANE", "AANO", "AASE", "AASO", "AE", "ALC", "AVNE",
-            "AVNO", "AVSE", "AVSO", "APM", "HM", "QI", "QD", "QR", "QC", "LO", "NS",
-        ]
-        .iter()
-        .map(|x| x.to_string()),
-    )
+static MARCADORES_CONHECIDOS_PALMAS: LazyLock<FxHashSet<&'static str>> = LazyLock::new(|| {
+    FxHashSet::from_iter([
+        "ARSE", "ARSO", "ARNE", "ARNO", "AC", "ACSE", "ACSO", "ACNE", "ACNO", "ACSU", "ACSV",
+        "ASR", "AA", "AAF", "AAE", "AAM", "AANE", "AANO", "AASE", "AASO", "AE", "ALC", "AVNE",
+        "AVNO", "AVSE", "AVSO", "APM", "HM", "QI", "QD", "QR", "QC", "LO", "NS",
+    ])
 });
 
-static SIGLAS_ESTADOS: LazyLock<FxHashSet<String>> =
-    LazyLock::new(|| FxHashSet::from_iter(ESTADOS.iter().map(|e| e.sigla.to_string())));
-
-static PONTUACAO: LazyLock<FxHashSet<char>> = LazyLock::new(|| {
-    FxHashSet::from_iter("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~¨´°§¶·«»–—…“”‘’".chars())
-});
+static SIGLAS_ESTADOS: LazyLock<FxHashSet<&'static str>> =
+    LazyLock::new(|| FxHashSet::from_iter(ESTADOS.iter().map(|e| e.sigla)));
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn token2features(sent: &[&str], i: usize) -> Vec<String> {
-        let toks: Vec<String> = sent.iter().map(|s| s.to_string()).collect();
-        ExtratorFeature::new(None).tokens2features(&toks)[i].clone()
+        ExtratorFeature::new(None).tokens2features(sent)[i].clone()
     }
 
     fn tokens2features(sent: &[&str]) -> Vec<Vec<String>> {
-        let toks: Vec<String> = sent.iter().map(|s| s.to_string()).collect();
-        ExtratorFeature::new(None).tokens2features(&toks)
+        ExtratorFeature::new(None).tokens2features(sent)
     }
 
-    fn tokenize(sent: &str) -> Vec<String> {
+    fn tokenize(sent: &str) -> Vec<&str> {
         ExtratorFeature::new(None).tokenize(sent).0
     }
 
@@ -544,7 +559,7 @@ mod tests {
             vec!["Rua", "das", "Flores", "!"]
         );
         assert_eq!(tokenize("123, teste"), vec!["123", ",", "teste"]);
-        assert_eq!(tokenize(""), Vec::<String>::new());
+        assert_eq!(tokenize(""), Vec::<&str>::new());
         assert_eq!(tokenize("A/B"), vec!["A", "/", "B"]);
     }
 
