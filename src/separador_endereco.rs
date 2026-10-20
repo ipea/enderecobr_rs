@@ -88,7 +88,8 @@ impl ExtratorFeature {
             // \p{L} => caracteres unicode
             // \p{N} => números unicode
             // Parece que tinha diferença entre as implementações devido às regexes
-            regex_tokenizer: Regex::new(r"\p{N}+|\p{L}+|[^\s\p{L}\p{N}]").unwrap(),
+            regex_tokenizer: Regex::new(r"\p{N}+|\p{L}+|[^\s\p{L}\p{N}]")
+                .expect("regex do tokenizador é válida"),
         }
     }
 
@@ -155,12 +156,16 @@ impl ExtratorFeature {
             "{}_pos",
             (i as f64 / sent.len() as f64 * 4.0) as i32
         ));
-        self._token_info_posicional(&tokens_info[i], 0, feats);
+
+        let Some(tok_info) = tokens_info.get(i) else {
+            return;
+        };
+        self._token_info_posicional(tok_info, 0, feats);
 
         if i == 0 {
             feats.push("BOS".to_string());
         }
-        if i == sent.len() - 1 {
+        if i == sent.len().saturating_sub(1) {
             feats.push("EOS".to_string());
         }
 
@@ -257,12 +262,20 @@ impl ExtratorFeature {
         let Some(pos_viz) = posicao_vizinho else {
             return;
         };
-        self._token_info_posicional(&tokens_info[pos_viz], distancia as i8, feats);
+        let Some(tok_viz) = tokens_info.get(pos_viz) else {
+            return;
+        };
+        self._token_info_posicional(tok_viz, distancia as i8, feats);
 
-        if pos_viz != ((indice_inicial as i32) + distancia) as usize {
+        // A posição geométrica esperada só difere da encontrada quando o
+        // vizinho foi alcançado pulando pontuação.
+        let posicao_esperada = usize::try_from(indice_inicial as i64 + i64::from(distancia)).ok();
+        if posicao_esperada != Some(pos_viz) {
             if let Some(pa) = posicao_anterior {
-                let faixa = &sent[pa.min(pos_viz)..=pa.max(pos_viz)];
-                let tem_pontuacao = faixa.iter().any(|t| is_pontuacao(t));
+                let (inicio, fim) = (pa.min(pos_viz), pa.max(pos_viz));
+                let tem_pontuacao = sent
+                    .get(inicio..=fim)
+                    .is_some_and(|faixa| faixa.iter().any(|t| is_pontuacao(t)));
                 if tem_pontuacao {
                     feats.push(format!("tem_pontuacao:{}", distancia));
                 }
@@ -276,15 +289,17 @@ impl ExtratorFeature {
         indice_inicial: usize,
         direcao: i32,
     ) -> Option<usize> {
-        let mut i = indice_inicial as i32 + direcao;
-        while i >= 0 && (i as usize) < sent.len() {
-            let tok = &sent[i as usize];
+        let mut i = indice_inicial as i64 + i64::from(direcao);
+        loop {
+            // Sai pelo `?` assim que o índice passa de qualquer um dos limites
+            // (negativo na direção para trás, `sent.len()` na para frente).
+            let idx = usize::try_from(i).ok()?;
+            let tok = sent.get(idx)?;
             if !tok.is_empty() && tok.chars().all(|c| c.is_alphanumeric()) {
-                return Some(i as usize);
+                return Some(idx);
             }
-            i += direcao;
+            i += i64::from(direcao);
         }
-        None
     }
 
     // Funções auxiliares de exemplo
@@ -375,7 +390,9 @@ impl SeparadorEndereco {
         let duracao_features = inicio_features.map_or(Duration::ZERO, |i| i.elapsed());
 
         let inicio_inferencia = medir.then(Instant::now);
-        let tags = tagger.tag(&atributos).unwrap();
+        let tags = tagger
+            .tag(&atributos)
+            .expect("Não foi possível executar o tagging do CRF.");
         let duracao_inferencia = inicio_inferencia.map_or(Duration::ZERO, |i| i.elapsed());
 
         let segmentado = EnderecoSegmentado {
@@ -391,7 +408,10 @@ impl SeparadorEndereco {
         &self,
         texto: &str,
     ) -> (EnderecoSegmentado, Duration, Duration) {
-        let mut tagger = self.model.tagger().unwrap();
+        let mut tagger = self
+            .model
+            .tagger()
+            .expect("Não foi possível criar o tagger do CRF.");
         self.processar(&mut tagger, texto, true)
     }
 }
@@ -441,9 +461,8 @@ impl EnderecoSegmentado {
         for (i, seg) in self.segmentos.iter().enumerate() {
             let atributo_opt = match seg.tipo.as_str() {
                 "logradouro" if res.logradouro.is_none() => {
-                    Some(res.logradouro.get_or_insert_default())
+                    Some(res.logradouro.get_or_insert_with(String::new))
                 }
-                "numero" => Some(res.numero.get_or_insert_default()),
                 "parcela"
                     if i > 0
                         && self
@@ -452,17 +471,19 @@ impl EnderecoSegmentado {
                             .filter(|anterior| anterior.tipo == "logradouro")
                             .is_some() =>
                 {
-                    Some(res.logradouro.get_or_insert_default())
+                    Some(res.logradouro.get_or_insert_with(String::new))
                 }
-                "parcela" => Some(res.complemento.get_or_insert_default()),
-                "modificador_numero" => Some(res.numero.get_or_insert_default()),
+                // `numero` e `modificador_numero` também alimentam o número.
+                "numero" | "modificador_numero" => Some(res.numero.get_or_insert_with(String::new)),
                 "quilometragem_via" if res.numero.is_none() => {
-                    Some(res.numero.get_or_insert_default())
+                    Some(res.numero.get_or_insert_with(String::new))
                 }
-                "quilometragem_via" => Some(res.complemento.get_or_insert_default()),
-                "complemento" => Some(res.complemento.get_or_insert_default()),
-                "localidade" => Some(res.localidade.get_or_insert_default()),
-                "cep" => Some(res.cep.get_or_insert_default()),
+                // Sem contexto de número, estes tipos caem no complemento.
+                "parcela" | "quilometragem_via" | "complemento" => {
+                    Some(res.complemento.get_or_insert_with(String::new))
+                }
+                "localidade" => Some(res.localidade.get_or_insert_with(String::new)),
+                "cep" => Some(res.cep.get_or_insert_with(String::new)),
                 _ => None,
             };
 
@@ -479,7 +500,7 @@ impl EnderecoSegmentado {
 
 pub fn baixar_modelo() -> Result<PathBuf, String> {
     let versao_modelo = MODEL_DOWNLOAD_PATH
-        .rsplitn(3, "/")
+        .rsplit('/')
         .nth(1)
         .ok_or("Não foi possivel obter a versão do modelo")?;
 
