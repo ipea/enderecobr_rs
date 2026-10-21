@@ -12,7 +12,7 @@ use crfsuite::{Attribute, Model, Tagger};
 
 use serde::Serialize;
 
-pub use crate::separador_endereco::modelo::obter_modelo;
+pub use crate::separador_endereco::modelo::{obter_caminho_modelo, obter_modelo};
 use crate::{separador_endereco::features::ExtratorFeature, Endereco};
 
 pub struct SeparadorEndereco {

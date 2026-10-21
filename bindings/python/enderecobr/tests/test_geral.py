@@ -1,5 +1,6 @@
-import enderecobr
+import pytest
 
+import enderecobr
 
 # Testes bem simples só para garantir que as funções estão sendo executadas.
 
@@ -133,3 +134,14 @@ def testa_padronizador_obter_vetores():
     pad = enderecobr.Padronizador()
     pad.adicionar_substituicoes([["R ", "RUA "]])
     assert pad.obter_vetores() == (["R "], ["RUA "], [None])
+
+
+def testa_separador_sem_modelo():
+    separador = enderecobr.SeparadorEndereco()
+
+    with pytest.raises(RuntimeError, match="Nenhum modelo carregado"):
+        _ = separador.segmentar("av n sra copacabana, 123")
+
+    # Testa também usando o método estático.
+    with pytest.raises(RuntimeError, match="Não foi possível carregar o modelo"):
+        _ = enderecobr.SeparadorEndereco.carregar("/nao/existe/tagger.crf")

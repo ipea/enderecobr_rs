@@ -13,10 +13,10 @@ pub const NOME_DIRETORIO_CACHE: &str = "enderecobr_rs";
 pub const NOME_ARQUIVO_MODELO: &str = "tagger.crf";
 
 /// Diretório (arquivo ou diretório) onde o modelo deve ficar.
-pub const VAR_AMBIENTE_MODELO: &str = "ENDERECOBR_MODELO_CRF";
+pub const VAR_AMBIENTE_MODELO: &str = "ENDERECOBR_MODELO";
 
 /// Desabilita o download do modelo.
-pub const VAR_AMBIENTE_SEM_DOWNLOAD: &str = "ENDERECOBR_MODELO_CRF_SEM_DOWNLOAD";
+pub const VAR_AMBIENTE_SEM_DOWNLOAD: &str = "ENDERECOBR_MODELO_SEM_DOWNLOAD";
 
 /// Retorna o caminho configurado do modelo, baixando-o caso ainda não
 /// exista localmente. É usado internamente por
@@ -25,7 +25,7 @@ pub const VAR_AMBIENTE_SEM_DOWNLOAD: &str = "ENDERECOBR_MODELO_CRF_SEM_DOWNLOAD"
 /// A função retorna o caminho usando esta lista de prioridades:
 ///
 /// 1. `path_modelo`, quando informado e não vazio;
-/// 2. a variável de ambiente `ENDERECOBR_MODELO_CRF`, quando definida e não
+/// 2. a variável de ambiente `ENDERECOBR_MODELO`, quando definida e não
 ///    vazia;
 /// 3. o diretório de cache do sistema operacional (`~/.cache/...` no Linux,
 ///    `~/Library/Caches` no macOS, `%LOCALAPPDATA%` no Windows), no caminho
@@ -36,7 +36,7 @@ pub const VAR_AMBIENTE_SEM_DOWNLOAD: &str = "ENDERECOBR_MODELO_CRF_SEM_DOWNLOAD"
 /// Caso seja um arquivo, ele será usado diretamente.
 ///
 /// O arquivo só é baixado quando está ausente ou vazio. Use a variável de ambiente
-/// `ENDERECOBR_MODELO_CRF_SEM_DOWNLOAD=1` para evitar o download em CIs.
+/// `ENDERECOBR_MODELO_SEM_DOWNLOAD=1` para evitar o download em CIs.
 ///
 /// A função retorna `Err` quando não consegue criar o diretório de destino,
 /// fazer o download, ou gravar o modelo no local.
@@ -139,15 +139,13 @@ fn obter_bytes_modelo() -> Result<Vec<u8>, String> {
     let resposta = cliente
         .get(MODEL_DOWNLOAD_PATH)
         .send()
-        .map_err(|erro| format!("Falha ao baixar o modelo de CRF: {erro}"))?;
+        .map_err(|erro| format!("Falha ao baixar o modelo: {erro}"))?;
 
     // O `reqwest` só devolve `Err` para falhas de transporte: um 404 ou 500 chega
     // como `Ok` e, sem esta checagem, o HTML do erro viraria o arquivo do modelo.
     let status = resposta.status();
     if !status.is_success() {
-        return Err(format!(
-            "O download do modelo de CRF falhou com HTTP {status}"
-        ));
+        return Err(format!("O download do modelo falhou com HTTP {status}"));
     }
 
     resposta

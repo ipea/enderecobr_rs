@@ -1,4 +1,6 @@
-use pyo3::exceptions::PyValueError;
+use std::path::PathBuf;
+
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
 #[pyclass]
@@ -124,18 +126,74 @@ impl IdentificadorPadroes {
     }
 }
 
+/// Segmentador probabilístico de endereços.
+///
+/// A instância nasce **sem modelo**: o construtor não lê nem baixa nada.
 #[pyclass]
 struct SeparadorEndereco {
-    interno: enderecobr_rs::separador_endereco::SeparadorEndereco,
+    interno: Option<enderecobr_rs::separador_endereco::SeparadorEndereco>,
 }
 
-#[pyclass]
+#[pymethods]
+impl SeparadorEndereco {
+    #[new]
+    fn novo() -> SeparadorEndereco {
+        SeparadorEndereco { interno: None }
+    }
+
+    /// Cria um separador já carregado a partir de um arquivo de modelo.
+    #[staticmethod]
+    fn carregar(caminho: PathBuf) -> PyResult<SeparadorEndereco> {
+        Ok(SeparadorEndereco {
+            interno: Some(abrir_modelo(caminho)?),
+        })
+    }
+
+    /// Carrega (ou substitui) o modelo desta instância, sem criar um objeto novo.
+    fn carregar_modelo(&mut self, caminho: PathBuf) -> PyResult<()> {
+        self.interno = Some(abrir_modelo(caminho)?);
+        Ok(())
+    }
+
+    /// Segmenta o endereço nas suas partes constituintes.
+    fn segmentar(&self, py: Python<'_>, texto: &str) -> PyResult<EnderecoSegmentado> {
+        let separador = self.interno.as_ref().ok_or_else(|| {
+            PyRuntimeError::new_err(
+                "Nenhum modelo carregado. Use SeparadorEndereco.carregar(caminho) \
+                 ou carregar_modelo(caminho) antes de segmentar.",
+            )
+        })?;
+
+        // A inferência do modelo é a parte cara: rodar sem o GIL libera as outras
+        // threads do Python (a tagger é criada a cada chamada).
+        let (segmentado, _, _) = py.detach(|| separador.segmentar_endereco_com_timing(texto));
+        Ok(segmentado.into())
+    }
+}
+
+/// Converte o `Result<_, String>` do núcleo no erro Python correspondente.
+fn abrir_modelo(
+    caminho: PathBuf,
+) -> PyResult<enderecobr_rs::separador_endereco::SeparadorEndereco> {
+    enderecobr_rs::separador_endereco::SeparadorEndereco::carregar(caminho).map_err(|erro| {
+        PyRuntimeError::new_err(format!("Não foi possível carregar o modelo: {erro}"))
+    })
+}
+
+/// Converte as falhas de resolução/download do modelo em erro Python.
+fn erro_de_modelo(erro: String) -> PyErr {
+    PyRuntimeError::new_err(format!("Não foi possível obter o modelo: {erro}"))
+}
+
+#[pyclass(get_all, frozen, eq, skip_from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SegmentoEndereco {
     pub tipo: String,
     pub valor: String,
 }
 
-#[pyclass]
+#[pyclass(get_all, frozen, eq, skip_from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EnderecoSegmentado {
     pub segmentos: Vec<SegmentoEndereco>,
 }
@@ -160,23 +218,10 @@ impl From<enderecobr_rs::separador_endereco::EnderecoSegmentado> for EnderecoSeg
     }
 }
 
-// #[pymethods]
-// impl SeparadorEndereco {
-//     fn carregar(path_modelo: &str) -> PyResult<SeparadorEndereco> {
-//         // enderecobr_rs::cep::padronizar_cep(valor).map_err(pyo3::exceptions::PyValueError::new_err)
-//
-//         let separador = SeparadorEndereco {
-//             interno: enderecobr_rs::separador_endereco::SeparadorEndereco::carregar(PathBuf::from(
-//                 path_modelo,
-//             ))
-//             .unwrap(),
-//         };
-//         separador
-//     }
-// }
-
 #[pymodule]
 pub mod enderecobr {
+
+    use std::path::PathBuf;
 
     use pyo3::prelude::*;
 
@@ -191,6 +236,9 @@ pub mod enderecobr {
 
     #[pymodule_export]
     use super::IdentificadorPadroes;
+
+    #[pymodule_export]
+    use super::SeparadorEndereco;
 
     #[pyfunction]
     fn padronizar_logradouros(valor: &str) -> String {
@@ -331,6 +379,23 @@ pub mod enderecobr {
         Padronizador {
             interno: enderecobr_rs::tipo_logradouro::criar_padronizador_tipo_logradouro(),
         }
+    }
+
+    // ========= Gestão do Modelo ==========
+
+    #[pyfunction]
+    #[pyo3(signature = (path_modelo = None))]
+    fn obter_modelo(py: Python<'_>, path_modelo: Option<String>) -> PyResult<PathBuf> {
+        // O download é bloqueante (até 60 s): não segurar o GIL enquanto isso.
+        py.detach(|| enderecobr_rs::separador_endereco::obter_modelo(path_modelo))
+            .map_err(super::erro_de_modelo)
+    }
+
+    #[pyfunction]
+    #[pyo3(signature = (path_modelo = None))]
+    fn obter_caminho_modelo(path_modelo: Option<String>) -> PyResult<PathBuf> {
+        enderecobr_rs::separador_endereco::obter_caminho_modelo(path_modelo)
+            .map_err(super::erro_de_modelo)
     }
 
     // ========= Separador de endereço ==========

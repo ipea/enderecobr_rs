@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from pathlib import Path
 
 def normalizar(valor: str) -> str:
     """
@@ -25,7 +26,6 @@ def normalizar(valor: str) -> str:
     'R. DO ACAI 15O'
 
     """
-    ...
 
 def padronizar_logradouros(valor: str) -> str:
     """
@@ -66,7 +66,6 @@ def padronizar_logradouros(valor: str) -> str:
     As expressões regulares são compiladas na primeira chamada, portanto a primeira
     execução pode ser mais lenta. Chamadas subsequentes reutilizam as regexes compiladas.
     """
-    ...
 
 def padronizar_numeros(valor: str) -> str:
     """
@@ -106,7 +105,6 @@ def padronizar_numeros(valor: str) -> str:
     As expressões regulares são compiladas na primeira chamada, portanto a primeira
     execução pode ser mais lenta. Chamadas subsequentes reutilizam as regexes compiladas.
     """
-    ...
 
 def padronizar_numeros_para_int(valor: str) -> int | None:
     """
@@ -145,7 +143,6 @@ def padronizar_numeros_para_int(valor: str) -> int | None:
     True
 
     """
-    ...
 
 def padronizar_numeros_para_string(valor: float) -> str:
     """
@@ -177,7 +174,6 @@ def padronizar_numeros_para_string(valor: float) -> str:
     'S/N'
 
     """
-    ...
 
 def padronizar_complementos(valor: str) -> str:
     """
@@ -216,7 +212,6 @@ def padronizar_complementos(valor: str) -> str:
     As expressões regulares são compiladas na primeira chamada, portanto a primeira
     execução pode ser mais lenta. Chamadas subsequentes reutilizam as regexes compiladas.
     """
-    ...
 
 def padronizar_bairros(valor: str) -> str:
     """
@@ -246,7 +241,6 @@ def padronizar_bairros(valor: str) -> str:
     As expressões regulares são compiladas na primeira chamada, portanto a primeira
     execução pode ser mais lenta. Chamadas subsequentes reutilizam as regexes compiladas.
     """
-    ...
 
 def padronizar_municipios(valor: str) -> str:
     """
@@ -315,7 +309,6 @@ def padronizar_municipios(valor: str) -> str:
     As expressões regulares são compiladas na primeira chamada, portanto a primeira
     execução pode ser mais lenta. Chamadas subsequentes reutilizam as regexes compiladas.
     """
-    ...
 
 def is_dado_faltante(valor: str) -> bool:
     """
@@ -347,7 +340,6 @@ def is_dado_faltante(valor: str) -> bool:
     False
 
     """
-    ...
 
 def padronizar_estados_para_nome(valor: str) -> str:
     """
@@ -398,7 +390,6 @@ def padronizar_estados_para_nome(valor: str) -> str:
     'MARANHAO'
 
     """
-    ...
 
 def padronizar_estados_para_codigo(valor: str) -> str:
     """
@@ -433,7 +424,6 @@ def padronizar_estados_para_codigo(valor: str) -> str:
     '21'
 
     """
-    ...
 
 def padronizar_estados_para_sigla(valor: str) -> str:
     """
@@ -468,7 +458,6 @@ def padronizar_estados_para_sigla(valor: str) -> str:
     'MA'
 
     """
-    ...
 
 def padronizar_tipo_logradouro(valor: str) -> str:
     """
@@ -527,7 +516,6 @@ def padronizar_cep(valor: str) -> str:
     '00123-456'
 
     """
-    ...
 
 def padronizar_cep_numerico(valor: int) -> str:
     """
@@ -558,7 +546,6 @@ def padronizar_cep_numerico(valor: int) -> str:
     '00123-456'
 
     """
-    ...
 
 def padronizar_cep_leniente(valor: str) -> str:
     """
@@ -589,7 +576,6 @@ def padronizar_cep_leniente(valor: str) -> str:
     - Se mais de 8 dígitos forem fornecidos, apenas os 8 primeiros são considerados.
     - Se menos de 8 dígitos forem fornecidos, zeros são adicionados à esquerda.
     """
-    ...
 
 class Padronizador:
     """
@@ -654,7 +640,6 @@ class Padronizador:
         ... ])
 
         """
-        ...
 
     def padronizar(self, valor: str) -> str:
         """
@@ -682,7 +667,6 @@ class Padronizador:
         'RUA AMARELA'
 
         """
-        ...
 
     def obter_substituicoes(self) -> list[tuple[str, str, None | str]]:
         """
@@ -701,7 +685,6 @@ class Padronizador:
         [('R ', 'RUA ', None)]
 
         """
-        ...
 
     def adicionar(self, regex: str, substituicao: str) -> None:
         r"""
@@ -727,7 +710,6 @@ class Padronizador:
         'RUA AZUL'
 
         """
-        ...
 
     def adicionar_com_ignorar(
         self, regex: str, substituicao: str, regex_ignorar: str
@@ -759,7 +741,6 @@ class Padronizador:
         'R APT AMARELA'
 
         """
-        ...
 
     def adicionar_vetores(
         self,
@@ -791,7 +772,6 @@ class Padronizador:
         'RUA AZUL'
 
         """
-        ...
 
     def preparar(self) -> None:
         r"""
@@ -808,7 +788,6 @@ class Padronizador:
         >>> pad.preparar()
 
         """
-        ...
 
     def obter_vetores(self) -> tuple[list[str], list[str], list[None | str]]:
         """
@@ -827,7 +806,6 @@ class Padronizador:
         (['R '], ['RUA '], [None])
 
         """
-        ...
 
 class IdentificadorPadroes:
     """
@@ -866,7 +844,6 @@ class IdentificadorPadroes:
         >>> idp.adicionar(['RUA', 'AV'])
 
         """
-        ...
 
     def identificar(self, valor: str) -> bool:
         """
@@ -892,42 +869,36 @@ class IdentificadorPadroes:
         False
 
         """
-        ...
 
 def obter_padronizador_logradouros() -> Padronizador:
     """
     Obtém o padronizador utilizado internamente pela função `padronizar_logradouros`.
     Útil para adicionar padrões de substituição não incluídos originalmente.
     """
-    ...
 
 def obter_padronizador_numeros() -> Padronizador:
     """
     Obtém o padronizador utilizado internamente pela função `padronizar_numeros`.
     Útil para adicionar padrões de substituição não incluídos originalmente.
     """
-    ...
 
 def obter_padronizador_bairros() -> Padronizador:
     """
     Obtém o padronizador utilizado internamente pela função `padronizar_bairros`.
     Útil para adicionar padrões de substituição não incluídos originalmente.
     """
-    ...
 
 def obter_padronizador_complementos() -> Padronizador:
     """
     Obtém o padronizador utilizado internamente pela função `padronizar_complementos`.
     Útil para adicionar padrões de substituição não incluídos originalmente.
     """
-    ...
 
 def obter_padronizador_tipos_logradouros() -> Padronizador:
     """
     Obtém o padronizador utilizado internamente pela função `padronizar_tipo_logradouro`.
     Útil para adicionar padrões de substituição não incluídos originalmente.
     """
-    ...
 
 def metaphone(valor: str) -> str:
     """
@@ -979,7 +950,6 @@ def metaphone(valor: str) -> str:
     'MASA'
 
     """
-    ...
 
 def padronizar_numeros_por_extenso(valor: str) -> str:
     """
@@ -1016,7 +986,6 @@ def padronizar_numeros_por_extenso(valor: str) -> str:
     'Sem números'
 
     """
-    ...
 
 def padronizar_numero_romano_por_extenso(valor: str) -> str:
     """
@@ -1046,7 +1015,6 @@ def padronizar_numero_romano_por_extenso(valor: str) -> str:
     'Rei João SEIS e Papa Bento DEZESSEIS'
 
     """
-    ...
 
 def numero_por_extenso(n: int) -> str:
     """
@@ -1076,7 +1044,6 @@ def numero_por_extenso(n: int) -> str:
     'DOIS MILHOES E MIL'
 
     """
-    ...
 
 def romano_para_inteiro(valor: str) -> int:
     """
@@ -1112,4 +1079,278 @@ def romano_para_inteiro(valor: str) -> int:
     - Caracteres inválidos são tratados como 0 e podem gerar resultados inesperados.
     - A função não valida a correção gramatical da sequência romana (ex: "IIII" retorna 4).
     """
-    ...
+
+class SegmentoEndereco:
+    """
+    Um trecho do endereço e o atributo a que ele corresponde.
+
+    Attributes
+    ----------
+    valor : str
+        Trecho do endereço, sem os separadores originais.
+    tipo : str
+        Atributo do trecho, em minúsculas.
+
+    Examples
+    --------
+    >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')
+    >>> seg.segmentos[0].valor
+    'av n sra copacabana'
+    >>> seg.segmentos[0].tipo
+    'logradouro'
+
+    """
+
+    valor: str
+    tipo: str
+
+class EnderecoSegmentado:
+    """
+    Resultado da segmentação de um endereço.
+
+    Attributes
+    ----------
+    segmentos : list of SegmentoEndereco
+        Segmentos na ordem em que aparecem no texto original.
+
+    Examples
+    --------
+    >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123, apt 301')
+    >>> [(s.valor, s.tipo) for s in seg.segmentos]
+    [('av n sra copacabana', 'logradouro'), ('123', 'numero'), ('apt 301', 'complemento')]
+
+    """
+
+    segmentos: list[SegmentoEndereco]
+
+class SeparadorEndereco:
+    """
+    Segmentador probabilístico de endereços.
+
+    Diferente das funções de módulo, permite usar um arquivo de modelo próprio
+    em vez do modelo padrão. A instância nasce **sem modelo**: o construtor não lê nem baixa
+    nada do disco. Use o método estático :meth:`carregar` ou o método :meth:`carregar_modelo`
+    antes de :meth:`segmentar`.
+
+    Para usar o modelo padrão, obtenha o caminho com :func:`obter_modelo` (resolve e
+    baixa, se necessário) ou com :func:`obter_caminho_modelo` (apenas resolve) e
+    passe o retorno para :meth:`carregar`.
+
+    Examples
+    --------
+    >>> from enderecobr import SeparadorEndereco
+    >>> sep = SeparadorEndereco.carregar('/caminho/para/tagger.crf')
+    >>> seg = sep.segmentar('av n sra copacabana, 123')
+    >>> seg.segmentos[0].tipo
+    'logradouro'
+
+    >>> sep = SeparadorEndereco()
+    >>> sep.carregar_modelo('/caminho/para/tagger.crf')
+    >>> sep.segmentar('av n sra copacabana, 123').segmentos[0].valor
+    'av n sra copacabana'
+
+    Usando o modelo padrão, sem precisar saber onde ele fica:
+
+    >>> sep = SeparadorEndereco.carregar(obter_modelo())
+
+    """
+
+    def __init__(self) -> None:
+        """
+        Inicializa um separador sem nenhum modelo carregado.
+        """
+
+    @staticmethod
+    def carregar(caminho: str | Path) -> SeparadorEndereco:
+        """
+        Cria um separador já carregado a partir de um arquivo de modelo.
+
+        Parameters
+        ----------
+        caminho : str or pathlib.Path
+            Caminho do arquivo de modelo treinado.
+
+        Returns
+        -------
+        SeparadorEndereco
+            Separador pronto para uso.
+
+        Raises
+        ------
+        RuntimeError
+            Se o arquivo não existir ou não puder ser lido.
+        """
+
+    def carregar_modelo(self, caminho: str | Path) -> None:
+        """
+        Carrega (ou substitui) o modelo desta instância, sem criar um objeto novo.
+
+        Parameters
+        ----------
+        caminho : str or pathlib.Path
+            Caminho do arquivo de modelo treinado.
+
+        Raises
+        ------
+        RuntimeError
+            Se o arquivo não existir ou não puder ser lido como modelo.
+
+        """
+
+    def segmentar(self, texto: str) -> EnderecoSegmentado:
+        """
+        Segmenta o endereço nas suas partes constituintes.
+
+        Parameters
+        ----------
+        texto : str
+            Endereço bruto a ser segmentado.
+
+        Returns
+        -------
+        EnderecoSegmentado
+            Segmentos encontrados e seus atributos.
+
+        Raises
+        ------
+        RuntimeError
+            Se nenhum modelo tiver sido carregado antes da chamada.
+
+        Notes
+        -----
+        O interpretador não é bloqueado durante a inferência: o GIL é liberado,
+          portanto outras threads do Python seguem rodando.
+
+        Examples
+        --------
+        >>> sep = enderecobr.SeparadorEndereco.carregar('/caminho/para/tagger.crf')
+        >>> seg = sep.segmentar('av n sra copacabana, 123, apt 301')
+        >>> [s.valor for s in seg.segmentos]
+        ['av n sra copacabana', '123', 'apt 301']
+
+        """
+
+def obter_caminho_modelo(path_modelo: str | Path | None = None) -> Path:
+    """
+    Resolve o caminho do modelo sem gravar nada no disco.
+
+    Segue esta ordem de prioridade:
+
+    1. ``path_modelo``, quando informado e não vazio;
+    2. a variável de ambiente ``ENDERECOBR_MODELO``, quando definida e não vazia;
+    3. o diretório de cache do sistema operacional (``~/.cache/...`` no Linux,
+       ``~/Library/Caches`` no macOS, ``%LOCALAPPDATA%`` no Windows), no caminho
+       ``enderecobr_rs/<versão do modelo>/tagger.crf``.
+
+    Se o valor resolvido for um diretório (ou terminar em ``/``), o subdiretório
+    da versão do modelo é acrescentado; se for um arquivo, ele é usado como está.
+
+    Parameters
+    ----------
+    path_modelo : str or pathlib.Path or None, optional
+        Arquivo ou diretório do modelo. Informado, tem prioridade sobre a
+        variável de ambiente e sobre o cache.
+
+    Returns
+    -------
+    pathlib.Path
+        Caminho do arquivo que seria usado. O arquivo pode não existir.
+
+    Raises
+    ------
+    RuntimeError
+        Se nem o argumento nem ``ENDERECOBR_MODELO`` forem informados e o
+        diretório de cache do sistema operacional não estiver disponível.
+
+    Examples
+    --------
+    >>> enderecobr.obter_caminho_modelo('/tmp/modelos/')
+    PosixPath('/tmp/modelos/modelo-crf-v0.1/tagger.crf')
+    >>> enderecobr.obter_caminho_modelo('/tmp/meu_modelo.crf')
+    PosixPath('/tmp/meu_modelo.crf')
+
+    Notes
+    -----
+    - Não acessa o disco nem a rede: só calcula o caminho.
+    - É útil para inspecionar qual arquivo :func:`obter_modelo` usaria, antes de
+      baixar qualquer coisa.
+
+    """
+
+def obter_modelo(path_modelo: str | Path | None = None) -> Path:
+    """
+    Resolve o caminho do modelo de padrão e garante que o arquivo exista,
+    baixando-o na primeira chamada.
+
+    Usa a mesma ordem de prioridade de :func:`obter_caminho_modelo` e só baixa o
+    modelo quando o arquivo está ausente ou vazio. O download pode ser desativado
+    com a variável de ambiente ``ENDERECOBR_MODELO_SEM_DOWNLOAD=1`` (útil em
+    CI).
+
+    Parameters
+    ----------
+    path_modelo : str or pathlib.Path or None, optional
+        Arquivo ou diretório do modelo. Informado, tem prioridade sobre a
+        variável de ambiente e sobre o cache.
+
+    Returns
+    -------
+    pathlib.Path
+        Caminho do arquivo ``.crf``, já existente.
+
+    Raises
+    ------
+    RuntimeError
+        Se o diretório de destino não puder ser criado, o download falhar ou o
+        arquivo não puder ser gravado.
+
+    Examples
+    --------
+    >>> from enderecobr import SeparadorEndereco, obter_modelo
+    >>> sep = SeparadorEndereco.carregar(obter_modelo())
+    >>> sep.segmentar('av n sra copacabana, 123').segmentos[0].tipo
+    'logradouro'
+
+    Notes
+    -----
+    - Faz uma requisição HTTP (timeout de 60 s) apenas quando precisa baixar e
+      libera o GIL durante a operação.
+    - O caminho devolvido pode ser passado direto para
+      :meth:`SeparadorEndereco.carregar`.
+
+    """
+
+def segmentar_endereco(endereco: str) -> EnderecoSegmentado:
+    """
+    Segmenta um endereço usando o modelo padrão, compartilhado entre chamadas.
+
+    Usa o modelo resolvido por `ENDERECOBR_MODELO` ou o cache do sistema
+    (baixando-o na primeira chamada, se necessário). Para usar um modelo próprio,
+    prefira :class:`SeparadorEndereco`.
+
+    Para saber (ou controlar) qual arquivo é esse, veja :func:`obter_caminho_modelo`
+    (resolve o caminho sem tocar no disco) e :func:`obter_modelo` (resolve e baixa).
+
+    Parameters
+    ----------
+    endereco : str
+        Endereço bruto a ser segmentado.
+
+    Returns
+    -------
+    EnderecoSegmentado
+        Segmentos encontrados e seus atributos.
+
+    Examples
+    --------
+    >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')
+    >>> [(s.valor, s.tipo) for s in seg.segmentos]
+    [('av n sra copacabana', 'logradouro'), ('123', 'numero')]
+
+    Notes
+    -----
+    - Se o modelo padrão não puder ser carregado, é levantada `PanicException`
+      (subclasse de `BaseException`, não de `Exception`), pois a falha acontece
+      dentro do código Rust.
+
+    """
