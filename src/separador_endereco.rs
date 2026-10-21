@@ -31,13 +31,8 @@ const MODELO_ARQUIVO: &str = "tagger.crf";
 /// Diretório (arquivo ou diretório) onde o modelo deve ficar.
 const VAR_AMBIENTE_MODELO: &str = "ENDERECOBR_MODELO_CRF";
 
-/// Quando ativa (`1`, `true`, ...), proíbe o download: sem o modelo local a
-/// função falha em vez de acessar a rede.
-const VAR_AMBIENTE_SEM_DOWNLOAD: &str = "ENDERECOBR_MODELO_CRF_SEM_DOWNLOAD";
-
-/// Vale para a requisição inteira (conexão + download dos ~1,1 MB), para que um
-/// servidor que não responde não trave a inicialização da biblioteca.
-const TIMEOUT_DOWNLOAD: Duration = Duration::from_secs(60);
+/// Desabilita o download do modelo.
+pub const VAR_AMBIENTE_SEM_DOWNLOAD: &str = "ENDERECOBR_MODELO_CRF_SEM_DOWNLOAD";
 
 fn is_pontuacao(word: &str) -> bool {
     word.chars().next().is_some_and(|c| PONTUACAO.contains(c))
@@ -57,13 +52,13 @@ pub struct ExtratorFeature {
     regex_tokenizer: Regex,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct SegmentoEndereco {
     pub valor: String,
     pub tipo: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct EnderecoSegmentado {
     pub segmentos: Vec<SegmentoEndereco>,
 }
@@ -451,14 +446,21 @@ fn com_tagger<R>(f: impl FnOnce(&mut Tagger<'static>) -> R) -> R {
 /// probabilístico.
 ///
 /// ```
-/// use enderecobr_rs::{Endereco, segmentar_endereco};
-/// let endereco_segmentado = segmentar_endereco("av n sra copacabana, 123, apt
-/// 301").como_endereco();
-/// let endereco_esperado = Endereco { logradouro: Some("av n sra copacabana".to_string()), numero: Some("123".to_string()), complemento: Some("apt 301".to_string()), ..Default::default() };
-/// assert_eq!(endereco_segmentado, endereco_esperado);
+/// use enderecobr_rs::separador_endereco::{SegmentoEndereco, EnderecoSegmentado, segmentar_endereco, VAR_AMBIENTE_SEM_DOWNLOAD, obter_modelo};
 ///
-/// let endereco_padronizado_esperado = Endereco { logradouro: Some("AVENIDA NOSSA SENHORA COPACABANA".to_string()), numero: Some("123".to_string()), complemento: Some("APARTAMENTO 301".to_string()), ..Default::default() };
-/// assert_eq!(endereco_segmentado.endereco_padronizado(), endereco_padronizado_esperado);
+/// // Evitando problemas no CI
+/// std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "true");
+/// let modelo_existe = obter_modelo(None).map(|x| x.exists()).unwrap_or(false);
+/// if !modelo_existe {
+///   return;
+/// }
+///
+/// // Exemplo de fato:
+/// let endereco_segmentado = segmentar_endereco("av n sra copacabana, 123, apt 301");
+/// let endereco_esperado = EnderecoSegmentado {
+///     segmentos: Vec::from(&[SegmentoEndereco { valor: "av n sra copacabana".to_string(), tipo: "logradouro".to_string() }, SegmentoEndereco { valor: "123".to_string(), tipo: "numero".to_string() }, SegmentoEndereco { valor: "apt 301".to_string(), tipo: "complemento".to_string() }])
+/// };
+/// assert_eq!(endereco_segmentado, endereco_esperado);
 ///```
 pub fn segmentar_endereco(texto: &str) -> EnderecoSegmentado {
     com_tagger(|tagger| SEPARADOR.processar(tagger, texto, false).0)
@@ -516,10 +518,10 @@ impl EnderecoSegmentado {
     }
 }
 
-/// Obtém o caminho do modelo de CRF usado por [`segmentar_endereco`], baixando-o
-/// do GitHub caso ainda não exista localmente.
+/// Retorna o caminho configurado do modelo, baixando-o caso ainda não
+/// exista localmente. É usado internamente por [`segmentar_endereco`].
 ///
-/// # Destino, em ordem de prioridade
+/// A função retorna o caminho usando esta lista de prioridades:
 ///
 /// 1. `path_modelo`, quando informado e não vazio;
 /// 2. a variável de ambiente `ENDERECOBR_MODELO_CRF`, quando definida e não
@@ -528,178 +530,116 @@ impl EnderecoSegmentado {
 ///    `~/Library/Caches` no macOS, `%LOCALAPPDATA%` no Windows), no caminho
 ///    `enderecobr_rs/<versão do modelo>/tagger.crf`.
 ///
-/// A versão entra no caminho de cache para que uma atualização do modelo não
-/// reutilize o arquivo da versão anterior.
+/// Se um diretório foi informado no argumento ou na variável de ambiente,
+/// a função irá criar um novo diretório para cada uma das versões do modelo.
+/// Caso seja um arquivo, ele será usado diretamente.
 ///
-/// # Arquivo ou diretório
+/// O arquivo só é baixado quando está ausente ou vazio. Use a variável de ambiente
+/// `ENDERECOBR_MODELO_CRF_SEM_DOWNLOAD=1` para evitar o download em CIs.
 ///
-/// Tanto `path_modelo` quanto a variável de ambiente aceitam o **arquivo** do
-/// modelo ou um **diretório** onde ele deve ser salvo. O caminho é tratado como
-/// diretório quando:
-///
-/// - já existe e é um diretório (`/tmp/modelos`);
-/// - termina em separador (`/tmp/modelos/`);
-/// - não tem extensão (`/tmp/modelos/v1`).
-///
-/// Nesses casos `tagger.crf` é anexado ao caminho. Um caminho com extensão
-/// (`/tmp/modelos/meu_modelo.crf`) é usado como o próprio arquivo. Diretórios
-/// intermediários inexistentes são criados.
-///
-/// # Download
-///
-/// O arquivo só é baixado quando está ausente ou vazio (execução anterior
-/// interrompida). O download:
-///
-/// - usa timeout de 60 s para a requisição inteira (conexão + download dos
-///   ~1,1 MB);
-/// - exige status HTTP de sucesso — sem isso, o corpo de um erro 404/500 seria
-///   gravado como se fosse o modelo;
-/// - grava primeiro em um temporário no mesmo diretório e o renomeia no fim
-///   (atômico no mesmo sistema de arquivos), então duas instâncias baixando ao
-///   mesmo tempo não produzem um arquivo corrompido;
-/// - avisa uma única vez no `stderr` que está baixando e para onde.
-///
-/// Defina `ENDERECOBR_MODELO_CRF_SEM_DOWNLOAD=1` para proibir o acesso à rede:
-/// nesse modo, um modelo ausente gera erro com a indicação de
-/// `ENDERECOBR_MODELO_CRF` — útil em CI, contêineres sem rede e testes.
-///
-/// # Erros
-///
-/// Devolve `Err` quando não consegue resolver o destino (sem cache do SO, versão
-/// do modelo ilegível na URL), quando o download está proibido ou falha (rede,
-/// timeout, status HTTP), quando não consegue criar o diretório, gravar o
-/// temporário ou renomeá-lo.
+/// A função retorna `Err` quando não consegue criar o diretório de destino,
+/// fazer o download, ou gravar o modelo no local.
 ///
 /// # Exemplos
 ///
-/// ```no_run
-/// # use enderecobr_rs::separador_endereco::obter_modelo;
-/// # fn main() -> Result<(), String> {
-/// // 1. cache do SO: baixa na primeira execução, reutiliza depois
-/// let caminho = obter_modelo(None)?;
-///
-/// // 2. diretório explícito: termina em `/tmp/modelos/tagger.crf`
-/// let caminho = obter_modelo(Some("/tmp/modelos".to_string()))?;
-///
-/// // 3. arquivo explícito: usado como está
-/// let caminho = obter_modelo(Some("/tmp/modelos/meu_modelo.crf".to_string()))?;
-/// # let _ = caminho;
-/// # Ok(())
-/// # }
 /// ```
+/// use enderecobr_rs::separador_endereco::{obter_modelo, VAR_AMBIENTE_SEM_DOWNLOAD};
+/// use std::path::PathBuf;
+/// use std::env::set_var;
+///
+/// std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "true");
+///
+/// assert_eq!(obter_modelo(Some("/tmp/modelos/".to_string())), Ok(PathBuf::from("/tmp/modelos/modelo-crf-v0.1/tagger.crf")));
+/// assert_eq!(obter_modelo(Some("/tmp/modelos/tagger.crf".to_string())), Ok(PathBuf::from("/tmp/modelos/tagger.crf")));
+/// ```
+///
 pub fn obter_modelo(path_modelo: Option<String>) -> Result<PathBuf, String> {
-    let caminho = resolver_caminho_modelo(path_modelo)?;
+    let caminho = obter_caminho_modelo(path_modelo)?;
+    let sem_download = variavel_ambiente_ativa(VAR_AMBIENTE_SEM_DOWNLOAD);
 
-    if modelo_disponivel(&caminho) {
+    // Não faz a checagem de path também senão for pra fazer o download.
+    if sem_download
+        || caminho
+            .metadata()
+            .is_ok_and(|metadados| metadados.is_file() && metadados.len() > 0)
+    {
         return Ok(caminho);
     }
 
-    baixar_modelo(&caminho)?;
+    if !variavel_ambiente_ativa(VAR_AMBIENTE_SEM_DOWNLOAD) {
+        baixar_modelo(&caminho)?;
+    }
     Ok(caminho)
 }
 
 /// Resolve onde o modelo deve ficar, aplicando a ordem de prioridade
-/// parâmetro → variável de ambiente → cache do SO.
-fn resolver_caminho_modelo(path_modelo: Option<String>) -> Result<PathBuf, String> {
-    // Um caminho vazio (`Some("")` ou variável definida em branco) é tratado
-    // como ausente: sem isso, `Some("")` viraria um arquivo relativo ao diretório
-    // atual, o que quase nunca é a intenção.
-    if let Some(caminho) = path_modelo.filter(|caminho| !caminho.is_empty()) {
-        return Ok(ajustar_caminho_modelo(PathBuf::from(caminho)));
-    }
-
-    if let Some(caminho) = std::env::var_os(VAR_AMBIENTE_MODELO).filter(|valor| !valor.is_empty()) {
-        return Ok(ajustar_caminho_modelo(PathBuf::from(caminho)));
-    }
-
-    caminho_cache_padrao()
-}
-
-/// Caminho padronizado no cache do SO, versionado pelo release do modelo.
-fn caminho_cache_padrao() -> Result<PathBuf, String> {
-    // `.../download/modelo-crf-v0.1/tagger.crf` -> `modelo-crf-v0.1`.
+/// parâmetro > variável de ambiente > cache. Adiciona um subdiretório de versão
+/// se o resultado for um diretório.
+fn obter_caminho_modelo(path_modelo: Option<String>) -> Result<PathBuf, String> {
     let versao = MODEL_DOWNLOAD_PATH
         .rsplit('/')
         .nth(1)
-        .ok_or("Não foi possível obter a versão do modelo na URL de download")?;
+        .ok_or("Não foi possível obter a versão do modelo")?;
 
-    Ok(dirs::cache_dir()
-        .ok_or("Diretório de cache do sistema operacional indisponível")?
-        .join("enderecobr_rs")
-        .join(versao)
-        .join(MODELO_ARQUIVO))
+    let path_param = path_modelo.filter(|x| !x.is_empty()).map(PathBuf::from);
+    let path_env = std::env::var_os(VAR_AMBIENTE_MODELO)
+        .filter(|x| !x.is_empty())
+        .map(PathBuf::from);
+
+    let path_default = dirs::cache_dir().map(|x| x.join("enderecobr_rs"));
+
+    path_param
+        .or(path_env)
+        .or(path_default)
+        .map(|cam| {
+            if cam.is_dir() || cam.to_string_lossy().ends_with(['/', '\\']) {
+                cam.join(versao).join(MODELO_ARQUIVO)
+            } else {
+                cam
+            }
+        })
+        // Pra chegar aqui, só se realmente ele não conseguiu chegar no cache.
+        .ok_or("Diretório de cache do sistema operacional indisponível".to_string())
 }
 
-/// Completa o caminho do usuário com `tagger.crf` quando ele aponta para um
-/// diretório em vez do arquivo do modelo.
-fn ajustar_caminho_modelo(caminho: PathBuf) -> PathBuf {
-    if aponta_para_diretorio(&caminho) {
-        caminho.join(MODELO_ARQUIVO)
-    } else {
-        caminho
-    }
-}
-
-/// `true` quando o caminho só pode ser um diretório: já é um, termina em
-/// separador (`/tmp/modelos/`) ou não tem extensão (`/tmp/modelos`).
-fn aponta_para_diretorio(caminho: &Path) -> bool {
-    caminho.is_dir()
-        || caminho.to_string_lossy().ends_with(['/', '\\'])
-        || caminho.extension().is_none()
-}
-
-/// `true` se há um arquivo utilizável no caminho. Arquivo vazio conta como
-/// ausente: é o que resta de uma escrita interrompida.
-fn modelo_disponivel(caminho: &Path) -> bool {
-    caminho
-        .metadata()
-        .is_ok_and(|metadados| metadados.is_file() && metadados.len() > 0)
-}
-
-/// Baixa o modelo para `destino`, que é criado se ainda não existir.
 fn baixar_modelo(destino: &Path) -> Result<(), String> {
-    if variavel_ambiente_ativa(VAR_AMBIENTE_SEM_DOWNLOAD) {
-        return Err(format!(
-            "Modelo de CRF ausente em {} e o download está desativado por \
-             {VAR_AMBIENTE_SEM_DOWNLOAD}. Aponte {VAR_AMBIENTE_MODELO} para um \
-             arquivo de modelo existente.",
-            destino.display()
-        ));
-    }
-
     if let Some(diretorio) = destino.parent().filter(|dir| !dir.as_os_str().is_empty()) {
         fs::create_dir_all(diretorio)
             .map_err(|erro| format!("Não foi possível criar {}: {erro}", diretorio.display()))?;
     }
 
-    eprintln!(
-        "Baixando o modelo de CRF de {MODEL_DOWNLOAD_PATH} para {}",
-        destino.display()
-    );
-
     let bytes = obter_bytes_modelo()?;
 
-    // Temporário único por processo no mesmo diretório do destino: o `rename`
-    // final é atômico e duas instâncias concorrentes não se atrapalham.
     let temporario = destino.with_extension(format!("{}.tmp", process::id()));
-    fs::write(&temporario, &bytes)
-        .map_err(|erro| format!("Não foi possível gravar {}: {erro}", temporario.display()))?;
-
-    fs::rename(&temporario, destino).map_err(|erro| {
-        // Não deixamos lixo para trás quando o rename falha.
-        descartar_arquivo(&temporario);
+    fs::write(&temporario, &bytes).map_err(|erro| {
         format!(
-            "Não foi possível mover {} para {}: {erro}",
-            temporario.display(),
-            destino.display()
+            "Não foi possível gravar o modelo {}: {erro}",
+            temporario.display()
         )
-    })
+    })?;
+
+    let res = fs::rename(&temporario, destino).map_err(|erro| {
+        format!(
+            "Não foi possível renomear o arquivo do modelo {}: {erro}",
+            temporario.display()
+        )
+    });
+
+    if res.is_err() {
+        fs::remove_file(&temporario).map_err(|erro| {
+            format!(
+                "Não foi remover o arquito temporário {}: {erro}",
+                temporario.display()
+            )
+        })?;
+    }
+    Ok(())
 }
 
 /// Baixa o conteúdo do modelo, validando o status HTTP antes de aceitar o corpo.
 fn obter_bytes_modelo() -> Result<Vec<u8>, String> {
     let cliente = reqwest::blocking::Client::builder()
-        .timeout(TIMEOUT_DOWNLOAD)
+        .timeout(Duration::from_secs(60))
         .user_agent(concat!(
             env!("CARGO_PKG_NAME"),
             "/",
@@ -731,21 +671,8 @@ fn obter_bytes_modelo() -> Result<Vec<u8>, String> {
 /// Variável de ambiente definida com um valor considerado "ligado"
 /// (presente, não vazia e diferente de `0`/`false`).
 fn variavel_ambiente_ativa(nome: &str) -> bool {
-    std::env::var_os(nome).is_some_and(|valor| {
-        !valor.is_empty() && valor != "0" && valor != "false"
-    })
-}
-
-/// Remove um arquivo temporário, ignorando o caso em que ele já não existe.
-fn descartar_arquivo(caminho: &Path) {
-    match fs::remove_file(caminho) {
-        Ok(()) => {}
-        Err(erro) if erro.kind() == std::io::ErrorKind::NotFound => {}
-        Err(erro) => eprintln!(
-            "Aviso: não foi possível remover o arquivo temporário {}: {erro}",
-            caminho.display()
-        ),
-    }
+    std::env::var_os(nome)
+        .is_some_and(|valor| !valor.is_empty() && valor != "0" && valor != "false")
 }
 
 // Constantes usadas para criar as features do CRF. Como são consultadas por
@@ -1013,70 +940,5 @@ mod tests {
             ordenado.dedup();
             assert_eq!(ordenado.len(), item.len());
         }
-    }
-
-    #[test]
-    fn test_aponta_para_diretorio() {
-        // Sem extensão, com separador final ou diretório existente.
-        assert!(aponta_para_diretorio(Path::new("/tmp/modelos")));
-        assert!(aponta_para_diretorio(Path::new("/tmp/modelos/")));
-        assert!(aponta_para_diretorio(Path::new("src")));
-        // Com extensão, o caminho é tratado como o arquivo do modelo.
-        assert!(!aponta_para_diretorio(Path::new("/tmp/meu_modelo.crf")));
-    }
-
-    #[test]
-    fn test_ajustar_caminho_modelo() {
-        assert_eq!(
-            ajustar_caminho_modelo(PathBuf::from("/tmp/modelos")),
-            PathBuf::from("/tmp/modelos/tagger.crf")
-        );
-        assert_eq!(
-            ajustar_caminho_modelo(PathBuf::from("/tmp/modelos/")),
-            PathBuf::from("/tmp/modelos/tagger.crf")
-        );
-        assert_eq!(
-            ajustar_caminho_modelo(PathBuf::from("/tmp/meu_modelo.crf")),
-            PathBuf::from("/tmp/meu_modelo.crf")
-        );
-    }
-
-    #[test]
-    fn test_modelo_disponivel() {
-        // `Cargo.toml` é um arquivo não vazio do próprio repositório.
-        assert!(modelo_disponivel(Path::new("Cargo.toml")));
-        assert!(!modelo_disponivel(Path::new("nao_existe_modelo.crf")));
-        // Um diretório não serve como modelo.
-        assert!(!modelo_disponivel(Path::new("src")));
-    }
-
-    #[test]
-    fn test_caminho_cache_padrao_e_versionado() {
-        // Falha só se o SO não expuser um diretório de cache.
-        if let Ok(caminho) = caminho_cache_padrao() {
-            assert!(caminho.ends_with("enderecobr_rs/modelo-crf-v0.1/tagger.crf"));
-        }
-    }
-
-    #[test]
-    fn test_resolver_caminho_modelo_ordem_de_prioridade() {
-        std::env::set_var(VAR_AMBIENTE_MODELO, "/tmp/da_variavel_ambiente.crf");
-
-        let do_parametro = resolver_caminho_modelo(Some("/tmp/do_parametro.crf".to_string()))
-            .expect("caminho do parâmetro resolvido");
-        let da_variavel =
-            resolver_caminho_modelo(None).expect("caminho da variável de ambiente resolvido");
-
-        // Parâmetro e variável vazios são ignorados: cai no cache do SO.
-        std::env::set_var(VAR_AMBIENTE_MODELO, "");
-        let sem_nenhum = resolver_caminho_modelo(Some(String::new()));
-        std::env::remove_var(VAR_AMBIENTE_MODELO);
-
-        assert_eq!(do_parametro, PathBuf::from("/tmp/do_parametro.crf"));
-        assert_eq!(
-            da_variavel,
-            PathBuf::from("/tmp/da_variavel_ambiente.crf")
-        );
-        assert!(sem_nenhum.is_ok_and(|caminho| caminho.ends_with(MODELO_ARQUIVO)));
     }
 }
