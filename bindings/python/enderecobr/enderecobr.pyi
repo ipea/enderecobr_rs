@@ -1090,13 +1090,6 @@ class SegmentoEndereco:
         Trecho do endereço, sem os separadores originais.
     tipo : str
         Atributo do trecho, em minúsculas.
-
-    Examples
-    --------
-    >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')  # doctest: +SKIP
-    >>> seg.segmentos[0].valor, seg.segmentos[0].tipo  # doctest: +SKIP
-    ('av n sra copacabana', 'logradouro')
-
     """
 
     valor: str
@@ -1110,13 +1103,6 @@ class EnderecoSegmentado:
     ----------
     segmentos : list of SegmentoEndereco
         Segmentos na ordem em que aparecem no texto original.
-
-    Examples
-    --------
-    >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123, apt 301')  # doctest: +SKIP
-    >>> [(s.valor, s.tipo) for s in seg.segmentos]  # doctest: +SKIP
-    [('av n sra copacabana', 'logradouro'), ('123', 'numero'), ('apt 301', 'complemento')]
-
     """
 
     segmentos: list[SegmentoEndereco]
@@ -1136,9 +1122,6 @@ class SeparadorEndereco:
 
     Examples
     --------
-    Os exemplos precisam do arquivo do modelo, por isso são pulados nos testes
-    automatizados (``# doctest: +SKIP``).
-
     Usando o modelo padrão, sem precisar saber onde ele fica:
 
     >>> from enderecobr import SeparadorEndereco, obter_modelo
@@ -1315,8 +1298,7 @@ def obter_modelo(path_modelo: str | Path | None = None) -> Path:
     -----
     - Faz uma requisição HTTP (timeout de 60 s) apenas quando precisa baixar e
       libera o GIL durante a operação.
-    - O caminho devolvido pode ser passado direto para
-      :meth:`SeparadorEndereco.carregar`.
+    - O caminho devolvido pode ser passado direto para :meth:`SeparadorEndereco.carregar`.
 
     """
 
