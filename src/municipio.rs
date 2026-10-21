@@ -42,7 +42,7 @@ const ALIAS: &[(&str, &str)] = &[
 ///
 /// O resultado desta etapa é uma *chave exata* procurada no mapa. Caso não haja
 /// correspondência exata, [`padronizar_municipios`] tenta ainda uma segunda
-/// busca fonética ([`padronizar_para_pareamento`]).
+/// busca fonética (`padronizar_para_pareamento`).
 pub fn criar_padronizador() -> Padronizador {
     let mut padronizador = Padronizador::default();
 
@@ -155,24 +155,26 @@ fn nomes_alternativos(mun: &str) -> Vec<String> {
 /// | nome canônico | `"RIO DE JANEIRO"` | própria linha do CSV |
 /// | código IBGE completo | `"3304557"` | coluna `cod_ibge` |
 /// | código IBGE sem dígito verificador | `"330455"` | mesmos 6 dígitos de cima |
-/// | chave fonética do nome | [`padronizar_para_pareamento`] | derivada |
-/// | variantes de apóstrofo | [`nomes_alternativos`] | derivada |
-/// | sinônimos manuais | [`ALIAS`] | tabela constante |
+/// | chave fonética do nome | `padronizar_para_pareamento` | derivada |
+/// | variantes de apóstrofo | `nomes_alternativos` | derivada |
+/// | sinônimos manuais | `ALIAS` | tabela constante |
 ///
 /// # Ordem de inserção e resolução de colisões
 ///
 /// As entradas são registradas em três fases, **nesta ordem**:
 ///
-/// 1. **Canônicas** — nomes e códigos do CSV, inseridas com [`HashMap::insert`]
-///    (sobrescrevem). Isso garante que o nome oficial prevalece sobre qualquer
-///    chave derivada que por acaso coincida com ele.
+/// 1. **Canônicas** — nomes e códigos do CSV, inseridas com
+///    [`HashMap::insert`](std::collections::HashMap::insert) (sobrescrevem).
+///    Isso garante que o nome oficial prevalece sobre qualquer chave derivada
+///    que por acaso coincida com ele.
 /// 2. **Fonéticas/alternativas** — derivadas de cada nome via
-///    [`padronizar_para_pareamento`] e [`nomes_alternativos`], inseridas com
-///    [`entry().or_insert()`][HashMap::entry] (não sobrescrevem). Assim, quando
+///    `padronizar_para_pareamento` e `nomes_alternativos`, inseridas com
+///    [`entry().or_insert()`](std::collections::HashMap::entry) (não
+///    sobrescrevem). Assim, quando
 ///    duas grafias distintas colapsam para a mesma chave fonética (ex.:
 ///    `CASTELO`/`CASTELLO`, `PRESIDENTE CASTELO`/`PRESIDENTE CASTELLO`), o
 ///    vencedor é sempre a primeira forma canônica inserida — nunca a errada.
-/// 3. **Sinônimos manuais** — [`ALIAS`], também via `entry().or_insert()`,
+/// 3. **Sinônimos manuais** — `ALIAS`, também via `entry().or_insert()`,
 ///    registrados por último para não roubar chaves já legítimas.
 ///
 /// `padronizar_municipios` consulta primeiro a chave exata e só depois a chave
@@ -278,7 +280,7 @@ pub fn criar_municipio_map() -> FxHashMap<String, String> {
 /// # Contrato de retorno
 ///
 /// - Valores reconhecidos → nome canônico completo (eventuais erros ortográficos
-///   e nomes antigos are resolvidos; ver [`criar_municipio_map`]).
+///   e nomes antigos são resolvidos; ver [`criar_municipio_map`]).
 /// - **Valores irreconhecíveis → `""`** (string vazia). Esta é a diferença em
 ///   relação a versões anteriores, que devolviam a entrada limpa; agora a
 ///   função sempre devolve um identificador válido ou vazio, nunca um texto
@@ -287,7 +289,7 @@ pub fn criar_municipio_map() -> FxHashMap<String, String> {
 /// A resolução segue duas tentativas, em ordem:
 ///
 /// 1. **busca exata** da entrada padronizada como chave direta do mapa;
-/// 2. se falhar, **busca fonética** via [`padronizar_para_pareamento`], que
+/// 2. se falhar, **busca fonética** via `padronizar_para_pareamento`, que
 ///    tolera variações e pequenos erros de grafia.
 ///
 /// Quando mais de um município mapeia para a mesma chave fonética, vence a

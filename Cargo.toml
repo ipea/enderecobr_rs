@@ -65,6 +65,12 @@ lto = "thin"
 # Quanto menor, aumenta o tempo de compilação mas o código fica mais otimizado
 codegen-units = 1
 
+[lints.rust]
+# `cfg(coverage)`/`cfg(coverage_nightly)` são definidos pelo cargo-llvm-cov; sem
+# declaração o compilador os acusa como `unexpected_cfgs`.
+# https://github.com/taiki-e/cargo-llvm-cov?tab=readme-ov-file#exclude-code-from-coverage
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
+
 [lints.clippy]
 # https://rust-trends.com/posts/mastering-clippy-elevating-your-rust-code-quality/
 single_match = "warn"

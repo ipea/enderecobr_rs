@@ -118,7 +118,7 @@ impl SeparadorEndereco {
         (segmentado, duracao_features, duracao_inferencia)
     }
 
-    /// Igual a [`Self::segmentar_endereco`], mas devolve também o tempo gasto na
+    /// Igual a [`segmentar_endereco`], mas devolve também o tempo gasto na
     /// extração de features e na inferência (tagging) do CRF.
     pub fn segmentar_endereco_com_timing(
         &self,

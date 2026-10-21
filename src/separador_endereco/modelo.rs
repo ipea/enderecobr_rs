@@ -8,6 +8,10 @@ use std::{
 pub const MODEL_DOWNLOAD_PATH: &str =
     "https://github.com/ipea/enderecobr_rs/releases/download/modelo-crf-v0.1/tagger.crf";
 
+pub const VERSAO_MODELO: &str = "modelo-crf-v0.1";
+pub const NOME_DIRETORIO_CACHE: &str = "enderecobr_rs";
+pub const NOME_ARQUIVO_MODELO: &str = "tagger.crf";
+
 /// Diretório (arquivo ou diretório) onde o modelo deve ficar.
 pub const VAR_AMBIENTE_MODELO: &str = "ENDERECOBR_MODELO_CRF";
 
@@ -15,7 +19,8 @@ pub const VAR_AMBIENTE_MODELO: &str = "ENDERECOBR_MODELO_CRF";
 pub const VAR_AMBIENTE_SEM_DOWNLOAD: &str = "ENDERECOBR_MODELO_CRF_SEM_DOWNLOAD";
 
 /// Retorna o caminho configurado do modelo, baixando-o caso ainda não
-/// exista localmente. É usado internamente por [`segmentar_endereco`].
+/// exista localmente. É usado internamente por
+/// [`segmentar_endereco`](super::segmentar_endereco).
 ///
 /// A função retorna o caminho usando esta lista de prioridades:
 ///
@@ -36,19 +41,7 @@ pub const VAR_AMBIENTE_SEM_DOWNLOAD: &str = "ENDERECOBR_MODELO_CRF_SEM_DOWNLOAD"
 /// A função retorna `Err` quando não consegue criar o diretório de destino,
 /// fazer o download, ou gravar o modelo no local.
 ///
-/// # Exemplos
-///
-/// ```
-/// use enderecobr_rs::separador_endereco::modelo::{obter_modelo, VAR_AMBIENTE_SEM_DOWNLOAD};
-/// use std::path::PathBuf;
-/// use std::env::set_var;
-///
-/// std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "true");
-///
-/// assert_eq!(obter_modelo(Some("/tmp/modelos/".to_string())), Ok(PathBuf::from("/tmp/modelos/modelo-crf-v0.1/tagger.crf")));
-/// assert_eq!(obter_modelo(Some("/tmp/modelos/tagger.crf".to_string())), Ok(PathBuf::from("/tmp/modelos/tagger.crf")));
-/// ```
-///
+#[cfg_attr(coverage_nightly, coverage(off))] // Chama funções que acessam o disco.
 pub fn obter_modelo(path_modelo: Option<String>) -> Result<PathBuf, String> {
     let caminho = obter_caminho_modelo(path_modelo)?;
     let sem_download = variavel_ambiente_ativa(VAR_AMBIENTE_SEM_DOWNLOAD);
@@ -71,25 +64,21 @@ pub fn obter_modelo(path_modelo: Option<String>) -> Result<PathBuf, String> {
 /// Resolve onde o modelo deve ficar, aplicando a ordem de prioridade
 /// parâmetro > variável de ambiente > cache. Adiciona um subdiretório de versão
 /// se o resultado for um diretório.
-fn obter_caminho_modelo(path_modelo: Option<String>) -> Result<PathBuf, String> {
-    let versao = MODEL_DOWNLOAD_PATH
-        .rsplit('/')
-        .nth(1)
-        .ok_or("Não foi possível obter a versão do modelo")?;
-
+/// Usado em [`obter_modelo`].
+pub fn obter_caminho_modelo(path_modelo: Option<String>) -> Result<PathBuf, String> {
     let path_param = path_modelo.filter(|x| !x.is_empty()).map(PathBuf::from);
     let path_env = std::env::var_os(VAR_AMBIENTE_MODELO)
         .filter(|x| !x.is_empty())
         .map(PathBuf::from);
 
-    let path_default = dirs::cache_dir().map(|x| x.join("enderecobr_rs"));
+    let path_default = dirs::cache_dir().map(|x| x.join(NOME_DIRETORIO_CACHE));
 
     path_param
         .or(path_env)
         .or(path_default)
         .map(|cam| {
             if cam.is_dir() || cam.to_string_lossy().ends_with(['/', '\\']) {
-                cam.join(versao).join("tagger.crf")
+                cam.join(VERSAO_MODELO).join(NOME_ARQUIVO_MODELO)
             } else {
                 cam
             }
@@ -98,6 +87,8 @@ fn obter_caminho_modelo(path_modelo: Option<String>) -> Result<PathBuf, String> 
         .ok_or("Diretório de cache do sistema operacional indisponível".to_string())
 }
 
+// Acessa disco e rede; fica fora do alvo de cobertura.
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn baixar_modelo(destino: &Path) -> Result<(), String> {
     if let Some(diretorio) = destino.parent().filter(|dir| !dir.as_os_str().is_empty()) {
         fs::create_dir_all(diretorio)
@@ -132,7 +123,8 @@ fn baixar_modelo(destino: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Baixa o conteúdo do modelo, validando o status HTTP antes de aceitar o corpo.
+// Baixa o conteúdo do modelo, validando o status HTTP antes de aceitar o corpo.
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn obter_bytes_modelo() -> Result<Vec<u8>, String> {
     let cliente = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(60))
@@ -154,7 +146,7 @@ fn obter_bytes_modelo() -> Result<Vec<u8>, String> {
     let status = resposta.status();
     if !status.is_success() {
         return Err(format!(
-            "O download do modelo de CRF falhou com HTTP {status} ({MODEL_DOWNLOAD_PATH})"
+            "O download do modelo de CRF falhou com HTTP {status}"
         ));
     }
 
@@ -169,4 +161,45 @@ fn obter_bytes_modelo() -> Result<Vec<u8>, String> {
 fn variavel_ambiente_ativa(nome: &str) -> bool {
     std::env::var_os(nome)
         .is_some_and(|valor| !valor.is_empty() && valor != "0" && valor != "false")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_obter_caminho_modelo_arquivo() {
+        std::env::set_var(VAR_AMBIENTE_MODELO, "/tmp/modelo_env/");
+
+        assert_eq!(
+            obter_caminho_modelo(None),
+            Ok(PathBuf::from("/tmp/modelo_env/")
+                .join(VERSAO_MODELO)
+                .join(NOME_ARQUIVO_MODELO))
+        );
+
+        assert_eq!(
+            obter_caminho_modelo(Some("/tmp/modelo_argumento/".to_string())),
+            Ok(PathBuf::from("/tmp/modelo_argumento/")
+                .join(VERSAO_MODELO)
+                .join(NOME_ARQUIVO_MODELO))
+        );
+
+        assert_eq!(
+            obter_caminho_modelo(Some("/tmp/modelo_arquivo.crf".to_string())),
+            Ok(PathBuf::from("/tmp/modelo_arquivo.crf"))
+        );
+    }
+
+    #[test]
+    fn test_variavel_ambiente_ativa() {
+        std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "true");
+        assert!(variavel_ambiente_ativa(VAR_AMBIENTE_SEM_DOWNLOAD));
+        std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "1");
+        assert!(variavel_ambiente_ativa(VAR_AMBIENTE_SEM_DOWNLOAD));
+        std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "false");
+        assert!(!variavel_ambiente_ativa(VAR_AMBIENTE_SEM_DOWNLOAD));
+        std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "0");
+        assert!(!variavel_ambiente_ativa(VAR_AMBIENTE_SEM_DOWNLOAD));
+    }
 }

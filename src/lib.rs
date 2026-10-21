@@ -1,4 +1,7 @@
 #![doc = include_str!("../README.md")]
+// Habilita `#[coverage(off)]` quando o cargo-llvm-cov roda com toolchain nightly.
+// Em stable o cfg não existe e o atributo desaparece por completo.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use serde::Serialize;
 use std::borrow::Cow;
