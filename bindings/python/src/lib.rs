@@ -124,10 +124,67 @@ impl IdentificadorPadroes {
     }
 }
 
+#[pyclass]
+struct SeparadorEndereco {
+    interno: enderecobr_rs::separador_endereco::SeparadorEndereco,
+}
+
+#[pyclass]
+pub struct SegmentoEndereco {
+    pub tipo: String,
+    pub valor: String,
+}
+
+#[pyclass]
+pub struct EnderecoSegmentado {
+    pub segmentos: Vec<SegmentoEndereco>,
+}
+
+impl From<enderecobr_rs::separador_endereco::SegmentoEndereco> for SegmentoEndereco {
+    fn from(s: enderecobr_rs::separador_endereco::SegmentoEndereco) -> Self {
+        SegmentoEndereco {
+            tipo: s.tipo,
+            valor: s.valor,
+        }
+    }
+}
+impl From<enderecobr_rs::separador_endereco::EnderecoSegmentado> for EnderecoSegmentado {
+    fn from(s: enderecobr_rs::separador_endereco::EnderecoSegmentado) -> Self {
+        EnderecoSegmentado {
+            segmentos: s
+                .segmentos
+                .into_iter()
+                .map(SegmentoEndereco::from)
+                .collect(),
+        }
+    }
+}
+
+// #[pymethods]
+// impl SeparadorEndereco {
+//     fn carregar(path_modelo: &str) -> PyResult<SeparadorEndereco> {
+//         // enderecobr_rs::cep::padronizar_cep(valor).map_err(pyo3::exceptions::PyValueError::new_err)
+//
+//         let separador = SeparadorEndereco {
+//             interno: enderecobr_rs::separador_endereco::SeparadorEndereco::carregar(PathBuf::from(
+//                 path_modelo,
+//             ))
+//             .unwrap(),
+//         };
+//         separador
+//     }
+// }
+
 #[pymodule]
 pub mod enderecobr {
 
     use pyo3::prelude::*;
+
+    #[pymodule_export]
+    use super::EnderecoSegmentado;
+
+    #[pymodule_export]
+    use super::SegmentoEndereco;
 
     #[pymodule_export]
     use super::Padronizador;
@@ -274,5 +331,12 @@ pub mod enderecobr {
         Padronizador {
             interno: enderecobr_rs::tipo_logradouro::criar_padronizador_tipo_logradouro(),
         }
+    }
+
+    // ========= Separador de endereço ==========
+
+    #[pyfunction]
+    fn segmentar_endereco(endereco: &str) -> EnderecoSegmentado {
+        enderecobr_rs::segmentar_endereco(endereco).into()
     }
 }
