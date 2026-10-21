@@ -1093,11 +1093,9 @@ class SegmentoEndereco:
 
     Examples
     --------
-    >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')
-    >>> seg.segmentos[0].valor
-    'av n sra copacabana'
-    >>> seg.segmentos[0].tipo
-    'logradouro'
+    >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')  # doctest: +SKIP
+    >>> seg.segmentos[0].valor, seg.segmentos[0].tipo  # doctest: +SKIP
+    ('av n sra copacabana', 'logradouro')
 
     """
 
@@ -1115,8 +1113,8 @@ class EnderecoSegmentado:
 
     Examples
     --------
-    >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123, apt 301')
-    >>> [(s.valor, s.tipo) for s in seg.segmentos]
+    >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123, apt 301')  # doctest: +SKIP
+    >>> [(s.valor, s.tipo) for s in seg.segmentos]  # doctest: +SKIP
     [('av n sra copacabana', 'logradouro'), ('123', 'numero'), ('apt 301', 'complemento')]
 
     """
@@ -1138,20 +1136,22 @@ class SeparadorEndereco:
 
     Examples
     --------
-    >>> from enderecobr import SeparadorEndereco
-    >>> sep = SeparadorEndereco.carregar('/caminho/para/tagger.crf')
-    >>> seg = sep.segmentar('av n sra copacabana, 123')
-    >>> seg.segmentos[0].tipo
-    'logradouro'
-
-    >>> sep = SeparadorEndereco()
-    >>> sep.carregar_modelo('/caminho/para/tagger.crf')
-    >>> sep.segmentar('av n sra copacabana, 123').segmentos[0].valor
-    'av n sra copacabana'
+    Os exemplos precisam do arquivo do modelo, por isso são pulados nos testes
+    automatizados (``# doctest: +SKIP``).
 
     Usando o modelo padrão, sem precisar saber onde ele fica:
 
-    >>> sep = SeparadorEndereco.carregar(obter_modelo())
+    >>> from enderecobr import SeparadorEndereco, obter_modelo
+    >>> sep = SeparadorEndereco.carregar(obter_modelo())  # doctest: +SKIP
+    >>> sep.segmentar('av n sra copacabana, 123').segmentos[0].tipo  # doctest: +SKIP
+    'logradouro'
+
+    O construtor não carrega nada, o que permite criar a instância primeiro:
+
+    >>> sep = SeparadorEndereco()
+    >>> sep.carregar_modelo('/caminho/para/tagger.crf')  # doctest: +SKIP
+    >>> sep.segmentar('av n sra copacabana, 123').segmentos[0].valor  # doctest: +SKIP
+    'av n sra copacabana'
 
     """
 
@@ -1223,9 +1223,9 @@ class SeparadorEndereco:
 
         Examples
         --------
-        >>> sep = enderecobr.SeparadorEndereco.carregar('/caminho/para/tagger.crf')
-        >>> seg = sep.segmentar('av n sra copacabana, 123, apt 301')
-        >>> [s.valor for s in seg.segmentos]
+        >>> sep = enderecobr.SeparadorEndereco.carregar('/caminho/para/tagger.crf')  # doctest: +SKIP
+        >>> seg = sep.segmentar('av n sra copacabana, 123, apt 301')  # doctest: +SKIP
+        >>> [s.valor for s in seg.segmentos]  # doctest: +SKIP
         ['av n sra copacabana', '123', 'apt 301']
 
         """
@@ -1264,10 +1264,10 @@ def obter_caminho_modelo(path_modelo: str | Path | None = None) -> Path:
 
     Examples
     --------
-    >>> enderecobr.obter_caminho_modelo('/tmp/modelos/')
-    PosixPath('/tmp/modelos/modelo-crf-v0.1/tagger.crf')
-    >>> enderecobr.obter_caminho_modelo('/tmp/meu_modelo.crf')
-    PosixPath('/tmp/meu_modelo.crf')
+    >>> enderecobr.obter_caminho_modelo('/tmp/modelos/').name
+    'tagger.crf'
+    >>> enderecobr.obter_caminho_modelo('/tmp/meu_modelo.crf').as_posix()
+    '/tmp/meu_modelo.crf'
 
     Notes
     -----
@@ -1307,8 +1307,8 @@ def obter_modelo(path_modelo: str | Path | None = None) -> Path:
     Examples
     --------
     >>> from enderecobr import SeparadorEndereco, obter_modelo
-    >>> sep = SeparadorEndereco.carregar(obter_modelo())
-    >>> sep.segmentar('av n sra copacabana, 123').segmentos[0].tipo
+    >>> sep = SeparadorEndereco.carregar(obter_modelo())  # doctest: +SKIP
+    >>> sep.segmentar('av n sra copacabana, 123').segmentos[0].tipo  # doctest: +SKIP
     'logradouro'
 
     Notes
@@ -1343,8 +1343,8 @@ def segmentar_endereco(endereco: str) -> EnderecoSegmentado:
 
     Examples
     --------
-    >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')
-    >>> [(s.valor, s.tipo) for s in seg.segmentos]
+    >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')  # doctest: +SKIP
+    >>> [(s.valor, s.tipo) for s in seg.segmentos]  # doctest: +SKIP
     [('av n sra copacabana', 'logradouro'), ('123', 'numero')]
 
     Notes
