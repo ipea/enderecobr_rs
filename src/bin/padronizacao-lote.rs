@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use clap::Parser;
 use enderecobr_rs::padronizar_estados_para_sigla;
@@ -7,7 +8,7 @@ use enderecobr_rs::separador_endereco::segmento_como_endereco;
 use enderecobr_rs::{
     padronizar_bairros, padronizar_cep_leniente, padronizar_complementos, padronizar_logradouros,
     padronizar_municipios, padronizar_numeros, padronizar_tipo_logradouro,
-    separador_endereco::{segmentar_endereco, segmentar_endereco_com_timing},
+    separador_endereco::segmentar_endereco,
     Endereco,
 };
 use itertools::Itertools;
@@ -166,8 +167,7 @@ const CAMPOS_ENDERECO: [&str; 5] = [
 ];
 
 /// Acumuladores do modo `--timing` (nanossegundos gastos e nº de endereços).
-static TEMPO_FEATURES_NS: AtomicU64 = AtomicU64::new(0);
-static TEMPO_INFERENCIA_NS: AtomicU64 = AtomicU64::new(0);
+static TEMPO_SEGMENTACAO_NS: AtomicU64 = AtomicU64::new(0);
 static NUM_ENDERECOS: AtomicU64 = AtomicU64::new(0);
 
 fn campo_endereco_processado() -> Field {
@@ -178,18 +178,17 @@ fn campo_endereco_processado() -> Field {
     Field::new("endereco_processado".into(), DataType::Struct(campos))
 }
 
-/// Segmenta o endereço e padroniza os campos; no modo `--timing`, acumula ainda os
-/// tempos de extração de features e de inferência.
+/// Segmenta o endereço e padroniza os campos; no modo `--timing`, acumula ainda o
+/// tempo gasto na segmentação.
 fn segmentar_padronizado(texto: &str, timing: bool) -> Endereco {
-    if timing {
-        let (segmentado, tempo_features, tempo_inferencia) = segmentar_endereco_com_timing(texto);
-        TEMPO_FEATURES_NS.fetch_add(tempo_features.as_nanos() as u64, Ordering::Relaxed);
-        TEMPO_INFERENCIA_NS.fetch_add(tempo_inferencia.as_nanos() as u64, Ordering::Relaxed);
-        NUM_ENDERECOS.fetch_add(1, Ordering::Relaxed);
-        segmento_como_endereco(&segmentado, true)
-    } else {
-        segmento_como_endereco(&segmentar_endereco(texto), true)
-    }
+    let Some(inicio) = timing.then(Instant::now) else {
+        return segmento_como_endereco(&segmentar_endereco(texto), true);
+    };
+
+    let segmentado = segmentar_endereco(texto);
+    TEMPO_SEGMENTACAO_NS.fetch_add(inicio.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    NUM_ENDERECOS.fetch_add(1, Ordering::Relaxed);
+    segmento_como_endereco(&segmentado, true)
 }
 
 fn expandir_endereco(col: Column, timing: bool) -> PolarsResult<Column> {
@@ -247,10 +246,9 @@ fn imprimir_timing() {
     if n == 0 {
         return;
     }
-    let features_us = TEMPO_FEATURES_NS.load(Ordering::Relaxed) as f64 / 1000.0 / n as f64;
-    let inferencia_us = TEMPO_INFERENCIA_NS.load(Ordering::Relaxed) as f64 / 1000.0 / n as f64;
+    let segmentacao_us = TEMPO_SEGMENTACAO_NS.load(Ordering::Relaxed) as f64 / 1000.0 / n as f64;
     println!(
-        "Timing (média por endereço, n={n}): features≈{features_us:.2} µs, inferência≈{inferencia_us:.2} µs"
+        "Timing (média por endereço, n={n}): segmentação≈{segmentacao_us:.2} µs"
     );
 }
 

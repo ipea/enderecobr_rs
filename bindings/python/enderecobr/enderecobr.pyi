@@ -522,7 +522,8 @@ def padronizar_cep_numerico(valor: int) -> str:
     Padroniza um CEP numérico para uma string formatada.
 
     Completa com zeros à esquerda quando necessário e retorna erro se o valor
-    exceder o tamanho permitido de CEP.
+    exceder o tamanho permitido de CEP. O valor precisa ser inteiro e não
+    negativo.
 
     Parameters
     ----------
@@ -537,7 +538,7 @@ def padronizar_cep_numerico(valor: int) -> str:
     Raises
     ------
     ValueError
-        Se o CEP tiver muitos dígitos.
+        Se o CEP tiver muitos dígitos ou se o valor for negativo.
 
     Examples
     --------
@@ -1107,6 +1108,128 @@ class EnderecoSegmentado:
 
     segmentos: list[SegmentoEndereco]
 
+class Endereco:
+    """
+    Endereço com os campos já separados.
+
+    Pode ser criado vazio (``Endereco()``), com os campos que você já tem, ou
+    obtido a partir de um texto com :func:`estruturar_endereco`. Campos ausentes
+    ficam como ``None``.
+
+    Attributes
+    ----------
+    logradouro : str or None
+        Nome do logradouro (rua, avenida etc.).
+    numero : str or None
+        Número do imóvel; ``S/N`` quando não houver.
+    complemento : str or None
+        Complemento do imóvel (apartamento, bloco, loja etc.).
+    localidade : str or None
+        Bairro ou localidade.
+    cep : str or None
+        CEP no formato ``XXXXX-XXX``.
+
+    Examples
+    --------
+    Montando um endereço a partir de campos soltos:
+
+    >>> from enderecobr import Endereco
+    >>> end = Endereco(logradouro='r. gen glicerio', numero='1')
+    >>> end.padronizar()
+    >>> end.logradouro
+    'RUA GENERAL GLICERIO'
+
+    """
+
+    logradouro: str | None
+    numero: str | None
+    complemento: str | None
+    localidade: str | None
+    cep: str | None
+
+    def __init__(
+        self,
+        logradouro: str | None = None,
+        numero: str | None = None,
+        complemento: str | None = None,
+        localidade: str | None = None,
+        cep: str | None = None,
+    ) -> None:
+        """
+        Cria um endereço informando apenas os campos que existem.
+
+        Parameters
+        ----------
+        logradouro : str or None, optional
+            Nome do logradouro.
+        numero : str or None, optional
+            Número do imóvel.
+        complemento : str or None, optional
+            Complemento do imóvel.
+        localidade : str or None, optional
+            Bairro ou localidade.
+        cep : str or None, optional
+            CEP, que pode vir em qualquer formato (a padronização é feita
+            depois, por :meth:`padronizar`).
+
+        """
+
+    def formatar(self) -> str:
+        """
+        Junta os campos preenchidos em um único texto, separados por vírgula.
+
+        Campos ``None`` ou vazios são omitidos. É o mesmo texto devolvido por
+        ``str(endereco)``.
+
+        Returns
+        -------
+        str
+            Texto com os campos preenchidos, na ordem logradouro, número,
+            complemento, localidade e CEP.
+
+        Examples
+        --------
+        >>> end = Endereco(logradouro='r. gen glicerio', numero='1')
+        >>> end.formatar()
+        'r. gen glicerio, 1'
+
+        """
+
+    def padronizar(self) -> None:
+        """
+        Padroniza os campos deste endereço no próprio objeto.
+
+        Cada campo passa pela função adequada (logradouro, número,
+        complemento, bairro e CEP). Campos vazios continuam vazios.
+
+        Examples
+        --------
+        >>> end = Endereco(logradouro='r. gen glicerio', numero='1')
+        >>> end.padronizar()
+        >>> end.logradouro
+        'RUA GENERAL GLICERIO'
+
+        """
+
+    def endereco_padronizado(self) -> Endereco:
+        """
+        Devolve uma cópia padronizada, sem alterar o original.
+
+        Returns
+        -------
+        Endereco
+            Novo endereço com os campos padronizados.
+
+        Examples
+        --------
+        >>> end = Endereco(logradouro='r. gen glicerio', numero='1')
+        >>> end.endereco_padronizado().logradouro
+        'RUA GENERAL GLICERIO'
+        >>> end.logradouro
+        'r. gen glicerio'
+
+        """
+
 class SeparadorEndereco:
     """
     Segmentador probabilístico de endereços.
@@ -1114,7 +1237,8 @@ class SeparadorEndereco:
     Diferente das funções de módulo, permite usar um arquivo de modelo próprio
     em vez do modelo padrão. A instância nasce **sem modelo**: o construtor não lê nem baixa
     nada do disco. Use o método estático :meth:`carregar` ou o método :meth:`carregar_modelo`
-    antes de :meth:`segmentar`.
+    antes de :meth:`segmentar`. Depois de carregado, o separador não falha mais
+    ao segmentar.
 
     Para usar o modelo padrão, obtenha o caminho com :func:`obter_modelo` (resolve e
     baixa, se necessário) ou com :func:`obter_caminho_modelo` (apenas resolve) e
@@ -1161,7 +1285,7 @@ class SeparadorEndereco:
         Raises
         ------
         RuntimeError
-            Se o arquivo não existir ou não puder ser lido.
+            Se o arquivo não existir, não puder ser lido ou não for um modelo válido.
         """
 
     def carregar_modelo(self, caminho: str | Path) -> None:
@@ -1176,7 +1300,7 @@ class SeparadorEndereco:
         Raises
         ------
         RuntimeError
-            Se o arquivo não existir ou não puder ser lido como modelo.
+            Se o arquivo não existir, não puder ser lido ou não for um modelo válido.
 
         """
 
@@ -1210,6 +1334,41 @@ class SeparadorEndereco:
         >>> seg = sep.segmentar('av n sra copacabana, 123, apt 301')  # doctest: +SKIP
         >>> [s.valor for s in seg.segmentos]  # doctest: +SKIP
         ['av n sra copacabana', '123', 'apt 301']
+
+        """
+
+    def segmentar_enderecos(self, textos: Iterable[str]) -> list[EnderecoSegmentado]:
+        """
+        Segmenta vários endereços de uma vez com o modelo desta instância.
+
+        A saída mantém a ordem de entrada, e cada posição corresponde ao endereço
+        de mesmo índice.
+
+        Parameters
+        ----------
+        textos : iterable of str
+            Endereços brutos a serem segmentados.
+
+        Returns
+        -------
+        list of EnderecoSegmentado
+            Um resultado por endereço, na mesma ordem da entrada.
+
+        Raises
+        ------
+        RuntimeError
+            Se nenhum modelo tiver sido carregado antes da chamada.
+
+        Notes
+        -----
+        O GIL é liberado durante o processamento do lote inteiro.
+
+        Examples
+        --------
+        >>> sep = enderecobr.SeparadorEndereco.carregar('/caminho/para/tagger.crf')  # doctest: +SKIP
+        >>> resultados = sep.segmentar_enderecos(['av n sra copacabana, 123'])  # doctest: +SKIP
+        >>> resultados[0].segmentos[0].tipo  # doctest: +SKIP
+        'logradouro'
 
         """
 
@@ -1323,6 +1482,11 @@ def segmentar_endereco(endereco: str) -> EnderecoSegmentado:
     EnderecoSegmentado
         Segmentos encontrados e seus atributos.
 
+    Raises
+    ------
+    RuntimeError
+        Se o modelo padrão não puder ser obtido ou carregado.
+
     Examples
     --------
     >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')  # doctest: +SKIP
@@ -1331,8 +1495,77 @@ def segmentar_endereco(endereco: str) -> EnderecoSegmentado:
 
     Notes
     -----
-    - Se o modelo padrão não puder ser carregado, é levantada `PanicException`
-      (subclasse de `BaseException`, não de `Exception`), pois a falha acontece
-      dentro do código Rust.
+    O GIL é liberado durante a inferência, então outras threads do Python
+    seguem rodando.
+
+    """
+
+def segmentar_enderecos(enderecos: Iterable[str]) -> list[EnderecoSegmentado]:
+    """
+    Segmenta vários endereços de uma vez com o modelo padrão.
+
+    É a forma mais eficiente de processar uma lista ou uma coluna de endereços:
+    o modelo é carregado uma única vez e o interpretador não é bloqueado durante
+    o processamento.
+
+    A saída mantém a ordem de entrada, e cada posição corresponde ao endereço de
+    mesmo índice.
+
+    Parameters
+    ----------
+    enderecos : iterable of str
+        Endereços brutos a serem segmentados.
+
+    Returns
+    -------
+    list of EnderecoSegmentado
+        Um resultado por endereço, na mesma ordem da entrada.
+
+    Raises
+    ------
+    RuntimeError
+        Se o modelo padrão não puder ser obtido ou carregado.
+
+    Examples
+    --------
+    >>> resultados = enderecobr.segmentar_enderecos([  # doctest: +SKIP
+    ...     'av n sra copacabana, 123',
+    ...     'r das flores, 45, apt 12',
+    ... ])
+    >>> len(resultados)  # doctest: +SKIP
+    2
+
+    """
+
+def estruturar_endereco(endereco: str, padronizar: bool = True) -> Endereco:
+    """
+    Segmenta o endereço e devolve os campos já separados em um :class:`Endereco`.
+
+    Atalho para segmentar e depois agrupar os trechos nos campos do endereço.
+    Use :func:`segmentar_endereco` quando quiser ver os trechos e seus tipos.
+
+    Parameters
+    ----------
+    endereco : str
+        Endereço bruto a ser estruturado.
+    padronizar : bool, optional
+        Se ``True`` (padrão), os campos resultantes passam pelas funções de
+        padronização.
+
+    Returns
+    -------
+    Endereco
+        Endereço com os campos encontrados.
+
+    Raises
+    ------
+    RuntimeError
+        Se o modelo padrão não puder ser obtido ou carregado.
+
+    Examples
+    --------
+    >>> end = enderecobr.estruturar_endereco('av n sra copacabana, 123')  # doctest: +SKIP
+    >>> end.numero  # doctest: +SKIP
+    '123'
 
     """

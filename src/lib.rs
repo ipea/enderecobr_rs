@@ -348,8 +348,12 @@ pub use numero::padronizar_numeros_para_int;
 pub use numero::padronizar_numeros_para_string;
 pub use tipo_logradouro::padronizar_tipo_logradouro;
 
+pub use separador_endereco::estruturar_endereco;
 pub use separador_endereco::segmentar_endereco;
-pub use separador_endereco::separar_endereco;
+pub use separador_endereco::segmentar_enderecos;
+pub use separador_endereco::tentar_estruturar_endereco;
+pub use separador_endereco::tentar_segmentar_endereco;
+pub use separador_endereco::tentar_segmentar_enderecos;
 
 use crate::separador_endereco::segmento_como_endereco;
 
@@ -531,6 +535,19 @@ mod tests {
             cep: None,
         };
         assert_eq!(endereco.formatar(), "RUA A, 123, CENTRO");
+    }
+
+    #[test]
+    fn test_endereco_formatar_com_cep() {
+        // O CEP entra no fim do texto formatado.
+        let endereco = Endereco {
+            logradouro: Some("RUA A".to_string()),
+            numero: Some("123".to_string()),
+            complemento: None,
+            localidade: Some("CENTRO".to_string()),
+            cep: Some("20040-020".to_string()),
+        };
+        assert_eq!(endereco.formatar(), "RUA A, 123, CENTRO, 20040-020");
     }
 
     #[test]

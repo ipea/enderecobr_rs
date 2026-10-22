@@ -9,10 +9,15 @@ use crate::{
 /// Representa um endereço separado em seus atributos constituintes.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Endereco {
+    /// Nome do logradouro (rua, avenida, travessa etc.).
     pub logradouro: Option<String>,
+    /// Número do imóvel, padronizado como `S/N` quando não houver.
     pub numero: Option<String>,
+    /// Complemento do imóvel (apartamento, bloco, loja etc.).
     pub complemento: Option<String>,
+    /// Bairro ou localidade do endereço.
     pub localidade: Option<String>,
+    /// CEP no formato `XXXXX-XXX`.
     pub cep: Option<String>,
 }
 
@@ -25,8 +30,6 @@ pub fn endereco_como_json(endereco: &Endereco) -> String {
 /// recebe a função adequada — [`padronizar_logradouros`] para o logradouro,
 /// [`padronizar_numeros`] para o número, [`padronizar_complementos`] para o complemento,
 /// [`padronizar_bairros`] para a localidade e [`padronizar_cep_leniente`] para o CEP.
-/// Campos `None` permanecem `None`. Os valores antigos são consumidos (via `take`), então
-/// só há alocação para os textos padronizados que substituem os originais.
 pub fn padronizar_in_place(endereco: &mut Endereco) {
     endereco.logradouro = endereco
         .logradouro
@@ -50,14 +53,15 @@ pub fn padronizar_in_place(endereco: &mut Endereco) {
         .map(|x| padronizar_cep_leniente(x.as_str()));
 }
 
-/// Obtém uma representação textual simples dos atributos desta struct,
-/// separados por vírgula, caso existam.
+/// Junta os campos preenchidos do endereço em um texto só, separados por
+/// vírgula, na ordem logradouro, número, complemento, localidade e CEP.
 pub fn formatar(endereco: &Endereco) -> String {
     [
         &endereco.logradouro,
         &endereco.numero,
         &endereco.complemento,
         &endereco.localidade,
+        &endereco.cep,
     ]
     .iter()
     .filter_map(|opt| opt.as_deref())
@@ -67,22 +71,51 @@ pub fn formatar(endereco: &Endereco) -> String {
 
 // Os métodos abaixo são apenas facilitadores para quem consome a crate direto do Rust.
 impl Endereco {
+    /// Cria um endereço informando os campos que existem, na ordem dos campos
+    /// da struct.
+    pub fn novo(
+        logradouro: Option<String>,
+        numero: Option<String>,
+        complemento: Option<String>,
+        localidade: Option<String>,
+        cep: Option<String>,
+    ) -> Endereco {
+        Endereco {
+            logradouro,
+            numero,
+            complemento,
+            localidade,
+            cep,
+        }
+    }
+
+    /// Serializa o endereço em JSON. Equivalente a [`endereco_como_json`].
     pub fn como_json(&self) -> String {
         endereco_como_json(self)
     }
 
+    /// Padroniza todos os campos deste endereço, modificando-o. Equivalente a
+    /// [`padronizar_in_place`].
     pub fn padronizar(&mut self) {
         padronizar_in_place(self)
     }
 
+    /// Devolve uma cópia padronizada deste endereço, sem alterar o original.
     pub fn endereco_padronizado(&self) -> Endereco {
         let mut novo = self.clone();
         padronizar_in_place(&mut novo);
         novo
     }
 
+    /// Devolve o endereço como um texto só. Equivalente a [`formatar`].
     pub fn formatar(&self) -> String {
         formatar(self)
+    }
+}
+
+impl std::fmt::Display for Endereco {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.formatar())
     }
 }
 

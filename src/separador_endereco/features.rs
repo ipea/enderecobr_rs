@@ -8,6 +8,8 @@ use rustc_hash::FxHashSet;
 use self::TipoToken::{Alpha, Desconhecido, Digito, Pontuacao};
 use crate::{estado::ESTADOS, normalizar};
 
+/// Transforma o texto do endereço nas features que o modelo usa para
+/// decidir o tipo de cada trecho.
 pub struct ExtratorFeature {
     distancias_vizinhaca: Vec<i32>,
     regex_tokenizer: Regex,
@@ -67,6 +69,8 @@ fn is_pontuacao(word: &str) -> bool {
 }
 
 impl ExtratorFeature {
+    /// Cria um extrator. `distancias_vizinhaca` define quais tokens vizinhos
+    /// entram como contexto (por padrão, os dois anteriores e os dois seguintes).
     pub fn new(distancias_vizinhaca: Option<Vec<i32>>) -> Self {
         Self {
             distancias_vizinhaca: distancias_vizinhaca.unwrap_or(vec![-2, -1, 1, 2]),
@@ -78,11 +82,13 @@ impl ExtratorFeature {
         }
     }
 
+    /// Divide o texto em tokens e devolve as features de cada um.
     pub fn sent2features(&self, text: &str) -> Vec<Vec<String>> {
         let (toks, _) = self.tokenize(text);
         self.tokens2features(&toks)
     }
 
+    /// Devolve as features de cada token de uma lista já tokenizada.
     pub fn tokens2features(&self, toks: &[&str]) -> Vec<Vec<String>> {
         let tok_info: Vec<TokenInfo> = toks.iter().map(|tok| self._token_info(tok)).collect();
         (0..toks.len())
@@ -287,9 +293,8 @@ impl ExtratorFeature {
         }
     }
 
-    // Funções auxiliares de exemplo
-    /// Os tokens são fatias emprestadas do texto de entrada: a extração de
-    /// features não aloca nenhuma `String` por token.
+    /// Divide o texto em tokens (palavras, números e pontuação) e devolve,
+    /// junto, a posição de cada token no texto original.
     pub fn tokenize<'a>(&self, text: &'a str) -> (Vec<&'a str>, Vec<usize>) {
         self.regex_tokenizer
             .find_iter(text)

@@ -4,12 +4,18 @@ use std::{
     process,
     time::Duration,
 };
-
+/// Endereço de onde o modelo padrão é baixado.
 pub const MODEL_DOWNLOAD_PATH: &str =
     "https://github.com/ipea/enderecobr_rs/releases/download/modelo-crf-v0.1/tagger.crf";
 
+/// Versão do modelo padrão. É usado como subdiretório no cache para que
+/// versões diferentes não se sobrescrevam.
 pub const VERSAO_MODELO: &str = "modelo-crf-v0.1";
+
+/// Nome do diretório da biblioteca dentro do cache do sistema.
 pub const NOME_DIRETORIO_CACHE: &str = "enderecobr_rs";
+
+/// Nome do arquivo do modelo dentro do diretório de cache.
 pub const NOME_ARQUIVO_MODELO: &str = "tagger.crf";
 
 /// Diretório (arquivo ou diretório) onde o modelo deve ficar.
@@ -42,7 +48,7 @@ pub const VAR_AMBIENTE_SEM_DOWNLOAD: &str = "ENDERECOBR_MODELO_SEM_DOWNLOAD";
 /// fazer o download, ou gravar o modelo no local.
 ///
 #[cfg_attr(coverage_nightly, coverage(off))] // Chama funções que acessam o disco.
-pub fn obter_modelo(path_modelo: Option<String>) -> Result<PathBuf, String> {
+pub fn obter_modelo(path_modelo: Option<&Path>) -> Result<PathBuf, String> {
     let caminho = obter_caminho_modelo(path_modelo)?;
     let sem_download = variavel_ambiente_ativa(VAR_AMBIENTE_SEM_DOWNLOAD);
 
@@ -65,8 +71,10 @@ pub fn obter_modelo(path_modelo: Option<String>) -> Result<PathBuf, String> {
 /// parâmetro > variável de ambiente > cache. Adiciona um subdiretório de versão
 /// se o resultado for um diretório.
 /// Usado em [`obter_modelo`].
-pub fn obter_caminho_modelo(path_modelo: Option<String>) -> Result<PathBuf, String> {
-    let path_param = path_modelo.filter(|x| !x.is_empty()).map(PathBuf::from);
+pub fn obter_caminho_modelo(path_modelo: Option<&Path>) -> Result<PathBuf, String> {
+    let path_param = path_modelo
+        .filter(|x| !x.as_os_str().is_empty())
+        .map(Path::to_path_buf);
     let path_env = std::env::var_os(VAR_AMBIENTE_MODELO)
         .filter(|x| !x.is_empty())
         .map(PathBuf::from);
@@ -177,14 +185,14 @@ mod tests {
         );
 
         assert_eq!(
-            obter_caminho_modelo(Some("/tmp/modelo_argumento/".to_string())),
+            obter_caminho_modelo(Some(Path::new("/tmp/modelo_argumento/"))),
             Ok(PathBuf::from("/tmp/modelo_argumento/")
                 .join(VERSAO_MODELO)
                 .join(NOME_ARQUIVO_MODELO))
         );
 
         assert_eq!(
-            obter_caminho_modelo(Some("/tmp/modelo_arquivo.crf".to_string())),
+            obter_caminho_modelo(Some(Path::new("/tmp/modelo_arquivo.crf"))),
             Ok(PathBuf::from("/tmp/modelo_arquivo.crf"))
         );
     }

@@ -3,6 +3,9 @@ use std::path::PathBuf;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
+// As docstrings públicas ficam em `enderecobr.pyi`; aqui só ficam os
+// comentários necessários para entender o código.
+
 #[pyclass]
 struct Padronizador {
     interno: enderecobr_rs::Padronizador,
@@ -33,29 +36,15 @@ impl Padronizador {
         self.interno.adicionar_pares(&slices);
     }
 
-    /// Adiciona uma regra simples de substituição.
-    ///
-    /// Toda ocorrência de `regex` será substituída por `substituicao`. É necessário
-    /// chamar [`preparar`][Self::preparar] após adicionar regras manualmente.
     fn adicionar(&mut self, regex: &str, substituicao: &str) {
         self.interno.adicionar(regex, substituicao);
     }
 
-    /// Adiciona uma regra condicional de substituição (com regex de exclusão).
-    ///
-    /// `regex` é substituída por `substituicao` somente se `regex_ignorar` **não**
-    /// corresponder ao texto. É necessário chamar
-    /// [`preparar`][Self::preparar] após adicionar regras manualmente.
     fn adicionar_com_ignorar(&mut self, regex: &str, substituicao: &str, regex_ignorar: &str) {
         self.interno
             .adicionar_com_ignorar(regex, substituicao, regex_ignorar);
     }
 
-    /// Adiciona regras a partir de três vetores paralelos.
-    ///
-    /// Os vetores devem ter o mesmo comprimento. O terceiro vetor pode conter `None`
-    /// para indicar ausência de condição de exclusão. As regras são preparadas
-    /// automaticamente ao término da execução.
     fn adicionar_vetores(
         &mut self,
         regexes: Vec<String>,
@@ -77,11 +66,6 @@ impl Padronizador {
         Ok(())
     }
 
-    /// Recompila o conjunto de expressões regulares após adicionar regras manualmente.
-    ///
-    /// Deve ser chamado após [`adicionar`][Self::adicionar] ou
-    /// [`adicionar_com_ignorar`][Self::adicionar_com_ignorar] para que as novas
-    /// regras passem a ser aplicadas.
     fn preparar(&mut self) {
         self.interno.preparar();
     }
@@ -94,8 +78,6 @@ impl Padronizador {
         self.interno.obter_pares()
     }
 
-    /// Retorna as regras como três vetores paralelos: regexes, substituições e
-    /// regexes de exclusão.
     fn obter_vetores(&self) -> (Vec<&str>, Vec<&str>, Vec<Option<&str>>) {
         self.interno.obter_vetores()
     }
@@ -115,12 +97,10 @@ impl IdentificadorPadroes {
         }
     }
 
-    /// Adiciona novas expressões regulares ao identificador.
     fn adicionar(&mut self, regexs: Vec<String>) {
         self.interno.adicionar(&regexs);
     }
 
-    /// Verifica se alguma das regexes cadastradas corresponde ao valor.
     fn identificar(&self, valor: &str) -> bool {
         self.interno.identificar(valor)
     }
@@ -141,7 +121,6 @@ impl SeparadorEndereco {
         SeparadorEndereco { interno: None }
     }
 
-    /// Cria um separador já carregado a partir de um arquivo de modelo.
     #[staticmethod]
     fn carregar(caminho: PathBuf) -> PyResult<SeparadorEndereco> {
         Ok(SeparadorEndereco {
@@ -149,35 +128,54 @@ impl SeparadorEndereco {
         })
     }
 
-    /// Carrega (ou substitui) o modelo desta instância, sem criar um objeto novo.
     fn carregar_modelo(&mut self, caminho: PathBuf) -> PyResult<()> {
         self.interno = Some(abrir_modelo(caminho)?);
         Ok(())
     }
 
-    /// Segmenta o endereço nas suas partes constituintes.
     fn segmentar(&self, py: Python<'_>, texto: &str) -> PyResult<EnderecoSegmentado> {
-        let separador = self.interno.as_ref().ok_or_else(|| {
+        let separador = self.modelo()?;
+
+        // A inferência é a parte cara: rodar sem o GIL libera as outras threads.
+        Ok(py.detach(|| separador.segmentar(texto)).into())
+    }
+
+    fn segmentar_enderecos(
+        &self,
+        py: Python<'_>,
+        textos: Vec<String>,
+    ) -> PyResult<Vec<EnderecoSegmentado>> {
+        let separador = self.modelo()?;
+
+        let segmentados = py.detach(|| {
+            let textos: Vec<&str> = textos.iter().map(String::as_str).collect();
+            separador.segmentar_enderecos(&textos)
+        });
+        Ok(segmentados
+            .into_iter()
+            .map(EnderecoSegmentado::from)
+            .collect())
+    }
+}
+
+impl SeparadorEndereco {
+    fn modelo(&self) -> PyResult<&enderecobr_rs::separador_endereco::SeparadorEndereco> {
+        self.interno.as_ref().ok_or_else(|| {
             PyRuntimeError::new_err(
                 "Nenhum modelo carregado. Use SeparadorEndereco.carregar(caminho) \
                  ou carregar_modelo(caminho) antes de segmentar.",
             )
-        })?;
-
-        // A inferência do modelo é a parte cara: rodar sem o GIL libera as outras
-        // threads do Python (a tagger é criada a cada chamada).
-        let (segmentado, _, _) = py.detach(|| separador.segmentar_endereco_com_timing(texto));
-        Ok(segmentado.into())
+        })
     }
 }
 
-/// Converte o `Result<_, String>` do núcleo no erro Python correspondente.
+/// Converte o `Result<_, String>` da lib Rust no erro Python correspondente.
 fn abrir_modelo(
     caminho: PathBuf,
 ) -> PyResult<enderecobr_rs::separador_endereco::SeparadorEndereco> {
-    enderecobr_rs::separador_endereco::SeparadorEndereco::carregar(caminho).map_err(|erro| {
-        PyRuntimeError::new_err(format!("Não foi possível carregar o modelo: {erro}"))
-    })
+    // A mensagem da lib Rust já diz qual arquivo falhou e por quê.
+    enderecobr_rs::separador_endereco::SeparadorEndereco::carregar(caminho)
+        .map_err(PyRuntimeError::new_err)
 }
 
 /// Converte as falhas de resolução/download do modelo em erro Python.
@@ -185,7 +183,12 @@ fn erro_de_modelo(erro: String) -> PyErr {
     PyRuntimeError::new_err(format!("Não foi possível obter o modelo: {erro}"))
 }
 
-// ====== Endereço =====
+/// Converte a falha de carga do modelo padrão em erro Python.
+fn erro_de_modelo_padrao(erro: String) -> PyErr {
+    PyRuntimeError::new_err(format!("Não foi possível carregar o modelo padrão: {erro}"))
+}
+
+// ====== Endereço ======
 #[pyclass(eq, skip_from_py_object)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Endereco {
@@ -194,9 +197,34 @@ pub struct Endereco {
 
 #[pymethods]
 impl Endereco {
+    #[new]
+    #[pyo3(signature = (logradouro = None, numero = None, complemento = None, localidade = None, cep = None))]
+    fn novo(
+        logradouro: Option<String>,
+        numero: Option<String>,
+        complemento: Option<String>,
+        localidade: Option<String>,
+        cep: Option<String>,
+    ) -> Endereco {
+        Endereco {
+            interno: enderecobr_rs::Endereco::novo(
+                logradouro,
+                numero,
+                complemento,
+                localidade,
+                cep,
+            ),
+        }
+    }
+
     #[getter]
     fn logradouro(&self) -> Option<String> {
         self.interno.logradouro.clone()
+    }
+
+    #[setter]
+    fn set_logradouro(&mut self, valor: Option<String>) {
+        self.interno.logradouro = valor;
     }
 
     #[getter]
@@ -204,9 +232,19 @@ impl Endereco {
         self.interno.numero.clone()
     }
 
+    #[setter]
+    fn set_numero(&mut self, valor: Option<String>) {
+        self.interno.numero = valor;
+    }
+
     #[getter]
     fn complemento(&self) -> Option<String> {
         self.interno.complemento.clone()
+    }
+
+    #[setter]
+    fn set_complemento(&mut self, valor: Option<String>) {
+        self.interno.complemento = valor;
     }
 
     #[getter]
@@ -214,9 +252,19 @@ impl Endereco {
         self.interno.localidade.clone()
     }
 
+    #[setter]
+    fn set_localidade(&mut self, valor: Option<String>) {
+        self.interno.localidade = valor;
+    }
+
     #[getter]
     fn cep(&self) -> Option<String> {
         self.interno.cep.clone()
+    }
+
+    #[setter]
+    fn set_cep(&mut self, valor: Option<String>) {
+        self.interno.cep = valor;
     }
 
     fn formatar(&self) -> String {
@@ -230,6 +278,28 @@ impl Endereco {
     fn endereco_padronizado(&self) -> Endereco {
         self.interno.endereco_padronizado().into()
     }
+
+    fn __str__(&self) -> String {
+        self.interno.formatar()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Endereco(logradouro={}, numero={}, complemento={}, localidade={}, cep={})",
+            formatar_campo(&self.interno.logradouro),
+            formatar_campo(&self.interno.numero),
+            formatar_campo(&self.interno.complemento),
+            formatar_campo(&self.interno.localidade),
+            formatar_campo(&self.interno.cep),
+        )
+    }
+}
+
+/// Mostra um campo opcional como `None` ou como texto entre aspas.
+fn formatar_campo(campo: &Option<String>) -> String {
+    campo
+        .as_ref()
+        .map_or_else(|| "None".to_string(), |valor| format!("{valor:?}"))
 }
 
 impl From<enderecobr_rs::Endereco> for Endereco {
@@ -257,6 +327,13 @@ impl SegmentoEndereco {
     fn valor(&self) -> String {
         self.interno.valor.clone()
     }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SegmentoEndereco(valor={:?}, tipo={:?})",
+            self.interno.valor, self.interno.tipo
+        )
+    }
 }
 
 #[pyclass(frozen, eq, skip_from_py_object)]
@@ -275,6 +352,16 @@ impl EnderecoSegmentado {
             .cloned()
             .map(SegmentoEndereco::from)
             .collect()
+    }
+
+    fn __repr__(&self) -> String {
+        let segmentos: Vec<String> = self
+            .interno
+            .segmentos
+            .iter()
+            .map(|segmento| format!("({:?}, {:?})", segmento.valor, segmento.tipo))
+            .collect();
+        format!("EnderecoSegmentado([{}])", segmentos.join(", "))
     }
 }
 
@@ -334,6 +421,7 @@ pub mod enderecobr {
     fn padronizar_bairros(valor: &str) -> String {
         enderecobr_rs::padronizar_bairros(valor)
     }
+
     #[pyfunction]
     fn padronizar_municipios(valor: &str) -> String {
         enderecobr_rs::padronizar_municipios(valor)
@@ -389,6 +477,7 @@ pub mod enderecobr {
     fn normalizar(valor: &str) -> String {
         enderecobr_rs::normalizar(valor).to_string()
     }
+
     #[pyfunction]
     fn is_dado_faltante(valor: &str) -> bool {
         enderecobr_rs::is_dado_faltante(valor)
@@ -460,29 +549,52 @@ pub mod enderecobr {
 
     #[pyfunction]
     #[pyo3(signature = (path_modelo = None))]
-    fn obter_modelo(py: Python<'_>, path_modelo: Option<String>) -> PyResult<PathBuf> {
+    fn obter_modelo(py: Python<'_>, path_modelo: Option<PathBuf>) -> PyResult<PathBuf> {
         // O download é bloqueante (até 60 s): não segurar o GIL enquanto isso.
-        py.detach(|| enderecobr_rs::separador_endereco::obter_modelo(path_modelo))
+        py.detach(|| enderecobr_rs::separador_endereco::obter_modelo(path_modelo.as_deref()))
             .map_err(super::erro_de_modelo)
     }
 
     #[pyfunction]
     #[pyo3(signature = (path_modelo = None))]
-    fn obter_caminho_modelo(path_modelo: Option<String>) -> PyResult<PathBuf> {
-        enderecobr_rs::separador_endereco::obter_caminho_modelo(path_modelo)
+    fn obter_caminho_modelo(path_modelo: Option<PathBuf>) -> PyResult<PathBuf> {
+        enderecobr_rs::separador_endereco::obter_caminho_modelo(path_modelo.as_deref())
             .map_err(super::erro_de_modelo)
     }
 
     // ========= Separador de endereço ==========
 
     #[pyfunction]
-    fn segmentar_endereco(endereco: &str) -> EnderecoSegmentado {
-        enderecobr_rs::segmentar_endereco(endereco).into()
+    fn segmentar_endereco(py: Python<'_>, endereco: &str) -> PyResult<EnderecoSegmentado> {
+        let segmentado = py
+            .detach(|| enderecobr_rs::tentar_segmentar_endereco(endereco))
+            .map_err(super::erro_de_modelo_padrao)?;
+        Ok(segmentado.into())
+    }
+
+    #[pyfunction]
+    fn segmentar_enderecos(
+        py: Python<'_>,
+        enderecos: Vec<String>,
+    ) -> PyResult<Vec<EnderecoSegmentado>> {
+        let segmentados = py
+            .detach(|| {
+                let textos: Vec<&str> = enderecos.iter().map(String::as_str).collect();
+                enderecobr_rs::tentar_segmentar_enderecos(&textos)
+            })
+            .map_err(super::erro_de_modelo_padrao)?;
+        Ok(segmentados
+            .into_iter()
+            .map(EnderecoSegmentado::from)
+            .collect())
     }
 
     #[pyfunction]
     #[pyo3(signature = (endereco, padronizar = true))]
-    fn separador_endereco(endereco: &str, padronizar: bool) -> Endereco {
-        enderecobr_rs::separar_endereco(endereco, padronizar).into()
+    fn estruturar_endereco(py: Python<'_>, endereco: &str, padronizar: bool) -> PyResult<Endereco> {
+        let estruturado = py
+            .detach(|| enderecobr_rs::tentar_estruturar_endereco(endereco, padronizar))
+            .map_err(super::erro_de_modelo_padrao)?;
+        Ok(estruturado.into())
     }
 }

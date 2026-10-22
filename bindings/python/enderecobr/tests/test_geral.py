@@ -145,3 +145,33 @@ def testa_separador_sem_modelo():
     # Testa também usando o método estático.
     with pytest.raises(RuntimeError, match="Não foi possível carregar o modelo"):
         _ = enderecobr.SeparadorEndereco.carregar("/nao/existe/tagger.crf")
+
+
+def testa_endereco_construtor_e_padronizar():
+    endereco = enderecobr.Endereco(logradouro="r. gen glicerio", numero="001")
+    assert endereco.complemento is None
+
+    endereco.complemento = "apt 405"
+    endereco.padronizar()
+
+    assert endereco.logradouro == "RUA GENERAL GLICERIO"
+    assert endereco.numero == "1"
+    assert endereco.complemento == "APARTAMENTO 405"
+    assert endereco.formatar() == "RUA GENERAL GLICERIO, 1, APARTAMENTO 405"
+
+
+def testa_endereco_copia_padronizada():
+    endereco = enderecobr.Endereco(logradouro="r. do aco", cep="20040020")
+    padronizado = endereco.endereco_padronizado()
+
+    assert padronizado.logradouro == "RUA DO ACO"
+    assert padronizado.cep == "20040-020"
+    assert endereco.logradouro == "r. do aco"
+
+
+def testa_endereco_repr():
+    endereco = enderecobr.Endereco(logradouro="RUA A", numero="1")
+    assert (
+        repr(endereco)
+        == 'Endereco(logradouro="RUA A", numero="1", complemento=None, localidade=None, cep=None)'
+    )
