@@ -185,36 +185,108 @@ fn erro_de_modelo(erro: String) -> PyErr {
     PyRuntimeError::new_err(format!("Não foi possível obter o modelo: {erro}"))
 }
 
-#[pyclass(get_all, frozen, eq, skip_from_py_object)]
+// ====== Endereço =====
+#[pyclass(eq, skip_from_py_object)]
 #[derive(Clone, Debug, PartialEq)]
-pub struct SegmentoEndereco {
-    pub tipo: String,
-    pub valor: String,
+pub struct Endereco {
+    interno: enderecobr_rs::endereco::Endereco,
 }
 
-#[pyclass(get_all, frozen, eq, skip_from_py_object)]
+#[pymethods]
+impl Endereco {
+    #[getter]
+    fn logradouro(&self) -> Option<String> {
+        self.interno.logradouro.clone()
+    }
+
+    #[getter]
+    fn numero(&self) -> Option<String> {
+        self.interno.numero.clone()
+    }
+
+    #[getter]
+    fn complemento(&self) -> Option<String> {
+        self.interno.complemento.clone()
+    }
+
+    #[getter]
+    fn localidade(&self) -> Option<String> {
+        self.interno.localidade.clone()
+    }
+
+    #[getter]
+    fn cep(&self) -> Option<String> {
+        self.interno.cep.clone()
+    }
+
+    fn formatar(&self) -> String {
+        self.interno.formatar()
+    }
+
+    fn padronizar(&mut self) {
+        self.interno.padronizar();
+    }
+
+    fn endereco_padronizado(&self) -> Endereco {
+        self.interno.endereco_padronizado().into()
+    }
+}
+
+impl From<enderecobr_rs::Endereco> for Endereco {
+    fn from(interno: enderecobr_rs::Endereco) -> Self {
+        Self { interno }
+    }
+}
+
+// ====== Classes do Segmentador ======
+
+#[pyclass(frozen, eq, skip_from_py_object)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SegmentoEndereco {
+    interno: enderecobr_rs::separador_endereco::SegmentoEndereco,
+}
+
+#[pymethods]
+impl SegmentoEndereco {
+    #[getter]
+    fn tipo(&self) -> String {
+        self.interno.tipo.clone()
+    }
+
+    #[getter]
+    fn valor(&self) -> String {
+        self.interno.valor.clone()
+    }
+}
+
+#[pyclass(frozen, eq, skip_from_py_object)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct EnderecoSegmentado {
-    pub segmentos: Vec<SegmentoEndereco>,
+    interno: enderecobr_rs::separador_endereco::EnderecoSegmentado,
+}
+
+#[pymethods]
+impl EnderecoSegmentado {
+    #[getter]
+    fn segmentos(&self) -> Vec<SegmentoEndereco> {
+        self.interno
+            .segmentos
+            .iter()
+            .cloned()
+            .map(SegmentoEndereco::from)
+            .collect()
+    }
 }
 
 impl From<enderecobr_rs::separador_endereco::SegmentoEndereco> for SegmentoEndereco {
-    fn from(s: enderecobr_rs::separador_endereco::SegmentoEndereco) -> Self {
-        SegmentoEndereco {
-            tipo: s.tipo,
-            valor: s.valor,
-        }
+    fn from(interno: enderecobr_rs::separador_endereco::SegmentoEndereco) -> Self {
+        Self { interno }
     }
 }
+
 impl From<enderecobr_rs::separador_endereco::EnderecoSegmentado> for EnderecoSegmentado {
-    fn from(s: enderecobr_rs::separador_endereco::EnderecoSegmentado) -> Self {
-        EnderecoSegmentado {
-            segmentos: s
-                .segmentos
-                .into_iter()
-                .map(SegmentoEndereco::from)
-                .collect(),
-        }
+    fn from(interno: enderecobr_rs::separador_endereco::EnderecoSegmentado) -> Self {
+        Self { interno }
     }
 }
 
@@ -227,6 +299,9 @@ pub mod enderecobr {
 
     #[pymodule_export]
     use super::EnderecoSegmentado;
+
+    #[pymodule_export]
+    use super::Endereco;
 
     #[pymodule_export]
     use super::SegmentoEndereco;
@@ -403,5 +478,11 @@ pub mod enderecobr {
     #[pyfunction]
     fn segmentar_endereco(endereco: &str) -> EnderecoSegmentado {
         enderecobr_rs::segmentar_endereco(endereco).into()
+    }
+
+    #[pyfunction]
+    #[pyo3(signature = (endereco, padronizar = true))]
+    fn separador_endereco(endereco: &str, padronizar: bool) -> Endereco {
+        enderecobr_rs::separar_endereco(endereco, padronizar).into()
     }
 }

@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use clap::Parser;
 use enderecobr_rs::padronizar_estados_para_sigla;
+use enderecobr_rs::separador_endereco::segmento_como_endereco;
 use enderecobr_rs::{
-    padronizar_bairros, padronizar_cep_leniente, padronizar_complementos,
-    padronizar_estados_para_nome, padronizar_logradouros, padronizar_municipios,
-    padronizar_numeros, padronizar_tipo_logradouro,
+    padronizar_bairros, padronizar_cep_leniente, padronizar_complementos, padronizar_logradouros,
+    padronizar_municipios, padronizar_numeros, padronizar_tipo_logradouro,
     separador_endereco::{segmentar_endereco, segmentar_endereco_com_timing},
     Endereco,
 };
@@ -186,11 +186,9 @@ fn segmentar_padronizado(texto: &str, timing: bool) -> Endereco {
         TEMPO_FEATURES_NS.fetch_add(tempo_features.as_nanos() as u64, Ordering::Relaxed);
         TEMPO_INFERENCIA_NS.fetch_add(tempo_inferencia.as_nanos() as u64, Ordering::Relaxed);
         NUM_ENDERECOS.fetch_add(1, Ordering::Relaxed);
-        segmentado.como_endereco().endereco_padronizado()
+        segmento_como_endereco(&segmentado, true)
     } else {
-        segmentar_endereco(texto)
-            .como_endereco()
-            .endereco_padronizado()
+        segmento_como_endereco(&segmentar_endereco(texto), true)
     }
 }
 

@@ -13,7 +13,10 @@ use crfsuite::{Attribute, Model, Tagger};
 use serde::Serialize;
 
 pub use crate::separador_endereco::modelo::{obter_caminho_modelo, obter_modelo};
-use crate::{separador_endereco::features::ExtratorFeature, Endereco};
+use crate::{
+    endereco::{padronizar_in_place, Endereco},
+    separador_endereco::features::ExtratorFeature,
+};
 
 pub struct SeparadorEndereco {
     pub model: Model,
@@ -193,46 +196,62 @@ pub fn segmentar_endereco_com_timing(texto: &str) -> (EnderecoSegmentado, Durati
 
 impl EnderecoSegmentado {
     pub fn como_json(&self) -> String {
-        serde_json::to_string(&self.segmentos).unwrap_or_else(|_| "[]".to_string())
+        segmento_como_json(self)
     }
-    pub fn como_endereco(&self) -> Endereco {
-        let mut res = Endereco::default();
-        for (i, seg) in self.segmentos.iter().enumerate() {
-            let atributo_opt = match seg.tipo.as_str() {
-                "logradouro" if res.logradouro.is_none() => {
-                    Some(res.logradouro.get_or_insert_with(String::new))
-                }
-                "parcela"
-                    if i > 0
-                        && self
-                            .segmentos
-                            .get(i - 1)
-                            .filter(|anterior| anterior.tipo == "logradouro")
-                            .is_some() =>
-                {
-                    Some(res.logradouro.get_or_insert_with(String::new))
-                }
-                // `numero` e `modificador_numero` também alimentam o número.
-                "numero" | "modificador_numero" => Some(res.numero.get_or_insert_with(String::new)),
-                "quilometragem_via" if res.numero.is_none() => {
-                    Some(res.numero.get_or_insert_with(String::new))
-                }
-                // Sem contexto de número, estes tipos caem no complemento.
-                "parcela" | "quilometragem_via" | "complemento" => {
-                    Some(res.complemento.get_or_insert_with(String::new))
-                }
-                "localidade" => Some(res.localidade.get_or_insert_with(String::new)),
-                "cep" => Some(res.cep.get_or_insert_with(String::new)),
-                _ => None,
-            };
+    pub fn como_endereco(&self, padronizar: bool) -> Endereco {
+        segmento_como_endereco(self, padronizar)
+    }
+}
 
-            if let Some(atributo) = atributo_opt {
-                if !atributo.is_empty() {
-                    atributo.push(' ');
-                }
-                atributo.push_str(seg.valor.as_str());
+pub fn separar_endereco(endereco: &str, padronizar: bool) -> Endereco {
+    segmento_como_endereco(&segmentar_endereco(endereco), padronizar)
+}
+
+pub fn segmento_como_json(segmentado: &EnderecoSegmentado) -> String {
+    serde_json::to_string(segmentado).unwrap_or_else(|_| "[]".to_string())
+}
+
+pub fn segmento_como_endereco(segmentado: &EnderecoSegmentado, padronizar: bool) -> Endereco {
+    let mut res = Endereco::default();
+    for (i, seg) in segmentado.segmentos.iter().enumerate() {
+        let atributo_opt = match seg.tipo.as_str() {
+            "logradouro" if res.logradouro.is_none() => {
+                Some(res.logradouro.get_or_insert_with(String::new))
             }
+            "parcela"
+                if i > 0
+                    && segmentado
+                        .segmentos
+                        .get(i - 1)
+                        .filter(|anterior| anterior.tipo == "logradouro")
+                        .is_some() =>
+            {
+                Some(res.logradouro.get_or_insert_with(String::new))
+            }
+            // `numero` e `modificador_numero` também alimentam o número.
+            "numero" | "modificador_numero" => Some(res.numero.get_or_insert_with(String::new)),
+            "quilometragem_via" if res.numero.is_none() => {
+                Some(res.numero.get_or_insert_with(String::new))
+            }
+            // Sem contexto de número, estes tipos caem no complemento.
+            "parcela" | "quilometragem_via" | "complemento" => {
+                Some(res.complemento.get_or_insert_with(String::new))
+            }
+            "localidade" => Some(res.localidade.get_or_insert_with(String::new)),
+            "cep" => Some(res.cep.get_or_insert_with(String::new)),
+            _ => None,
+        };
+
+        if let Some(atributo) = atributo_opt {
+            if !atributo.is_empty() {
+                atributo.push(' ');
+            }
+            atributo.push_str(seg.valor.as_str());
         }
-        res
     }
+    if padronizar {
+        padronizar_in_place(&mut res);
+    }
+
+    res
 }

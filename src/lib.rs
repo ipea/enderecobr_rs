@@ -3,17 +3,16 @@
 // Em stable o cfg não existe e o atributo desaparece por completo.
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-use serde::Serialize;
 use std::borrow::Cow;
 use unicode_normalization::UnicodeNormalization;
 
-use itertools::Itertools;
 use regex::{Regex, RegexSet};
 
 pub mod bairro;
 pub mod cep;
 pub mod complemento;
 pub mod dado_faltante;
+pub mod endereco;
 pub mod estado;
 pub mod logradouro;
 pub mod metaphone;
@@ -22,81 +21,6 @@ pub mod numero;
 pub mod numero_extenso;
 pub mod separador_endereco;
 pub mod tipo_logradouro;
-
-/// Representa um endereço separado em seus atributos constituintes.
-#[derive(Debug, PartialEq, Default, Serialize)]
-pub struct Endereco {
-    pub logradouro: Option<String>,
-    pub numero: Option<String>,
-    pub complemento: Option<String>,
-    pub localidade: Option<String>,
-    pub cep: Option<String>,
-}
-
-impl Endereco {
-    pub fn como_json(&self) -> String {
-        serde_json::to_string(&self).unwrap_or_else(|_| "{}".to_string())
-    }
-    /// Obtém o logradouro padronizado, utilizando a função [padronizar_logradouros].
-    pub fn logradouro_padronizado(&self) -> Option<String> {
-        self.logradouro
-            .as_ref()
-            .map(|x| padronizar_logradouros(x.as_str()))
-    }
-
-    /// Obtém o número padronizado, utilizando a função [padronizar_numeros].
-    pub fn numero_padronizado(&self) -> Option<String> {
-        self.numero.as_ref().map(|x| padronizar_numeros(x.as_str()))
-    }
-
-    /// Obtém o complemento padronizado, utilizando a função [padronizar_complementos].
-    pub fn complemento_padronizado(&self) -> Option<String> {
-        self.complemento
-            .as_ref()
-            .map(|x| padronizar_complementos(x.as_str()))
-    }
-
-    /// Obtém a localidade padronizada, utilizando a função [padronizar_bairros].
-    pub fn localidade_padronizada(&self) -> Option<String> {
-        self.localidade
-            .as_ref()
-            .map(|x| padronizar_bairros(x.as_str()))
-    }
-
-    /// Obtém o CEP padronizado, utilizando a função [padronizar_bairros].
-    pub fn cep_padronizado(&self) -> Option<String> {
-        self.cep
-            .as_ref()
-            .map(|x| padronizar_cep_leniente(x.as_str()))
-    }
-
-    /// Obtém uma nova struct [Endereco] com todos os campos padronizados,
-    /// utilizando os métodos anteriores.
-    pub fn endereco_padronizado(&self) -> Endereco {
-        Endereco {
-            logradouro: self.logradouro_padronizado(),
-            numero: self.numero_padronizado(),
-            complemento: self.complemento_padronizado(),
-            localidade: self.localidade_padronizada(),
-            cep: self.cep_padronizado(),
-        }
-    }
-
-    /// Obtém uma representação textual dos atributos desta struct,
-    /// separados por vírgula, caso existam.
-    pub fn formatar(&self) -> String {
-        [
-            &self.logradouro,
-            &self.numero,
-            &self.complemento,
-            &self.localidade,
-        ]
-        .iter()
-        .filter_map(|opt| opt.as_deref())
-        .map(|x| x.trim())
-        .join(", ")
-    }
-}
 
 /// Representa um par de "regexp replace". Usado internamente no [Padronizador].
 #[derive(Debug)]
@@ -413,6 +337,7 @@ pub use cep::padronizar_cep_leniente;
 pub use cep::padronizar_cep_numerico;
 pub use complemento::padronizar_complementos;
 pub use dado_faltante::is_dado_faltante;
+pub use endereco::Endereco;
 pub use estado::padronizar_estados_para_codigo;
 pub use estado::padronizar_estados_para_nome;
 pub use estado::padronizar_estados_para_sigla;
@@ -424,6 +349,9 @@ pub use numero::padronizar_numeros_para_string;
 pub use tipo_logradouro::padronizar_tipo_logradouro;
 
 pub use separador_endereco::segmentar_endereco;
+pub use separador_endereco::separar_endereco;
+
+use crate::separador_endereco::segmento_como_endereco;
 
 /// Função utilitária utilizada nas ferramentas de CLI para selecionar um padronizador facilmente
 /// via uma string descritiva.
@@ -445,19 +373,11 @@ pub fn obter_padronizador_por_tipo(tipo: &str) -> Result<fn(&str) -> String, &st
 
         "segmentacao" => Ok(|val| segmentar_endereco(val).como_json()),
 
-        "estruturacao" => Ok(|val| {
-            segmentar_endereco(val)
-                .como_endereco()
-                .endereco_padronizado()
-                .como_json()
-        }),
+        "estruturacao" => {
+            Ok(|val| segmento_como_endereco(&segmentar_endereco(val), true).como_json())
+        }
 
-        "formatacao" => Ok(|val| {
-            segmentar_endereco(val)
-                .como_endereco()
-                .endereco_padronizado()
-                .formatar()
-        }),
+        "formatacao" => Ok(|val| segmento_como_endereco(&segmentar_endereco(val), true).formatar()),
 
         _ => Err("Nenhum padronizador encontrado"),
     }
@@ -550,22 +470,17 @@ mod tests {
             numero: Some("001".to_string()),
             complemento: Some("apto. 405".to_string()),
             localidade: Some("jd botânico".to_string()),
-            cep: None,
+            cep: Some("20.040-020".to_string()),
         };
 
-        assert_eq!(
-            endereco.logradouro_padronizado(),
-            Some("RUA GENERAL GLICERIO".to_string())
-        );
-        assert_eq!(endereco.numero_padronizado(), Some("1".to_string()));
-        assert_eq!(
-            endereco.complemento_padronizado(),
-            Some("APARTAMENTO 405".to_string())
-        );
-        assert_eq!(
-            endereco.localidade_padronizada(),
-            Some("JARDIM BOTANICO".to_string())
-        );
+        let esperado = Endereco {
+            logradouro: Some("RUA GENERAL GLICERIO".to_string()),
+            numero: Some("1".to_string()),
+            complemento: Some("APARTAMENTO 405".to_string()),
+            localidade: Some("JARDIM BOTANICO".to_string()),
+            cep: Some("20040-020".to_string()),
+        };
+        assert_eq!(endereco.endereco_padronizado(), esperado);
     }
 
     #[test]
