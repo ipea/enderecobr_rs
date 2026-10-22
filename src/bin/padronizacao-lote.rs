@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 use enderecobr_rs::padronizar_estados_para_sigla;
@@ -65,6 +65,14 @@ fn parsear(s: &str) -> Result<EspecificacaoCampo, String> {
     })
 }
 
+fn parsear_threads(s: &str) -> Result<usize, String> {
+    match s.parse::<usize>() {
+        Ok(n) if n > 0 => Ok(n),
+        Ok(_) => Err("O número de threads deve ser maior que zero".into()),
+        Err(_) => Err(format!("Número de threads inválido: {s}")),
+    }
+}
+
 fn obter_padronizador(tipo: &TipoCampo) -> fn(&str) -> String {
     match tipo {
         TipoCampo::Logradouro => padronizar_logradouros,
@@ -101,13 +109,25 @@ struct Args {
     #[arg(short('n'), long)]
     limite: Option<u32>,
 
+    /// Coluna com o endereço bruto, a ser separado e padronizado em campos
+    /// (logradouro, número, complemento, localidade e CEP).
     #[arg(short('e'), long)]
     endereco: Option<String>,
 
-    /// Mede e imprime o tempo gasto na extração de features vs. na inferência do
-    /// CRF. Só tem efeito combinado com `-e/--endereco`.
+    /// Mede e imprime o tempo gasto na segmentação dos endereços. Só tem efeito
+    /// combinado com `-e/--endereco`.
     #[arg(long, default_value = "false")]
     timing: bool,
+
+    /// Número máximo de threads (cores) usadas no processamento. Sem esta opção,
+    /// o Polars usa todos os núcleos disponíveis.
+    #[arg(
+        short('j'),
+        long,
+        value_name = "N",
+        value_parser = parsear_threads
+    )]
+    threads: Option<usize>,
 
     /// Leitura de baixa memória do parquet de entrada. Desative com
     /// `--low-memory=false`.
@@ -241,19 +261,39 @@ fn segmentar_endereco_df(df: LazyFrame, campo_endereco: &str, timing: bool) -> L
     .drop(col("endereco_processado").into_selector().unwrap())
 }
 
-fn imprimir_timing() {
+fn imprimir_timing(duracao_total: Duration) {
+    println!("Tempo total de execução: {:.2?}", duracao_total);
+
     let n = NUM_ENDERECOS.load(Ordering::Relaxed);
     if n == 0 {
         return;
     }
-    let segmentacao_us = TEMPO_SEGMENTACAO_NS.load(Ordering::Relaxed) as f64 / 1000.0 / n as f64;
+
+    let tempo_segmentacao = Duration::from_nanos(TEMPO_SEGMENTACAO_NS.load(Ordering::Relaxed));
+    let media_us = tempo_segmentacao.as_secs_f64() * 1e6 / n as f64;
     println!(
-        "Timing (média por endereço, n={n}): segmentação≈{segmentacao_us:.2} µs"
+        "Separação de endereços: {tempo_segmentacao:.2?} no total, {media_us:.2} µs por endereço (n={n})"
     );
+}
+
+/// Limita o número de threads usadas pelo Polars e pelo Rayon.
+///
+/// As variáveis de ambiente precisam ser definidas antes de qualquer uso do
+/// Polars, que lê ambas ao criar o pool de threads na primeira chamada.
+fn limitar_threads(threads: Option<usize>) {
+    let Some(threads) = threads else {
+        return;
+    };
+
+    std::env::set_var("POLARS_MAX_THREADS", threads.to_string());
+    std::env::set_var("RAYON_NUM_THREADS", threads.to_string());
 }
 
 fn main() {
     let args = Args::parse();
+    limitar_threads(args.threads);
+
+    let inicio_execucao = Instant::now();
     let timing = args.timing;
     let mut colunas_finais: Vec<String> = Vec::default();
 
@@ -339,7 +379,7 @@ fn main() {
                 args.arquivo_entrada, args.arquivo_saida
             );
             if timing {
-                imprimir_timing();
+                imprimir_timing(inicio_execucao.elapsed());
             }
         }
         Err(err) => println!("{}", err),
