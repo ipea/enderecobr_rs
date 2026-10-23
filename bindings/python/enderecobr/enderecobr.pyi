@@ -1089,6 +1089,25 @@ class TipoSegmento:
     mesma ordem. Cada variante também se compara igual ao seu índice inteiro
     (``TipoSegmento.Cep == 5``).
 
+    Tipos de Segmento:
+    - Logradouro: Tipo de via + título + nome: `R ALCIDES CARNEIRO LEAL`, `ROD BR-116`;
+    - LogradouroInterno: Via ou área interna de um empreendimento, fora do arruamento oficial.
+    - Numero: Numeração predial, inclusive quando ausente: `71`, `S/N`;
+    - ModificadorNumero: Sufixo ou marcador preso ao número: `A`, `504-B1`, `POSTE`;
+    - Complemento: Unidade interna do imóvel, tipo e valor juntos: `APTO 104`, `BL 4`;
+    - Empreendimento: Lugar nomeado: prédio, condomínio, conjunto, loteamento ou o próprio estabelecimento que ocupa o endereço: `ED MANAGUA`, `COND PALM VILLAGE`;
+    - Parcela: Identificador cadastral do terreno (um `gleba` pode conter uma `quadra` que pode conter um `lote`): `QD 34 LOTE 17`;
+    - DescricaoArea: Descrição textual de área, seu uso ou medição. Nunca é um identificador. Ex.: `8.000,00 m²`, `ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...`, `MAR TERRITORIAL`, `MARGEM ESQUERDA`;
+    - QuilometragemVia: Quilometragem em rodovia, onde o número é a posição ao longo da via: `KM 304`;
+    - Referencia: Trecho que aponta para outro endereço ou lugar: `ESQUINA COM AV BOA VIAGEM`;
+    - Denominacao: Nome atual ou antigo da via ou do lugar: `ANTIGA RUA B`;
+    - Localidade: Localidade, bairro, distrito, vila ou zona: `PINA`, `ZONA RURAL`;
+    - Cep: Código de endereçamento postas;
+    - Municipio: Município;
+    - Uf: Unidade federativa;
+    - Outro: Conteúdo que não cabe em nenhum outro tipo — inclusive rótulo que ainda não tem variante própria;
+
+
     Examples
     --------
     >>> from enderecobr import TipoSegmento, SegmentoEndereco
