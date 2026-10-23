@@ -310,22 +310,67 @@ impl From<enderecobr_rs::Endereco> for Endereco {
 
 // ====== Classes do Segmentador ======
 
-#[pyclass(frozen, eq, skip_from_py_object)]
+#[pyclass(eq, skip_from_py_object)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SegmentoEndereco {
     interno: enderecobr_rs::separador_endereco::SegmentoEndereco,
 }
 
+/// Espelha `enderecobr_rs::separador_endereco::TipoSegmento`: mesmas variantes, na
+/// mesma ordem (a ordem define o valor inteiro usado por `eq_int`). Ao mexer em um
+/// dos dois lados, mexa no outro.
+#[pyclass(eq, eq_int, from_py_object)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TipoSegmento {
+    Logradouro,
+    LogradouroInterno,
+    Numero,
+    ModificadorNumero,
+    Complemento,
+    Cep,
+    Localidade,
+    Municipio,
+    Uf,
+    Parcela,
+    QuilometragemVia,
+    Denominacao,
+    DescricaoArea,
+    Empreendimento,
+    Referencia,
+    Outro,
+}
+
 #[pymethods]
 impl SegmentoEndereco {
+    #[new]
+    #[pyo3(signature = (valor, tipo))]
+    fn novo(valor: String, tipo: TipoSegmento) -> SegmentoEndereco {
+        SegmentoEndereco {
+            interno: enderecobr_rs::separador_endereco::SegmentoEndereco {
+                valor,
+                tipo: tipo.into(),
+            },
+        }
+    }
+
     #[getter]
-    fn tipo(&self) -> String {
-        self.interno.tipo.clone()
+    fn tipo(&self) -> TipoSegmento {
+        TipoSegmento::from(self.interno.tipo)
+    }
+
+    #[setter]
+    fn set_tipo(&mut self, tipo: TipoSegmento) {
+        self.interno.tipo = tipo.into();
     }
 
     #[getter]
     fn valor(&self) -> String {
         self.interno.valor.clone()
+    }
+
+    #[setter]
+    fn set_valor(&mut self, valor: String) {
+        self.interno.valor = valor;
     }
 
     fn __repr__(&self) -> String {
@@ -365,6 +410,54 @@ impl EnderecoSegmentado {
     }
 }
 
+impl From<enderecobr_rs::separador_endereco::TipoSegmento> for TipoSegmento {
+    fn from(interno: enderecobr_rs::separador_endereco::TipoSegmento) -> Self {
+        use enderecobr_rs::separador_endereco::TipoSegmento as Rs;
+        match interno {
+            Rs::Logradouro => TipoSegmento::Logradouro,
+            Rs::LogradouroInterno => TipoSegmento::LogradouroInterno,
+            Rs::Numero => TipoSegmento::Numero,
+            Rs::ModificadorNumero => TipoSegmento::ModificadorNumero,
+            Rs::Complemento => TipoSegmento::Complemento,
+            Rs::Cep => TipoSegmento::Cep,
+            Rs::Localidade => TipoSegmento::Localidade,
+            Rs::Municipio => TipoSegmento::Municipio,
+            Rs::Uf => TipoSegmento::Uf,
+            Rs::Parcela => TipoSegmento::Parcela,
+            Rs::QuilometragemVia => TipoSegmento::QuilometragemVia,
+            Rs::Denominacao => TipoSegmento::Denominacao,
+            Rs::DescricaoArea => TipoSegmento::DescricaoArea,
+            Rs::Empreendimento => TipoSegmento::Empreendimento,
+            Rs::Referencia => TipoSegmento::Referencia,
+            Rs::Outro => TipoSegmento::Outro,
+        }
+    }
+}
+
+impl From<TipoSegmento> for enderecobr_rs::separador_endereco::TipoSegmento {
+    fn from(espelho: TipoSegmento) -> Self {
+        use enderecobr_rs::separador_endereco::TipoSegmento as Rs;
+        match espelho {
+            TipoSegmento::Logradouro => Rs::Logradouro,
+            TipoSegmento::LogradouroInterno => Rs::LogradouroInterno,
+            TipoSegmento::Numero => Rs::Numero,
+            TipoSegmento::ModificadorNumero => Rs::ModificadorNumero,
+            TipoSegmento::Complemento => Rs::Complemento,
+            TipoSegmento::Cep => Rs::Cep,
+            TipoSegmento::Localidade => Rs::Localidade,
+            TipoSegmento::Municipio => Rs::Municipio,
+            TipoSegmento::Uf => Rs::Uf,
+            TipoSegmento::Parcela => Rs::Parcela,
+            TipoSegmento::QuilometragemVia => Rs::QuilometragemVia,
+            TipoSegmento::Denominacao => Rs::Denominacao,
+            TipoSegmento::DescricaoArea => Rs::DescricaoArea,
+            TipoSegmento::Empreendimento => Rs::Empreendimento,
+            TipoSegmento::Referencia => Rs::Referencia,
+            TipoSegmento::Outro => Rs::Outro,
+        }
+    }
+}
+
 impl From<enderecobr_rs::separador_endereco::SegmentoEndereco> for SegmentoEndereco {
     fn from(interno: enderecobr_rs::separador_endereco::SegmentoEndereco) -> Self {
         Self { interno }
@@ -392,6 +485,9 @@ pub mod enderecobr {
 
     #[pymodule_export]
     use super::SegmentoEndereco;
+
+    #[pymodule_export]
+    use super::TipoSegmento;
 
     #[pymodule_export]
     use super::Padronizador;
@@ -596,5 +692,25 @@ pub mod enderecobr {
             .detach(|| enderecobr_rs::tentar_estruturar_endereco(endereco, padronizar))
             .map_err(super::erro_de_modelo_padrao)?;
         Ok(estruturado.into())
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::TipoSegmento;
+    use enderecobr_rs::separador_endereco::TipoSegmento as TipoSegmentoRs;
+
+    #[test]
+    fn tipo_segmento_espelha_o_rust() {
+        // Mesma quantidade, mesma ordem (a ordem vira o valor inteiro no Python)
+        // e sem duas variantes do Rust caindo na mesma variante do Python.
+        for (indice, tipo) in TipoSegmentoRs::TODOS.into_iter().enumerate() {
+            let espelho = TipoSegmento::from(tipo);
+            assert_eq!(
+                espelho as isize, indice as isize,
+                "ordem divergente: {tipo}"
+            );
+            assert_eq!(TipoSegmentoRs::from(espelho), tipo, "ida e volta: {tipo}");
+        }
     }
 }

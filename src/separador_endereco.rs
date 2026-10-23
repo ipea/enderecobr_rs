@@ -26,15 +26,105 @@ pub struct SeparadorEndereco {
     pub extrator: ExtratorFeature,
 }
 
+/// Tipo de informação que um trecho do endereço representa.
+///
+/// As variantes espelham, uma a uma, os rótulos que o modelo CRF emite (`B_<TIPO>`
+/// e `I_<TIPO>`) e são a única fonte de verdade: o binding do Python repete esta
+/// lista na mesma ordem. Rótulos sem variante própria caem em
+/// [`TipoSegmento::Outro`], que preserva o texto original apenas como `"outro"`.
+#[derive(Serialize, Debug, PartialEq, Eq, Clone, Copy, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum TipoSegmento {
+    Logradouro,
+    LogradouroInterno,
+    Numero,
+    ModificadorNumero,
+    Complemento,
+    Cep,
+    Localidade,
+    Municipio,
+    Uf,
+    Parcela,
+    QuilometragemVia,
+    Denominacao,
+    DescricaoArea,
+    Empreendimento,
+    Referencia,
+    /// Rótulo do modelo que ainda não tem variante própria.
+    Outro,
+}
+
+impl TipoSegmento {
+    /// Todas as variantes, na ordem de declaração (que o binding do Python repete).
+    pub const TODOS: [TipoSegmento; 16] = [
+        TipoSegmento::Logradouro,
+        TipoSegmento::LogradouroInterno,
+        TipoSegmento::Numero,
+        TipoSegmento::ModificadorNumero,
+        TipoSegmento::Complemento,
+        TipoSegmento::Cep,
+        TipoSegmento::Localidade,
+        TipoSegmento::Municipio,
+        TipoSegmento::Uf,
+        TipoSegmento::Parcela,
+        TipoSegmento::QuilometragemVia,
+        TipoSegmento::Denominacao,
+        TipoSegmento::DescricaoArea,
+        TipoSegmento::Empreendimento,
+        TipoSegmento::Referencia,
+        TipoSegmento::Outro,
+    ];
+
+    /// Rótulo em minúsculas, igual ao usado na serialização e nos dumps do modelo.
+    pub const fn como_str(self) -> &'static str {
+        match self {
+            TipoSegmento::Logradouro => "logradouro",
+            TipoSegmento::LogradouroInterno => "logradouro_interno",
+            TipoSegmento::Numero => "numero",
+            TipoSegmento::ModificadorNumero => "modificador_numero",
+            TipoSegmento::Complemento => "complemento",
+            TipoSegmento::Cep => "cep",
+            TipoSegmento::Localidade => "localidade",
+            TipoSegmento::Municipio => "municipio",
+            TipoSegmento::Uf => "uf",
+            TipoSegmento::Parcela => "parcela",
+            TipoSegmento::QuilometragemVia => "quilometragem_via",
+            TipoSegmento::Denominacao => "denominacao",
+            TipoSegmento::DescricaoArea => "descricao_area",
+            TipoSegmento::Empreendimento => "empreendimento",
+            TipoSegmento::Referencia => "referencia",
+            TipoSegmento::Outro => "outro",
+        }
+    }
+}
+
+impl std::fmt::Display for TipoSegmento {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.como_str())
+    }
+}
+
+impl From<&str> for TipoSegmento {
+    /// Converte o rótulo do modelo (sem o prefixo BIO), em qualquer caixa.
+    ///
+    /// Rótulos desconhecidos caem em [`TipoSegmento::Outro`] em vez de falhar:
+    /// um modelo novo não deve derrubar a segmentação.
+    fn from(rotulo: &str) -> Self {
+        Self::TODOS
+            .into_iter()
+            .find(|tipo| tipo.como_str().eq_ignore_ascii_case(rotulo))
+            .unwrap_or(TipoSegmento::Outro)
+    }
+}
+
 /// Um trecho do endereço e o tipo de informação que ele representa.
 #[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct SegmentoEndereco {
     /// Trecho do endereço, preservando a grafia original.
     pub valor: String,
-    /// Tipo do trecho, em minúsculas: `logradouro`, `numero`, `complemento`,
-    /// `localidade`, `cep` e outros rótulos do modelo (por exemplo `parcela`,
-    /// `modificador_numero` e `quilometragem_via`).
-    pub tipo: String,
+    /// Tipo do trecho; em JSON aparece como o rótulo do modelo em minúsculas
+    /// (`logradouro`, `numero`, `complemento` etc.).
+    pub tipo: TipoSegmento,
 }
 
 /// Resultado da segmentação: os trechos identificados, na ordem em que aparecem
@@ -94,18 +184,18 @@ impl SeparadorEndereco {
                 continue; // "O"
             };
 
+            let tipo = TipoSegmento::from(tipo);
             match bio.as_bytes().first().copied() {
                 Some(b'B') => segmentos.push(SegmentoEndereco {
                     valor: tok.to_string(),
-                    tipo: tipo.to_ascii_lowercase(),
+                    tipo,
                 }),
                 Some(b'I') => {
                     let Some(ultimo_segmento) = segmentos.last_mut() else {
                         continue;
                     };
-                    // `eq_ignore_ascii_case` compara sem alocar uma string minúscula
-                    // por token "I" (o tipo do segmento já está minúsculo).
-                    if !ultimo_segmento.tipo.eq_ignore_ascii_case(tipo) {
+                    // Comparação de enum: não aloca nem depende da caixa do rótulo.
+                    if ultimo_segmento.tipo != tipo {
                         continue;
                     }
                     let tem_espaco = offset
@@ -207,7 +297,7 @@ fn com_tagger<R>(
 /// [`tentar_segmentar_endereco`] para tratar esse caso como erro.
 ///
 /// ```
-/// use enderecobr_rs::separador_endereco::{SegmentoEndereco, EnderecoSegmentado, segmentar_endereco, modelo::{VAR_AMBIENTE_SEM_DOWNLOAD, obter_modelo}};
+/// use enderecobr_rs::separador_endereco::{SegmentoEndereco, EnderecoSegmentado, TipoSegmento, segmentar_endereco, modelo::{VAR_AMBIENTE_SEM_DOWNLOAD, obter_modelo}};
 ///
 /// // Evitando problemas no CI
 /// std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "true");
@@ -219,7 +309,7 @@ fn com_tagger<R>(
 /// // Exemplo de fato:
 /// let endereco_segmentado = segmentar_endereco("av n sra copacabana, 123, apt 301");
 /// let endereco_esperado = EnderecoSegmentado {
-///     segmentos: Vec::from(&[SegmentoEndereco { valor: "av n sra copacabana".to_string(), tipo: "logradouro".to_string() }, SegmentoEndereco { valor: "123".to_string(), tipo: "numero".to_string() }, SegmentoEndereco { valor: "apt 301".to_string(), tipo: "complemento".to_string() }])
+///     segmentos: Vec::from(&[SegmentoEndereco { valor: "av n sra copacabana".to_string(), tipo: TipoSegmento::Logradouro }, SegmentoEndereco { valor: "123".to_string(), tipo: TipoSegmento::Numero }, SegmentoEndereco { valor: "apt 301".to_string(), tipo: TipoSegmento::Complemento }])
 /// };
 /// assert_eq!(endereco_segmentado, endereco_esperado);
 ///```
@@ -309,31 +399,33 @@ pub fn segmento_como_json(segmentado: &EnderecoSegmentado) -> String {
 pub fn segmento_como_endereco(segmentado: &EnderecoSegmentado, padronizar: bool) -> Endereco {
     let mut res = Endereco::default();
     for (i, seg) in segmentado.segmentos.iter().enumerate() {
-        let atributo_opt = match seg.tipo.as_str() {
-            "logradouro" if res.logradouro.is_none() => {
+        let atributo_opt = match seg.tipo {
+            TipoSegmento::Logradouro if res.logradouro.is_none() => {
                 Some(res.logradouro.get_or_insert_with(String::new))
             }
-            "parcela"
+            TipoSegmento::Parcela
                 if i > 0
                     && segmentado
                         .segmentos
                         .get(i - 1)
-                        .filter(|anterior| anterior.tipo == "logradouro")
+                        .filter(|anterior| anterior.tipo == TipoSegmento::Logradouro)
                         .is_some() =>
             {
                 Some(res.logradouro.get_or_insert_with(String::new))
             }
             // `numero` e `modificador_numero` também alimentam o número.
-            "numero" | "modificador_numero" => Some(res.numero.get_or_insert_with(String::new)),
-            "quilometragem_via" if res.numero.is_none() => {
+            TipoSegmento::Numero | TipoSegmento::ModificadorNumero => {
+                Some(res.numero.get_or_insert_with(String::new))
+            }
+            TipoSegmento::QuilometragemVia if res.numero.is_none() => {
                 Some(res.numero.get_or_insert_with(String::new))
             }
             // Sem contexto de número, estes tipos caem no complemento.
-            "parcela" | "quilometragem_via" | "complemento" => {
+            TipoSegmento::Parcela | TipoSegmento::QuilometragemVia | TipoSegmento::Complemento => {
                 Some(res.complemento.get_or_insert_with(String::new))
             }
-            "localidade" => Some(res.localidade.get_or_insert_with(String::new)),
-            "cep" => Some(res.cep.get_or_insert_with(String::new)),
+            TipoSegmento::Localidade => Some(res.localidade.get_or_insert_with(String::new)),
+            TipoSegmento::Cep => Some(res.cep.get_or_insert_with(String::new)),
             _ => None,
         };
 
@@ -349,4 +441,36 @@ pub fn segmento_como_endereco(segmentado: &EnderecoSegmentado, padronizar: bool)
     }
 
     res
+}
+
+#[cfg(test)]
+mod testes_tipo_segmento {
+    use super::TipoSegmento;
+
+    #[test]
+    fn converte_rotulo_do_modelo_em_variante() {
+        assert_eq!(TipoSegmento::from("LOGRADOURO"), TipoSegmento::Logradouro);
+        assert_eq!(
+            TipoSegmento::from("modificador_numero"),
+            TipoSegmento::ModificadorNumero
+        );
+        // Rótulo desconhecido não derruba a segmentação.
+        assert_eq!(TipoSegmento::from("NOVO_ROTULO"), TipoSegmento::Outro);
+    }
+
+    #[test]
+    fn como_str_volta_para_o_rotulo() {
+        for tipo in TipoSegmento::TODOS {
+            assert_eq!(TipoSegmento::from(tipo.como_str()), tipo);
+        }
+    }
+
+    #[test]
+    fn todos_cabe_no_enum() {
+        // Se a lista `TODOS` repetir uma variante, a contagem denuncia.
+        let mut vistos: Vec<&str> = TipoSegmento::TODOS.iter().map(|t| t.como_str()).collect();
+        vistos.sort_unstable();
+        vistos.dedup();
+        assert_eq!(vistos.len(), TipoSegmento::TODOS.len());
+    }
 }

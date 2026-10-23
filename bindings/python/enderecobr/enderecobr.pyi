@@ -1081,20 +1081,78 @@ def romano_para_inteiro(valor: str) -> int:
     - A função não valida a correção gramatical da sequência romana (ex: "IIII" retorna 4).
     """
 
+class TipoSegmento:
+    """
+    Tipo de informação que um trecho do endereço representa.
+
+    As variantes são exatamente as mesmas do enum `TipoSegmento` do Rust, e na
+    mesma ordem. Cada variante também se compara igual ao seu índice inteiro
+    (``TipoSegmento.Cep == 5``).
+
+    Examples
+    --------
+    >>> from enderecobr import TipoSegmento, SegmentoEndereco
+    >>> segmento = SegmentoEndereco('123', TipoSegmento.Numero)
+    >>> segmento.tipo == TipoSegmento.Numero
+    True
+    """
+
+    Logradouro: TipoSegmento
+    LogradouroInterno: TipoSegmento
+    Numero: TipoSegmento
+    ModificadorNumero: TipoSegmento
+    Complemento: TipoSegmento
+    Cep: TipoSegmento
+    Localidade: TipoSegmento
+    Municipio: TipoSegmento
+    Uf: TipoSegmento
+    Parcela: TipoSegmento
+    QuilometragemVia: TipoSegmento
+    Denominacao: TipoSegmento
+    DescricaoArea: TipoSegmento
+    Empreendimento: TipoSegmento
+    Referencia: TipoSegmento
+    Outro: TipoSegmento
+
 class SegmentoEndereco:
     """
     Um trecho do endereço e o atributo a que ele corresponde.
+
+    Em geral os objetos vêm prontos de :func:`segmentar_endereco`, mas dá para
+    montar um à mão — útil ao reidratar um ``segmento_como_json`` ou ao testar
+    código que só lê os segmentos.
+
+    Parameters
+    ----------
+    valor : str
+        Trecho do endereço, sem os separadores originais.
+    tipo : TipoSegmento
+        Atributo do trecho.
 
     Attributes
     ----------
     valor : str
         Trecho do endereço, sem os separadores originais.
-    tipo : str
-        Atributo do trecho, em minúsculas.
+    tipo : TipoSegmento
+        Atributo do trecho. Em JSON/dump sai como o rótulo em minúsculas
+        (`logradouro`, `numero`, `complemento` etc.).
+
+    Examples
+    --------
+    >>> from enderecobr import SegmentoEndereco, TipoSegmento
+    >>> segmento = SegmentoEndereco('apt 301', TipoSegmento.Complemento)
+    >>> (segmento.valor, segmento.tipo)
+    ('apt 301', TipoSegmento.Complemento)
+    >>> segmento.valor = 'apt 302'
+    >>> segmento.tipo = TipoSegmento.Outro
+    >>> (segmento.valor, segmento.tipo)
+    ('apt 302', TipoSegmento.Outro)
     """
 
+    def __init__(self, valor: str, tipo: TipoSegmento) -> None: ...
+
     valor: str
-    tipo: str
+    tipo: TipoSegmento
 
 class EnderecoSegmentado:
     """
@@ -1251,7 +1309,7 @@ class SeparadorEndereco:
     >>> from enderecobr import SeparadorEndereco, obter_modelo
     >>> sep = SeparadorEndereco.carregar(obter_modelo())  # doctest: +SKIP
     >>> sep.segmentar('av n sra copacabana, 123').segmentos[0].tipo  # doctest: +SKIP
-    'logradouro'
+    TipoSegmento.Logradouro
 
     O construtor não carrega nada, o que permite criar a instância primeiro:
 
@@ -1491,7 +1549,7 @@ def segmentar_endereco(endereco: str) -> EnderecoSegmentado:
     --------
     >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')  # doctest: +SKIP
     >>> [(s.valor, s.tipo) for s in seg.segmentos]  # doctest: +SKIP
-    [('av n sra copacabana', 'logradouro'), ('123', 'numero')]
+    [('av n sra copacabana', TipoSegmento.Logradouro), ('123', TipoSegmento.Numero)]
 
     Notes
     -----
