@@ -1085,28 +1085,28 @@ class TipoSegmento:
     """
     Tipo de informação que um trecho do endereço representa.
 
-    As variantes são exatamente as mesmas do enum `TipoSegmento` do Rust, e na
-    mesma ordem. Cada variante também se compara igual ao seu índice inteiro
-    (``TipoSegmento.Cep == 5``).
+    As variantes são exatamente as mesmas do enum `TipoSegmento` do Rust, na
+    mesma ordem, e cada uma se compara igual ao seu valor inteiro
+    (``TipoSegmento.Cep == 12``, ``int(TipoSegmento.Cep) == 12``).
 
-    Tipos de Segmento:
-    - Logradouro: Tipo de via + título + nome: `R ALCIDES CARNEIRO LEAL`, `ROD BR-116`;
-    - LogradouroInterno: Via ou área interna de um empreendimento, fora do arruamento oficial.
-    - Numero: Numeração predial, inclusive quando ausente: `71`, `S/N`;
-    - ModificadorNumero: Sufixo ou marcador preso ao número: `A`, `504-B1`, `POSTE`;
-    - Complemento: Unidade interna do imóvel, tipo e valor juntos: `APTO 104`, `BL 4`;
-    - Empreendimento: Lugar nomeado: prédio, condomínio, conjunto, loteamento ou o próprio estabelecimento que ocupa o endereço: `ED MANAGUA`, `COND PALM VILLAGE`;
-    - Parcela: Identificador cadastral do terreno (um `gleba` pode conter uma `quadra` que pode conter um `lote`): `QD 34 LOTE 17`;
-    - DescricaoArea: Descrição textual de área, seu uso ou medição. Nunca é um identificador. Ex.: `8.000,00 m²`, `ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...`, `MAR TERRITORIAL`, `MARGEM ESQUERDA`;
-    - QuilometragemVia: Quilometragem em rodovia, onde o número é a posição ao longo da via: `KM 304`;
-    - Referencia: Trecho que aponta para outro endereço ou lugar: `ESQUINA COM AV BOA VIAGEM`;
-    - Denominacao: Nome atual ou antigo da via ou do lugar: `ANTIGA RUA B`;
-    - Localidade: Localidade, bairro, distrito, vila ou zona: `PINA`, `ZONA RURAL`;
-    - Cep: Código de endereçamento postas;
-    - Municipio: Município;
-    - Uf: Unidade federativa;
-    - Outro: Conteúdo que não cabe em nenhum outro tipo — inclusive rótulo que ainda não tem variante própria;
+    Variantes, na ordem do enum:
 
+    - [Logradouro][enderecobr.TipoSegmento.Logradouro]
+    - [LogradouroInterno][enderecobr.TipoSegmento.LogradouroInterno]
+    - [Numero][enderecobr.TipoSegmento.Numero]
+    - [ModificadorNumero][enderecobr.TipoSegmento.ModificadorNumero]
+    - [Complemento][enderecobr.TipoSegmento.Complemento]
+    - [Empreendimento][enderecobr.TipoSegmento.Empreendimento]
+    - [Parcela][enderecobr.TipoSegmento.Parcela]
+    - [DescricaoArea][enderecobr.TipoSegmento.DescricaoArea]
+    - [QuilometragemVia][enderecobr.TipoSegmento.QuilometragemVia]
+    - [Referencia][enderecobr.TipoSegmento.Referencia]
+    - [Denominacao][enderecobr.TipoSegmento.Denominacao]
+    - [Localidade][enderecobr.TipoSegmento.Localidade]
+    - [Cep][enderecobr.TipoSegmento.Cep]
+    - [Municipio][enderecobr.TipoSegmento.Municipio]
+    - [Uf][enderecobr.TipoSegmento.Uf]
+    - [Outro][enderecobr.TipoSegmento.Outro]
 
     Examples
     --------
@@ -1114,24 +1114,70 @@ class TipoSegmento:
     >>> segmento = SegmentoEndereco('123', TipoSegmento.Numero)
     >>> segmento.tipo == TipoSegmento.Numero
     True
+
     """
 
     Logradouro: TipoSegmento
+    """Tipo de via + título + nome: `R ALCIDES CARNEIRO LEAL`, `ROD BR-116`."""
+
     LogradouroInterno: TipoSegmento
+    """
+    Via ou área interna de um empreendimento, fora do arruamento oficial.
+    """
+
     Numero: TipoSegmento
+    """Numeração predial, inclusive quando ausente: `71`, `S/N`."""
+
     ModificadorNumero: TipoSegmento
+    """Sufixo ou marcador preso ao número: `A`, `504-B1`, `POSTE`."""
+
     Complemento: TipoSegmento
-    Cep: TipoSegmento
-    Localidade: TipoSegmento
-    Municipio: TipoSegmento
-    Uf: TipoSegmento
-    Parcela: TipoSegmento
-    QuilometragemVia: TipoSegmento
-    Denominacao: TipoSegmento
-    DescricaoArea: TipoSegmento
+    """Unidade interna do imóvel, tipo e valor juntos: `APTO 104`, `BL 4`."""
+
     Empreendimento: TipoSegmento
+    """
+    Lugar nomeado: prédio, condomínio, conjunto, loteamento ou o próprio estabelecimento que ocupa o endereço: `ED MANAGUA`, `COND PALM VILLAGE`.
+    """
+
+    Parcela: TipoSegmento
+    """
+    Identificador cadastral do terreno (uma `gleba` pode conter uma `quadra` que pode conter um `lote`): `QD 34 LOTE 17`.
+    """
+
+    DescricaoArea: TipoSegmento
+    """
+    Descrição textual de área, seu uso ou medição; nunca um identificador. Ex.: `8.000,00 m²`, `ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...`, `MAR TERRITORIAL`, `MARGEM ESQUERDA`.
+    """
+
+    QuilometragemVia: TipoSegmento
+    """
+    Quilometragem em rodovia, onde o número é a posição ao longo da via: `KM 304`.
+    """
+
     Referencia: TipoSegmento
+    """
+    Trecho que aponta para outro endereço ou lugar: `ESQUINA COM AV BOA VIAGEM`.
+    """
+
+    Denominacao: TipoSegmento
+    """Nome atual ou antigo da via ou do lugar: `ANTIGA RUA B`."""
+
+    Localidade: TipoSegmento
+    """Localidade, bairro, distrito, vila ou zona: `PINA`, `ZONA RURAL`."""
+
+    Cep: TipoSegmento
+    """Código de endereçamento postal."""
+
+    Municipio: TipoSegmento
+    """Município."""
+
+    Uf: TipoSegmento
+    """Unidade federativa."""
+
     Outro: TipoSegmento
+    """
+    Conteúdo que não cabe em nenhum outro tipo — inclusive rótulo que ainda não tem variante própria.
+    """
 
 class SegmentoEndereco:
     """
@@ -1166,6 +1212,7 @@ class SegmentoEndereco:
     >>> segmento.tipo = TipoSegmento.Outro
     >>> (segmento.valor, segmento.tipo)
     ('apt 302', TipoSegmento.Outro)
+
     """
 
     def __init__(self, valor: str, tipo: TipoSegmento) -> None: ...

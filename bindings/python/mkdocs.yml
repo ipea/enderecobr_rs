@@ -38,6 +38,9 @@ plugins:
             # Show class inherited members.
             inherited_members: true
 
+            # Keep declaration order (not alphabetical), importante para enums.
+            members_order: source
+
             # Render auto-generated summaries of attributes, functions, etc.
             # at the start of each symbol's documentation.
             summary: true
