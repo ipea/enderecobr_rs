@@ -1,8 +1,6 @@
 import json
 import sqlite3
 import subprocess
-from pathlib import Path
-from typing import Annotated
 
 import geocodebr
 import enderecobr
@@ -33,7 +31,7 @@ def main():
                 "--quiet",
                 "--bin",
                 "padronizar",
-                "--features=experimental,cli",
+                "--features=cli",
                 "estruturacao",
             ],
             input=enderecos_string,

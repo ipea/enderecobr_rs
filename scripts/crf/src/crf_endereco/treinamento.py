@@ -2,6 +2,8 @@ import json
 import sqlite3
 
 import sklearn_crfsuite
+import sklearn_crfsuite.metrics
+from sklearn.model_selection import train_test_split
 
 from crf_endereco.preproc import (
     ExtratorFeature,
@@ -107,19 +109,36 @@ where resposta_llm is not null
 
 def main():
     x, y = carregar_dados()
+    (
+        x_train,
+        x_test,
+        y_train,
+        y_test,
+    ) = train_test_split(x, y, test_size=0.1, random_state=42)
 
-    print(f"Realizando treinamento (n={len(x)})...")
+    print(f"Realizando treinamento (n={len(x_train)})...")
     crf = sklearn_crfsuite.CRF(
         algorithm="lbfgs",
         # c1=0.01,
         verbose=True,
         c2=0.01,
-        max_iterations=2000,
+        max_iterations=5_000,
         all_possible_transitions=False,
         min_freq=2,
         model_filename="./tagger.crf",
     )
-    _ = crf.fit(x, y)
+    modelo = crf.fit(x_train, y_train)
+    y_pred = modelo.predict(x_test)
+
+    flat_acc = sklearn_crfsuite.metrics.flat_accuracy_score(
+        y_true=y_test, y_pred=y_pred
+    )
+    print(f"Acurácia: {flat_acc:.2f}")
+    print(
+        sklearn_crfsuite.metrics.flat_classification_report(
+            y_test, y_pred, zero_division=0.0
+        )
+    )
 
 
 if __name__ == "__main__":
