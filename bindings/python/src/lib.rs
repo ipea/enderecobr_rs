@@ -327,17 +327,55 @@ pub enum TipoSegmento {
     Numero,
     ModificadorNumero,
     Complemento,
-    Cep,
+    Empreendimento,
+    Parcela,
+    DescricaoArea,
+    QuilometragemVia,
+    Referencia,
+    Denominacao,
     Localidade,
+    Cep,
     Municipio,
     Uf,
-    Parcela,
-    QuilometragemVia,
-    Denominacao,
-    DescricaoArea,
-    Empreendimento,
-    Referencia,
     Outro,
+}
+
+impl TipoSegmento {
+    /// Nome de cada variante, na ordem de declaração. É o `name` que o Python vê,
+    /// equivalente ao de um `enum.IntEnum`.
+    const NOMES: [&str; 16] = [
+        "Logradouro",
+        "LogradouroInterno",
+        "Numero",
+        "ModificadorNumero",
+        "Complemento",
+        "Empreendimento",
+        "Parcela",
+        "DescricaoArea",
+        "QuilometragemVia",
+        "Referencia",
+        "Denominacao",
+        "Localidade",
+        "Cep",
+        "Municipio",
+        "Uf",
+        "Outro",
+    ];
+}
+
+// Não é um `enum.Enum` de verdade (o pyo3 não herda disso), mas expõe `name` e
+// `value` para que o stub possa ser declarado como `enum.IntEnum` sem mentir.
+#[pymethods]
+impl TipoSegmento {
+    #[getter]
+    fn name(&self) -> &'static str {
+        Self::NOMES[*self as usize]
+    }
+
+    #[getter]
+    fn value(&self) -> i32 {
+        *self as i32
+    }
 }
 
 #[pymethods]
@@ -419,16 +457,16 @@ impl From<enderecobr_rs::separador_endereco::TipoSegmento> for TipoSegmento {
             Rs::Numero => TipoSegmento::Numero,
             Rs::ModificadorNumero => TipoSegmento::ModificadorNumero,
             Rs::Complemento => TipoSegmento::Complemento,
-            Rs::Cep => TipoSegmento::Cep,
+            Rs::Empreendimento => TipoSegmento::Empreendimento,
+            Rs::Parcela => TipoSegmento::Parcela,
+            Rs::DescricaoArea => TipoSegmento::DescricaoArea,
+            Rs::QuilometragemVia => TipoSegmento::QuilometragemVia,
+            Rs::Referencia => TipoSegmento::Referencia,
+            Rs::Denominacao => TipoSegmento::Denominacao,
             Rs::Localidade => TipoSegmento::Localidade,
+            Rs::Cep => TipoSegmento::Cep,
             Rs::Municipio => TipoSegmento::Municipio,
             Rs::Uf => TipoSegmento::Uf,
-            Rs::Parcela => TipoSegmento::Parcela,
-            Rs::QuilometragemVia => TipoSegmento::QuilometragemVia,
-            Rs::Denominacao => TipoSegmento::Denominacao,
-            Rs::DescricaoArea => TipoSegmento::DescricaoArea,
-            Rs::Empreendimento => TipoSegmento::Empreendimento,
-            Rs::Referencia => TipoSegmento::Referencia,
             Rs::Outro => TipoSegmento::Outro,
         }
     }
@@ -443,16 +481,16 @@ impl From<TipoSegmento> for enderecobr_rs::separador_endereco::TipoSegmento {
             TipoSegmento::Numero => Rs::Numero,
             TipoSegmento::ModificadorNumero => Rs::ModificadorNumero,
             TipoSegmento::Complemento => Rs::Complemento,
-            TipoSegmento::Cep => Rs::Cep,
+            TipoSegmento::Empreendimento => Rs::Empreendimento,
+            TipoSegmento::Parcela => Rs::Parcela,
+            TipoSegmento::DescricaoArea => Rs::DescricaoArea,
+            TipoSegmento::QuilometragemVia => Rs::QuilometragemVia,
+            TipoSegmento::Referencia => Rs::Referencia,
+            TipoSegmento::Denominacao => Rs::Denominacao,
             TipoSegmento::Localidade => Rs::Localidade,
+            TipoSegmento::Cep => Rs::Cep,
             TipoSegmento::Municipio => Rs::Municipio,
             TipoSegmento::Uf => Rs::Uf,
-            TipoSegmento::Parcela => Rs::Parcela,
-            TipoSegmento::QuilometragemVia => Rs::QuilometragemVia,
-            TipoSegmento::Denominacao => Rs::Denominacao,
-            TipoSegmento::DescricaoArea => Rs::DescricaoArea,
-            TipoSegmento::Empreendimento => Rs::Empreendimento,
-            TipoSegmento::Referencia => Rs::Referencia,
             TipoSegmento::Outro => Rs::Outro,
         }
     }
@@ -704,6 +742,7 @@ mod testes {
     fn tipo_segmento_espelha_o_rust() {
         // Mesma quantidade, mesma ordem (a ordem vira o valor inteiro no Python)
         // e sem duas variantes do Rust caindo na mesma variante do Python.
+        assert_eq!(TipoSegmento::NOMES.len(), TipoSegmentoRs::TODOS.len());
         for (indice, tipo) in TipoSegmentoRs::TODOS.into_iter().enumerate() {
             let espelho = TipoSegmento::from(tipo);
             assert_eq!(
@@ -711,6 +750,12 @@ mod testes {
                 "ordem divergente: {tipo}"
             );
             assert_eq!(TipoSegmentoRs::from(espelho), tipo, "ida e volta: {tipo}");
+            // O `name` do Python é o nome da variante, como em `enum.IntEnum`.
+            assert_eq!(
+                TipoSegmento::NOMES[indice],
+                format!("{tipo:?}"),
+                "nome divergente: {tipo}"
+            );
         }
     }
 }

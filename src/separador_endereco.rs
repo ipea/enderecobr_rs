@@ -31,26 +31,43 @@ pub struct SeparadorEndereco {
 /// As variantes espelham, uma a uma, os rótulos que o modelo CRF emite (`B_<TIPO>`
 /// e `I_<TIPO>`) e são a única fonte de verdade: o binding do Python repete esta
 /// lista na mesma ordem. Rótulos sem variante própria caem em
-/// [`TipoSegmento::Outro`], que preserva o texto original apenas como `"outro"`.
+/// [`TipoSegmento::Outro`].
 #[derive(Serialize, Debug, PartialEq, Eq, Clone, Copy, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum TipoSegmento {
+    /// Tipo de via + título + nome: `R ALCIDES CARNEIRO LEAL`, `ROD BR-116`.
     Logradouro,
+    /// Via ou área interna de um empreendimento, fora do arruamento oficial.
     LogradouroInterno,
+    /// Numeração predial, inclusive quando ausente: `71`, `S/N`.
     Numero,
+    /// Sufixo ou marcador preso ao número: `A`, `504-B1`, `POSTE`.
     ModificadorNumero,
+    /// Unidade interna do imóvel, tipo e valor juntos: `APTO 104`, `BL 4`.
     Complemento,
-    Cep,
-    Localidade,
-    Municipio,
-    Uf,
-    Parcela,
-    QuilometragemVia,
-    Denominacao,
-    DescricaoArea,
+    /// Lugar nomeado: prédio, condomínio, conjunto, loteamento ou o próprio
+    /// estabelecimento que ocupa o endereço: `ED MANAGUA`, `COND PALM VILLAGE`.
     Empreendimento,
+    /// Identificador cadastral do terreno (gleba ⊃ quadra ⊃ lote): `QD 34 LOTE 17`.
+    Parcela,
+    /// Descrição textual de área, seu uso ou medição. Nunca é um identificador. Ex.: `8.000,00 m²`, `ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...`, `MAR TERRITORIAL`, `MARGEM ESQUERDA`.
+    DescricaoArea,
+    /// Quilometragem em rodovia, onde o número é a posição ao longo da via: `KM 304`.
+    QuilometragemVia,
+    /// Trecho que aponta para outro endereço ou lugar: `ESQUINA COM AV BOA VIAGEM`.
     Referencia,
-    /// Rótulo do modelo que ainda não tem variante própria.
+    /// Nome atual ou antigo da via ou do lugar: `ANTIGA RUA B`.
+    Denominacao,
+    /// Localidade, bairro, distrito, vila ou zona: `PINA`, `ZONA RURAL`.
+    Localidade,
+    /// CEP.
+    Cep,
+    /// Município.
+    Municipio,
+    /// Unidade federativa.
+    Uf,
+    /// Conteúdo que não cabe em nenhum outro tipo — inclusive rótulo que ainda
+    /// não tem variante própria.
     Outro,
 }
 
@@ -62,16 +79,16 @@ impl TipoSegmento {
         TipoSegmento::Numero,
         TipoSegmento::ModificadorNumero,
         TipoSegmento::Complemento,
-        TipoSegmento::Cep,
+        TipoSegmento::Empreendimento,
+        TipoSegmento::Parcela,
+        TipoSegmento::DescricaoArea,
+        TipoSegmento::QuilometragemVia,
+        TipoSegmento::Referencia,
+        TipoSegmento::Denominacao,
         TipoSegmento::Localidade,
+        TipoSegmento::Cep,
         TipoSegmento::Municipio,
         TipoSegmento::Uf,
-        TipoSegmento::Parcela,
-        TipoSegmento::QuilometragemVia,
-        TipoSegmento::Denominacao,
-        TipoSegmento::DescricaoArea,
-        TipoSegmento::Empreendimento,
-        TipoSegmento::Referencia,
         TipoSegmento::Outro,
     ];
 
@@ -83,17 +100,17 @@ impl TipoSegmento {
             TipoSegmento::Numero => "numero",
             TipoSegmento::ModificadorNumero => "modificador_numero",
             TipoSegmento::Complemento => "complemento",
-            TipoSegmento::Cep => "cep",
+            TipoSegmento::Empreendimento => "empreendimento",
+            TipoSegmento::Parcela => "parcela",
+            TipoSegmento::DescricaoArea => "descricao_area",
+            TipoSegmento::QuilometragemVia => "quilometragem_via",
+            TipoSegmento::Referencia => "referencia",
+            TipoSegmento::Denominacao => "denominacao",
             TipoSegmento::Localidade => "localidade",
+            TipoSegmento::Cep => "cep",
             TipoSegmento::Municipio => "municipio",
             TipoSegmento::Uf => "uf",
-            TipoSegmento::Parcela => "parcela",
-            TipoSegmento::QuilometragemVia => "quilometragem_via",
-            TipoSegmento::Denominacao => "denominacao",
-            TipoSegmento::DescricaoArea => "descricao_area",
-            TipoSegmento::Empreendimento => "empreendimento",
-            TipoSegmento::Referencia => "referencia",
-            TipoSegmento::Outro => "outro",
+            TipoSegmento::Outro => "outros",
         }
     }
 }
