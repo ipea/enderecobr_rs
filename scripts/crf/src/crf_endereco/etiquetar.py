@@ -27,8 +27,18 @@ Uso:
     # Lote filtrado por UF e/ou origem (repita ou separe por vírgula)
     uv run etiquetar.py lote dataset.sqlite --uf RJ --origem siase --env .env
 
+    # Lote só com os endereços em que o CRF prevê categorias raras (proxy)
+    uv run etiquetar.py lote dataset.sqlite --apenas-tipos referencia,descricao_area \
+        --modelo-crf ./tagger.crf --limite 500 --env .env
+
 A ontologia de rótulos fica em `prompt_sistema.md` (prompt) e `ONTOLOGIA.md`
 (notas de pós-processamento).
+
+Variáveis de ambiente (`.env`): `API_URL`, `API_KEY`, `API_MODEL`, `CNEFE_PATH`,
+`SEARX_URL` (opcional), `MUNICIPIOS_PATH` (opcional), `TIMEOUT_SQL` (opcional) e
+`API_TOOLS_STRICT` (opcional; liga `strict: true` no schema das ferramentas).
+Deixe `API_TOOLS_STRICT` desligado em backends que recusam esse campo: o
+`deepseek-v4.1-flash` do IPEA responde HTTP 500 com ele.
 """
 
 from __future__ import annotations
@@ -38,9 +48,10 @@ import math
 import os
 import random
 import sqlite3
+import subprocess
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -67,6 +78,8 @@ from rich.progress import (
 DIR_MODULO = Path(__file__).resolve().parent
 # scripts/crf/src/crf_endereco -> <repo>/src/data/municipios.csv
 MUNICIPIOS_PADRAO = DIR_MODULO.parents[3] / "src" / "data" / "municipios.csv"
+# Raiz do enderecobr_rs (onde ficam o crate do segmentador e o `target/`).
+DIR_REPO = DIR_MODULO.parents[3]
 TEMPLATE_PROMPT_SISTEMA = DIR_MODULO / "prompt_sistema.md"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0"
@@ -88,6 +101,9 @@ class Config:
     municipios_path: Path
     timeout_sql: float = 15.0
     searx_url: str | None = None
+    # `strict: true` no schema das ferramentas é opcional: alguns backends
+    # (`deepseek-v4.1-flash`, por exemplo) respondem HTTP 500 com ele.
+    tools_estritas: bool = False
 
     @property
     def url_chat(self) -> str:
@@ -121,6 +137,12 @@ def carregar_config(env_path: Path) -> Config:
                 f"Variável de ambiente {nome} deve ser numérica (recebido {bruto!r})."
             ) from e
 
+    def opcional_bool(nome: str, padrao: bool) -> bool:
+        bruto = os.environ.get(nome)
+        if bruto is None or not bruto.strip():
+            return padrao
+        return bruto.strip().lower() not in {"0", "false", "nao", "não", "no", "off"}
+
     searx_url = os.environ.get("SEARX_URL")
     if not searx_url:
         console.print(
@@ -135,6 +157,7 @@ def carregar_config(env_path: Path) -> Config:
         municipios_path=Path(os.environ.get("MUNICIPIOS_PATH", MUNICIPIOS_PADRAO)),
         timeout_sql=opcional_float("TIMEOUT_SQL", 15.0),
         searx_url=searx_url,
+        tools_estritas=opcional_bool("API_TOOLS_STRICT", False),
     )
 
 
@@ -200,25 +223,34 @@ def _criar_json_schema_funcao(
     descricao: str,
     propriedades: dict[str, Any],
     requeridos: list[str],
+    *,
+    estrita: bool = False,
 ) -> dict[str, Any]:
-    return {
-        "type": "function",
-        "function": {
-            "name": nome,
-            "description": descricao,
-            "parameters": {
-                "type": "object",
-                "properties": propriedades,
-                "required": requeridos,
-                "additionalProperties": False,
-            },
-            "strict": True,
+    """Descreve uma ferramenta em `function`-calling.
+
+    `estrita` liga `strict: true` no schema (JSON Schema mode). Fica desligado
+    por padrão porque alguns backends recusam esse campo com HTTP 500 — o
+    backend `deepseek-v4.1-flash` do IPEA, por exemplo. Ligue com
+    `API_TOOLS_STRICT=1` quando o provedor suportar.
+    """
+    funcao: dict[str, Any] = {
+        "name": nome,
+        "description": descricao,
+        "parameters": {
+            "type": "object",
+            "properties": propriedades,
+            "required": requeridos,
+            "additionalProperties": False,
         },
     }
+    if estrita:
+        funcao["strict"] = True
+    return {"type": "function", "function": funcao}
 
 
 def criar_ferramentas(config: Config) -> list[dict[str, Any]]:
     """Monta as ferramentas expostas à LLM, conforme a configuração."""
+    estrita = config.tools_estritas
     ferramentas = [
         _criar_json_schema_funcao(
             "responder",
@@ -240,18 +272,21 @@ def criar_ferramentas(config: Config) -> list[dict[str, Any]]:
                 "comentario": {"type": "string"},
             },
             ["segmentos"],
+            estrita=estrita,
         ),
         _criar_json_schema_funcao(
             "fetch_url",
             "Fetch the requested URL and return the result in markdown",
             {"url": {"type": "string", "description": "Requested URL"}},
             ["url"],
+            estrita=estrita,
         ),
         _criar_json_schema_funcao(
             "sql_query",
             "Run a SQL query using DuckDB over CNEFE.",
             {"sql": {"type": "string", "description": "SQL to execute"}},
             ["sql"],
+            estrita=estrita,
         ),
     ]
 
@@ -262,6 +297,7 @@ def criar_ferramentas(config: Config) -> list[dict[str, Any]]:
                 "Search across several search engines.",
                 {"query": {"type": "string", "description": "Search query"}},
                 ["query"],
+                estrita=estrita,
             )
         )
 
@@ -442,12 +478,33 @@ conteúdo: {resultado.get("content", "")}
 
 # --- HTTP -----------------------------------------------------------------
 
-ERROS_TRANSITORIOS = (
-    requests.Timeout,
-    requests.ConnectionError,
-    requests.HTTPError,
-    requests.JSONDecodeError,
-)
+
+def _pode_retentar(status: int) -> bool:
+    """Indica se o status HTTP merece nova tentativa.
+
+    5xx e 429 são transientes; os demais 4xx significam que o servidor recusou
+    o conteúdo (payload/schema), então repetir só gasta tempo.
+    """
+    return status == 429 or status >= 500
+
+
+class ErroHTTP(RuntimeError):
+    """Resposta de erro do servidor, com o corpo incluído para diagnóstico.
+
+    `raise_for_status` só informa o status; o corpo é o que diz *por que* falhou
+    (um 500 de backend costuma vir com `{"error": ...}`), e sem ele o erro de
+    uma linha vira um `{"erro": "HTTPError: 500"}` inútil no banco.
+    """
+
+    def __init__(self, metodo: str, url: str, status: int, corpo: str) -> None:
+        self.metodo = metodo
+        self.url = url
+        self.status = status
+        self.corpo = corpo
+        recorte = " ".join(corpo.split())[:800]
+        super().__init__(
+            f"{metodo} {url} → HTTP {status}: {recorte or '<corpo vazio>'}"
+        )
 
 
 class ClienteHTTP:
@@ -503,30 +560,49 @@ class ClienteHTTP:
         decodificar: bool = False,
         **kwargs: Any,
     ) -> Any:
-        """Executa uma requisição, reenviando em erros transientes."""
+        """Executa uma requisição, reenviando em erros transientes.
+
+        4xx (menos 429) falham na hora, com o corpo do servidor na mensagem.
+        """
+        ultimo_erro: Exception | None = None
         for tentativa in range(self.n_tentativas):
             try:
                 resposta = self.sessao.request(
                     metodo, url, timeout=(self.timeout_conexao, timeout), **kwargs
                 )
-                resposta.raise_for_status()
-                return resposta.json() if decodificar else resposta
-            except (
-                requests.Timeout,
-                requests.ConnectionError,
-                requests.HTTPError,
-                requests.JSONDecodeError,
-            ) as e:
-                if tentativa == self.n_tentativas - 1:
-                    raise
-                delay = self.delay_base * (2**tentativa - 1) + random.uniform(0, 5)
-                self.console.print(
-                    f"[yellow]Tentativa {tentativa + 1}/{self.n_tentativas} "
-                    f"falhou: {e}. Retentando em {delay:.2f}s…[/yellow]"
-                )
-                time.sleep(delay)
+            except (requests.Timeout, requests.ConnectionError) as e:
+                erro: Exception = e
+            else:
+                if resposta.ok:
+                    if not decodificar:
+                        return resposta
+                    try:
+                        return resposta.json()
+                    except requests.JSONDecodeError:
+                        erro = ErroHTTP(
+                            metodo, url, resposta.status_code, resposta.text
+                        )
+                else:
+                    erro = ErroHTTP(metodo, url, resposta.status_code, resposta.text)
+                    if not _pode_retentar(resposta.status_code):
+                        raise erro
 
-        raise RuntimeError("Não foi possível realizar a requisição.")
+            ultimo_erro = erro
+            if tentativa == self.n_tentativas - 1:
+                break
+            delay = self.delay_base * (2**tentativa - 1) + random.uniform(0, 5)
+            self.console.print(
+                f"[yellow]Tentativa {tentativa + 1}/{self.n_tentativas} "
+                f"falhou: {erro}. Retentando em {delay:.2f}s…[/yellow]"
+            )
+            time.sleep(delay)
+
+        if isinstance(ultimo_erro, ErroHTTP):
+            raise ultimo_erro
+        detalhe = f": {ultimo_erro}" if ultimo_erro is not None else ""
+        raise RuntimeError(
+            f"{metodo} {url} falhou após {self.n_tentativas} tentativa(s){detalhe}"
+        )
 
 
 def realizar_requisicao(
@@ -718,6 +794,203 @@ class EstratoPendente:
     pendentes: int
 
 
+# --- Filtro por predição do CRF -------------------------------------------
+
+# Rótulos que o CRF consegue emitir: espelham `TipoSegmento::TODOS` do Rust.
+# Ficam de fora `cadastro`, `ruido` e `outros`: `treinamento.mapa_tipo_segmento`
+# os colapsa em `O`, então o modelo nunca os prevê (`outros` só aparece como
+# fallback de rótulo desconhecido no Rust).
+TIPOS_SEGMENTO_CRF = frozenset(
+    {
+        "logradouro",
+        "logradouro_interno",
+        "numero",
+        "modificador_numero",
+        "complemento",
+        "empreendimento",
+        "parcela",
+        "descricao_area",
+        "quilometragem_via",
+        "referencia",
+        "denominacao",
+        "localidade",
+        "cep",
+        "municipio",
+        "uf",
+    }
+)
+
+# Quantos endereços vão por chamada ao segmentador (uma linha de entrada e uma
+# de saída JSON por endereço).
+TAMANHO_BLOCO_CRF = 5_000
+
+
+def garantir_tabela_filtro(conn: sqlite3.Connection) -> None:
+    """Cria a tabela temporária `_filtro_crf` usada pelas consultas de lote.
+
+    É idempotente e precisa existir mesmo quando o filtro está desligado, porque
+    as consultas de pendentes a citam em um `IN` com parâmetro de desligamento.
+    """
+    _ = conn.execute(
+        "CREATE TEMP TABLE IF NOT EXISTS _filtro_crf (id INTEGER PRIMARY KEY)"
+    )
+
+
+def registrar_filtro_crf(conn: sqlite3.Connection, ids: Iterable[int]) -> None:
+    """Grava em `_filtro_crf` os ids que passaram pelo filtro do modelo."""
+    garantir_tabela_filtro(conn)
+    _ = conn.execute("DELETE FROM _filtro_crf")
+    _ = conn.executemany(
+        "INSERT OR IGNORE INTO _filtro_crf (id) VALUES (?)",
+        [(identificador,) for identificador in ids],
+    )
+    conn.commit()
+
+
+def contar_filtro_crf(conn: sqlite3.Connection) -> int:
+    """Quantos ids passaram pelo filtro do modelo na conexão."""
+    garantir_tabela_filtro(conn)
+    linha = conn.execute("SELECT count(*) FROM _filtro_crf").fetchone()
+    return cast(int, linha[0]) if linha is not None else 0
+
+
+def validar_tipos_filtro(
+    valores: list[str] | None, modelo: Path | None
+) -> frozenset[str]:
+    """Normaliza e valida a lista de `--apenas-tipos`; vazia = filtro desligado.
+
+    Erra com mensagem explícita quando o tipo não existe na ontologia ou quando
+    existe mas o CRF nunca o emite (`cadastro`, `ruido`, `outros` são colapsados
+    em `O` pelo treinamento).
+    """
+    if modelo is not None and not modelo.is_file():
+        raise typer.BadParameter(f"Modelo CRF não encontrado: {modelo}")
+    if not valores:
+        return frozenset()
+
+    tipos = frozenset(item.strip().lower() for item in valores if item.strip())
+    desconhecidos = sorted(tipos - set(TIPOS_SEGMENTO))
+    if desconhecidos:
+        raise typer.BadParameter(
+            f"Tipo(s) desconhecido(s): {', '.join(desconhecidos)}. "
+            f"Válidos: {', '.join(sorted(TIPOS_SEGMENTO))}."
+        )
+    sem_modelo = sorted(tipos - TIPOS_SEGMENTO_CRF)
+    if sem_modelo:
+        raise typer.BadParameter(
+            f"O CRF não prevê {', '.join(sem_modelo)}: o treinamento colapsa "
+            "esses rótulos em `O`. Use um tipo que o modelo emite."
+        )
+    return tipos
+
+
+def filtrar_ids_por_tipos(
+    saida: Sequence[str], ids: Sequence[int], tipos: frozenset[str]
+) -> set[int]:
+    """Ids cuja segmentação (um JSON por linha) tem ao menos um segmento de `tipos`.
+
+    Linha ilegível conta como não selecionada: o filtro só inclui quem o modelo
+    comprovadamente marcou com um dos tipos pedidos.
+    """
+    selecionados: set[int] = set()
+    for identificador, linha in zip(ids, saida, strict=True):
+        try:
+            dados = json.loads(linha)
+        except json.JSONDecodeError:
+            continue
+        for segmento in dados.get("segmentos", []):
+            if str(segmento.get("tipo", "")) in tipos:
+                selecionados.add(identificador)
+                break
+    return selecionados
+
+
+def comando_segmentador(binario: Path | None) -> list[str]:
+    """Comando do segmentador do enderecobr_rs (lê endereços, devolve JSON).
+
+    Ordem: binário informado > `target/{release,debug}/padronizar` > `cargo run`.
+    """
+    if binario is not None:
+        return [str(binario), "segmentacao"]
+    for perfil in ("release", "debug"):
+        candidato = DIR_REPO / "target" / perfil / "padronizar"
+        if candidato.is_file():
+            return [str(candidato), "segmentacao"]
+    return [
+        "cargo",
+        "run",
+        "--quiet",
+        "--bin",
+        "padronizar",
+        "--features=cli",
+        "segmentacao",
+    ]
+
+
+def prever_tipos_crf(
+    linhas: Sequence[LinhaPendente],
+    tipos: frozenset[str],
+    modelo: Path | None,
+    binario: Path | None,
+    console: Console,
+) -> set[int]:
+    """Roda o CRF nos pendentes e devolve os ids com ao menos um dos `tipos`.
+
+    Usa o binário do próprio enderecobr_rs, então a predição é idêntica à do
+    segmentador publicado; o modelo é escolhido por `--modelo-crf`
+    (`ENDERECOBR_MODELO` para o binário) ou pelo padrão dele.
+    """
+    comando = comando_segmentador(binario)
+    ambiente = dict(os.environ)
+    if modelo is not None:
+        ambiente["ENDERECOBR_MODELO"] = str(modelo.resolve())
+
+    selecionados: set[int] = set()
+    progresso = Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        console=console,
+    )
+    with progresso:
+        tarefa = progresso.add_task("Prevendo com o CRF", total=len(linhas))
+        for inicio in range(0, len(linhas), TAMANHO_BLOCO_CRF):
+            bloco = linhas[inicio : inicio + TAMANHO_BLOCO_CRF]
+            if any("\n" in linha.endereco for linha in bloco):
+                raise RuntimeError(
+                    "Endereço com quebra de linha quebra o protocolo do "
+                    "segmentador (uma linha por endereço)."
+                )
+            entrada = "\n".join(linha.endereco for linha in bloco)
+            resultado = subprocess.run(
+                comando,
+                input=entrada,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=DIR_REPO,
+                env=ambiente,
+            )
+            if resultado.returncode != 0:
+                raise RuntimeError(
+                    f"O segmentador falhou ({comando[0]}): "
+                    f"{resultado.stderr.strip()[:500]}"
+                )
+            saida = resultado.stdout.splitlines()
+            if len(saida) != len(bloco):
+                raise RuntimeError(
+                    f"O segmentador devolveu {len(saida)} linha(s) para "
+                    f"{len(bloco)} endereço(s) do bloco."
+                )
+            selecionados |= filtrar_ids_por_tipos(
+                saida, [linha.id for linha in bloco], tipos
+            )
+            progresso.advance(tarefa, len(bloco))
+
+    return selecionados
+
+
 def abrir_banco(caminho: Path) -> sqlite3.Connection:
     """Abre o SQLite gerado por `dataset_etiquetacao.py`."""
     if not caminho.is_file():
@@ -753,13 +1026,16 @@ def listar_ufs_pendentes(
     incluir_erros: bool = False,
     ufs: Sequence[str] | None = None,
     municipios: Sequence[str] | None = None,
+    usar_filtro_crf: bool = False,
 ) -> list[EstratoPendente]:
     """UFs que têm pendentes, com quantos já foram anotados em cada uma.
 
     `anotados` conta só as anotações bem-sucedidas (sem `$.erro`); é a base do
     peso usado por `alocar` no primeiro nível (UF). UFs nulas viram a chave ''.
     `ufs`/`municipios` restringem os estratos (sem diferenciar maiúsc./minúsc.).
+    `usar_filtro_crf` restringe aos ids aprovados pelo filtro do modelo.
     """
+    garantir_tabela_filtro(conn)
     linhas = conn.execute(
         """
         SELECT coalesce(p.uf, '') AS uf,
@@ -776,6 +1052,7 @@ def listar_ufs_pendentes(
           AND (:lote IS NULL OR p.lote = :lote)
           AND (:ufs IS NULL OR instr(:ufs, ',' || upper(coalesce(p.uf, '')) || ',') > 0)
           AND (:municipios IS NULL OR instr(upper(:municipios), ',' || upper(coalesce(p.municipio, '')) || ',') > 0)
+          AND (:usar_filtro_crf = 0 OR p.id IN (SELECT id FROM _filtro_crf))
         GROUP BY coalesce(p.uf, '')
         """,
         {
@@ -783,6 +1060,7 @@ def listar_ufs_pendentes(
             "lote": lote,
             "ufs": _lista_delimitada(ufs, caixa="upper"),
             "municipios": _lista_delimitada(municipios, caixa="upper"),
+            "usar_filtro_crf": usar_filtro_crf,
         },
     ).fetchall()
     return [
@@ -799,6 +1077,7 @@ def listar_origens_pendentes(
     incluir_erros: bool = False,
     origens: Sequence[str] | None = None,
     municipios: Sequence[str] | None = None,
+    usar_filtro_crf: bool = False,
 ) -> list[EstratoPendente]:
     """Origens com pendentes dentro de uma UF, com quantos já foram anotados.
 
@@ -806,6 +1085,7 @@ def listar_origens_pendentes(
     base do peso 1/(anotados da célula origem×UF + 1). `origens`/`municipios`
     restringem os estratos (sem diferenciar maiúsc./minúsc.).
     """
+    garantir_tabela_filtro(conn)
     linhas = conn.execute(
         """
         SELECT p.origem,
@@ -824,6 +1104,7 @@ def listar_origens_pendentes(
           AND (:lote IS NULL OR p.lote = :lote)
           AND (:origens IS NULL OR instr(:origens, ',' || lower(p.origem) || ',') > 0)
           AND (:municipios IS NULL OR instr(upper(:municipios), ',' || upper(coalesce(p.municipio, '')) || ',') > 0)
+          AND (:usar_filtro_crf = 0 OR p.id IN (SELECT id FROM _filtro_crf))
         GROUP BY p.origem
         """,
         {
@@ -832,6 +1113,7 @@ def listar_origens_pendentes(
             "lote": lote,
             "origens": _lista_delimitada(origens, caixa="lower"),
             "municipios": _lista_delimitada(municipios, caixa="upper"),
+            "usar_filtro_crf": usar_filtro_crf,
         },
     ).fetchall()
     return [
@@ -880,6 +1162,7 @@ def coletar_lote_balanceado(
     ufs: Sequence[str] | None = None,
     origens: Sequence[str] | None = None,
     municipios: Sequence[str] | None = None,
+    usar_filtro_crf: bool = False,
 ) -> tuple[list[LinhaPendente], list[tuple[EstratoPendente, EstratoPendente, int]]]:
     """Coleta um lote com cotas hierárquicas UF → origem, pesando 1/(anotados+1).
 
@@ -887,10 +1170,16 @@ def coletar_lote_balanceado(
     distribui o lote entre as UFs; depois, dentro da cota de cada UF, distribui
     entre as origens dela. As linhas de cada origem saem em ordem aleatória e o
     lote final é embaralhado. Retorna também a alocação por (UF, origem) para o
-    relatório. `ufs`/`origens`/`municipios` restringem os estratos considerados.
+    relatório. `ufs`/`origens`/`municipios` restringem os estratos considerados;
+    `usar_filtro_crf` restringe todo o processo aos ids aprovados pelo modelo.
     """
     estratos_uf = listar_ufs_pendentes(
-        conn, lote=lote, incluir_erros=incluir_erros, ufs=ufs, municipios=municipios
+        conn,
+        lote=lote,
+        incluir_erros=incluir_erros,
+        ufs=ufs,
+        municipios=municipios,
+        usar_filtro_crf=usar_filtro_crf,
     )
     tamanho = (
         limite if limite is not None else sum(u.pendentes for u in estratos_uf)
@@ -906,6 +1195,7 @@ def coletar_lote_balanceado(
             incluir_erros=incluir_erros,
             origens=origens,
             municipios=municipios,
+            usar_filtro_crf=usar_filtro_crf,
         )
         for origem, cota_origem in alocar(estratos_origem, cota_uf):
             linhas.extend(
@@ -917,6 +1207,7 @@ def coletar_lote_balanceado(
                     origens=[origem.chave],
                     ufs=[uf.chave],
                     municipios=municipios,
+                    usar_filtro_crf=usar_filtro_crf,
                 )
             )
             alocacao.append((uf, origem, cota_origem))
@@ -933,14 +1224,17 @@ def selecionar_pendentes(
     origens: Sequence[str] | None = None,
     ufs: Sequence[str] | None = None,
     municipios: Sequence[str] | None = None,
+    usar_filtro_crf: bool = False,
 ) -> list[LinhaPendente]:
     """Seleciona as linhas a processar: pendentes e, opcionalmente, com erro.
 
     Consulta com parâmetros nomeados: `incluir_erros` liga/desliga o ramo de
     erros; `limite` nulo vira `-1` (sem limite no SQLite); `lote` nulo desativa
     esse filtro; `origens`/`ufs`/`municipios` restringem por origem, UF e/ou
-    município (listas, sem diferenciar maiúsc./minúsc.).
+    município (listas, sem diferenciar maiúsc./minúsc.); `usar_filtro_crf`
+    restringe aos ids aprovados pelo filtro do modelo.
     """
+    garantir_tabela_filtro(conn)
     linhas = cast(
         list[sqlite3.Row],
         conn.execute(
@@ -954,6 +1248,7 @@ def selecionar_pendentes(
               AND (:origens IS NULL OR instr(:origens, ',' || lower(origem) || ',') > 0)
               AND (:ufs IS NULL OR instr(:ufs, ',' || upper(coalesce(uf, '')) || ',') > 0)
               AND (:municipios IS NULL OR instr(upper(:municipios), ',' || upper(coalesce(municipio, '')) || ',') > 0)
+              AND (:usar_filtro_crf = 0 OR id IN (SELECT id FROM _filtro_crf))
             ORDER BY random()
             LIMIT COALESCE(:limite, -1)
             """,
@@ -964,6 +1259,7 @@ def selecionar_pendentes(
                 "origens": _lista_delimitada(origens, caixa="lower"),
                 "ufs": _lista_delimitada(ufs, caixa="upper"),
                 "municipios": _lista_delimitada(municipios, caixa="upper"),
+                "usar_filtro_crf": usar_filtro_crf,
             },
         ).fetchall(),
     )
@@ -1279,6 +1575,37 @@ def lote(
             help="Sorteia o lote com cotas hierárquicas UF→origem (1/(anotados+1)).",
         ),
     ] = True,
+    apenas_tipos: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--apenas-tipos",
+            help=(
+                "Processa só endereços em que o CRF prevê ao menos um destes "
+                "tipos (repita ou separe por vírgula). O modelo roda em todos "
+                "os pendentes (não só em --limite) antes de etiquetar."
+            ),
+        ),
+    ] = None,
+    modelo_crf: Annotated[
+        Path | None,
+        typer.Option(
+            "--modelo-crf",
+            help=(
+                "tagger.crf usado em --apenas-tipos (padrão: o modelo padrão "
+                "do enderecobr_rs, ou ENDERECOBR_MODELO)."
+            ),
+        ),
+    ] = None,
+    binario_crf: Annotated[
+        Path | None,
+        typer.Option(
+            "--binario-crf",
+            help=(
+                "Binário `padronizar` do enderecobr_rs (padrão: "
+                "target/{release,debug}/padronizar ou `cargo run`)."
+            ),
+        ),
+    ] = None,
     verboso: Annotated[
         bool,
         typer.Option(
@@ -1287,17 +1614,46 @@ def lote(
     ] = False,
 ) -> None:
     """Processa em lote os endereços pendentes do dataset de etiquetagem."""
-    config = carregar_config(env)
-    console_llm = console if verboso else Console(quiet=True)
     ufs_filtro = _dividir_filtros(uf)
     origens_filtro = _dividir_filtros(origem)
     municipios_filtro = _dividir_filtros(municipio)
+    # Valida os argumentos antes de tocar no ambiente (falha rápida, sem .env).
+    tipos_filtro = validar_tipos_filtro(_dividir_filtros(apenas_tipos), modelo_crf)
+    if binario_crf is not None and not binario_crf.is_file():
+        raise typer.BadParameter(f"Binário do segmentador não encontrado: {binario_crf}")
+
+    config = carregar_config(env)
+    console_llm = console if verboso else Console(quiet=True)
 
     # Valida o ambiente (CNEFE, municipios) uma vez, antes de começar o lote.
     Contexto.criar(config, console).fechar()
 
     conn = abrir_banco(banco)
     try:
+        if tipos_filtro:
+            candidatos = selecionar_pendentes(
+                conn,
+                lote=lote_id,
+                incluir_erros=retentar_erros,
+                ufs=ufs_filtro,
+                origens=origens_filtro,
+                municipios=municipios_filtro,
+            )
+            console.print(
+                f"[dim]Segmentando {len(candidatos)} pendente(s) para filtrar "
+                f"por {', '.join(sorted(tipos_filtro))}...[/dim]"
+            )
+            registrar_filtro_crf(
+                conn,
+                prever_tipos_crf(
+                    candidatos, tipos_filtro, modelo_crf, binario_crf, console
+                ),
+            )
+            console.print(
+                f"[dim]Filtro do CRF: {contar_filtro_crf(conn)} de "
+                f"{len(candidatos)} endereço(s) com ao menos um tipo previsto.[/dim]"
+            )
+
         if balancear:
             linhas, alocacao = coletar_lote_balanceado(
                 conn,
@@ -1307,6 +1663,7 @@ def lote(
                 ufs=ufs_filtro,
                 origens=origens_filtro,
                 municipios=municipios_filtro,
+                usar_filtro_crf=bool(tipos_filtro),
             )
             agrupado: dict[str, list[tuple[str, int]]] = {}
             for estrato_uf, estrato_origem, quantidade in alocacao:
@@ -1329,6 +1686,7 @@ def lote(
                 ufs=ufs_filtro,
                 origens=origens_filtro,
                 municipios=municipios_filtro,
+                usar_filtro_crf=bool(tipos_filtro),
             )
         if not linhas:
             console.print("[yellow]Nenhum endereço pendente para processar.[/yellow]")

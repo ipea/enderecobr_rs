@@ -27,6 +27,8 @@ package = true
 
 [dependency-groups]
 dev = [
+    "pandas-stubs>=3.0.5.260914",
+    "pyarrow-stubs>=20.0.0.20260819",
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
 ]
