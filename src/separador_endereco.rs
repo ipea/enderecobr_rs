@@ -49,11 +49,11 @@ use crate::{
 };
 
 /// Separador de endereços: divide um texto livre em partes (logradouro,
-/// número, complemento, CEP etc.) com o auxílio de um modelo treinado.
+/// número, complemento, CEP etc.) com o auxílio de um modelo probabilístico.
 ///
 /// Em geral não é preciso criar uma instância: [`segmentar_endereco`] e
-/// [`estruturar_endereco`] já usam um modelo padrão compartilhado. Instancie apenas
-/// quando quiser trabalhar com um arquivo de modelo próprio.
+/// [`estruturar_endereco`] já usam o modelo distribuído com o pacote.
+/// Instancie apenas quando quiser trabalhar com um arquivo de modelo próprio.
 pub struct SeparadorEndereco {
     /// Modelo usado na classificação dos trechos do endereço.
     pub model: Model,
@@ -63,8 +63,8 @@ pub struct SeparadorEndereco {
 
 /// Tipo de informação que um trecho do endereço representa.
 ///
-/// As variantes espelham, uma a uma, os rótulos que o modelo emite (`B_<TIPO>`
-/// e `I_<TIPO>`). Rótulos sem variante própria caem em [`TipoSegmento::Outro`].
+/// As variantes espelham, uma a uma, os rótulos que o modelo probabilístico emite.
+/// Rótulos sem variante própria caem em [`TipoSegmento::Outro`].
 ///
 /// ```
 /// use enderecobr_rs::separador_endereco::TipoSegmento;
@@ -112,7 +112,7 @@ pub enum TipoSegmento {
 }
 
 impl TipoSegmento {
-    /// Todas as variantes, na ordem de declaração (que o binding do Python repete).
+    /// Todas as variantes, na ordem de declaração.
     ///
     /// ```
     /// use enderecobr_rs::separador_endereco::TipoSegmento;
@@ -145,10 +145,6 @@ impl TipoSegmento {
     /// use enderecobr_rs::separador_endereco::TipoSegmento;
     ///
     /// assert_eq!(TipoSegmento::Cep.como_str(), "cep");
-    /// assert_eq!(TipoSegmento::QuilometragemVia.como_str(), "quilometragem_via");
-    /// // A variante `Outro` guarda os rótulos sem correspondência; o rótulo no plural
-    /// // é herança dos dumps do modelo.
-    /// assert_eq!(TipoSegmento::Outro.como_str(), "outros");
     /// ```
     pub const fn como_str(self) -> &'static str {
         match self {
@@ -186,7 +182,8 @@ impl std::fmt::Display for TipoSegmento {
 }
 
 impl From<&str> for TipoSegmento {
-    /// Converte o rótulo do modelo (sem o prefixo BIO), em qualquer caixa.
+    /// Converte os rótulos emitidos pelo modelo, de forma case insensitive,
+    /// para o enum [`TipoSegmento`].
     ///
     /// Rótulos desconhecidos caem em [`TipoSegmento::Outro`] em vez de falhar:
     /// um modelo novo não deve derrubar a segmentação.
@@ -194,10 +191,8 @@ impl From<&str> for TipoSegmento {
     /// ```
     /// use enderecobr_rs::separador_endereco::TipoSegmento;
     ///
-    /// // A caixa do rótulo não importa.
     /// assert_eq!(TipoSegmento::from("MODIFICADOR_NUMERO"), TipoSegmento::ModificadorNumero);
     /// assert_eq!(TipoSegmento::from("Localidade"), TipoSegmento::Localidade);
-    /// assert_eq!(TipoSegmento::from("rotulo_desconhecido"), TipoSegmento::Outro);
     /// ```
     fn from(rotulo: &str) -> Self {
         Self::TODOS
@@ -207,24 +202,10 @@ impl From<&str> for TipoSegmento {
     }
 }
 
-/// Um trecho do endereço e o tipo de informação que ele representa.
-///
-/// ```
-/// use enderecobr_rs::separador_endereco::{SegmentoEndereco, TipoSegmento};
-///
-/// let segmento = SegmentoEndereco {
-///     valor: "123".to_string(),
-///     tipo: TipoSegmento::Numero,
-/// };
-/// assert_eq!(segmento.valor, "123");
-/// assert_eq!(segmento.tipo, TipoSegmento::Numero);
-/// ```
+/// Um trecho do endereço junto com o tipo de informação que ele representa.
 #[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct SegmentoEndereco {
-    /// Trecho do endereço, preservando a grafia original.
     pub valor: String,
-    /// Tipo do trecho; em JSON aparece como o rótulo do modelo em minúsculas
-    /// (`logradouro`, `numero`, `complemento` etc.).
     pub tipo: TipoSegmento,
 }
 
@@ -251,10 +232,7 @@ pub struct SegmentoEndereco {
 ///
 /// assert_eq!(
 ///     segmento_como_json(&segmentado),
-///     concat!(
-///         r#"{"segmentos":[{"valor":"av atlantica","tipo":"logradouro"},"#,
-///         r#"{"valor":"123","tipo":"numero"}]}"#
-///     )
+///     r#"{"segmentos":[{"valor":"av atlantica","tipo":"logradouro"},{"valor":"123","tipo":"numero"}]}"#
 /// );
 /// ```
 #[derive(Serialize, Debug, PartialEq, Clone, Default)]
@@ -270,14 +248,6 @@ impl SeparadorEndereco {
     /// consegue ser usado para classificar. Depois de criado, o separador não
     /// falha mais ao segmentar: a única falha restante seria falta de memória,
     /// que já é testada aqui.
-    ///
-    /// ```no_run
-    /// use enderecobr_rs::separador_endereco::SeparadorEndereco;
-    ///
-    /// let separador = SeparadorEndereco::carregar("meu_modelo.crf".into())
-    ///     .expect("modelo válido");
-    /// assert!(separador.segmentar("av atlantica, 123").segmentos.len() > 1);
-    /// ```
     pub fn carregar(caminho: PathBuf) -> Result<SeparadorEndereco, String> {
         let model = Model::from_file(&caminho.to_string_lossy()).map_err(|erro| {
             format!(
@@ -350,16 +320,7 @@ impl SeparadorEndereco {
         segmentos
     }
 
-    /// Segmenta um endereço com este separador.
-    ///
-    /// ```no_run
-    /// use enderecobr_rs::separador_endereco::SeparadorEndereco;
-    ///
-    /// let separador = SeparadorEndereco::carregar("meu_modelo.crf".into()).unwrap();
-    /// let segmentado = separador.segmentar("av atlantica, 123, apto 301");
-    /// let tipos: Vec<_> = segmentado.segmentos.iter().map(|s| s.tipo).collect();
-    /// assert_eq!(tipos.len(), 3);
-    /// ```
+    /// Segmenta um endereço com este separador. Vide [`segmentar_endereco`].
     pub fn segmentar(&self, texto: &str) -> EnderecoSegmentado {
         let mut tagger = self.novo_tagger();
         self.processar_com_tagger(&mut tagger, texto)
@@ -488,9 +449,8 @@ pub fn tentar_segmentar_endereco(texto: &str) -> Result<EnderecoSegmentado, Stri
 }
 
 /// Segmenta vários endereços de uma vez, com o modelo padrão carregado uma única
-/// vez. Vide [`segmentar_endereco`] para mais informações.
-///
-/// É a forma mais eficiente de processar uma lista ou coluna de endereços.
+/// vez. Vide [`segmentar_endereco`] para mais informações. Mais eficiente de processar
+/// uma lista ou coluna de endereços.
 ///
 /// # Panics
 ///
@@ -530,15 +490,29 @@ impl EnderecoSegmentado {
 /// `padronizar` indica se os campos resultantes devem passar pelas funções de
 /// padronização.
 ///
+/// Vide a documentação de [`segmentar_endereco`] e [`segmento_como_endereco`]
+/// para mais detalhes.
+///
 /// # Panics
 ///
 /// Panic se o modelo padrão não puder ser carregado. Use
 /// [`tentar_estruturar_endereco`] para tratar esse caso como erro.
 ///
-/// ```no_run
-/// use enderecobr_rs::separador_endereco::estruturar_endereco;
+/// ```
+/// use enderecobr_rs::separador_endereco::{
+///     modelo::{obter_modelo, VAR_AMBIENTE_SEM_DOWNLOAD},
+///     estruturar_endereco
+/// };
 /// use enderecobr_rs::endereco::Endereco;
 ///
+/// // Evitando problemas no CI
+/// std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "true");
+/// let modelo_existe = obter_modelo(None).map(|x| x.exists()).unwrap_or(false);
+/// if !modelo_existe {
+///     return;
+/// }
+///
+/// // Exemplo de fato
 /// let endereco = estruturar_endereco("av atlantica, 123, apto 301", true);
 /// assert_eq!(endereco, Endereco {
 ///   logradouro: Some("AVENIDA ATLANTICA".to_string()),

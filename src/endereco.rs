@@ -125,22 +125,58 @@ mod tests {
 
     #[test]
     fn test_endereco_padronizado() {
+        let original = Endereco {
+            logradouro: Some("R gen. glicerio".to_string()),
+            numero: Some("1".to_string()),
+            complemento: Some("apt 405".to_string()),
+            localidade: Some("jd botanico".to_string()),
+            cep: Some("20040020".to_string()), // antes era None
+        };
+        let esperado = Endereco {
+            logradouro: Some("RUA GENERAL GLICERIO".to_string()),
+            numero: Some("1".to_string()),
+            complemento: Some("APARTAMENTO 405".to_string()),
+            localidade: Some("JARDIM BOTANICO".to_string()),
+            cep: Some("20040-020".to_string()), // antes era None
+        };
+
+        assert_eq!(original.endereco_padronizado(), esperado.clone());
+
+        let mut clone = original.clone();
+        clone.padronizar();
+        assert_eq!(clone, esperado.clone());
+    }
+    #[test]
+    fn test_formatar_endereco() {
+        let end = Endereco::novo(
+            Some("r gen. glicerio".to_string()),
+            Some("1".to_string()),
+            None,
+            Some("laranjeiras".to_string()),
+            None,
+        );
+        assert_eq!(end.formatar(), "r gen. glicerio, 1, laranjeiras");
+
+        // Invariante
+        assert_eq!(formatar(&end), end.formatar());
+
+        // Invariante
+        assert_eq!(formatar(&end), format!("{}", end));
+    }
+
+    #[test]
+    fn test_criar_json_endereco() {
+        let end = Endereco {
+            logradouro: Some("r gen. glicerio".to_string()),
+            ..Default::default()
+        };
+
         assert_eq!(
-            Endereco {
-                logradouro: Some("R gen. glicerio".to_string()),
-                numero: Some("1".to_string()),
-                complemento: Some("apt 405".to_string()),
-                localidade: Some("jd botanico".to_string()),
-                cep: Some("20040020".to_string()), // antes era None
-            }
-            .endereco_padronizado(),
-            Endereco {
-                logradouro: Some("RUA GENERAL GLICERIO".to_string()),
-                numero: Some("1".to_string()),
-                complemento: Some("APARTAMENTO 405".to_string()),
-                localidade: Some("JARDIM BOTANICO".to_string()),
-                cep: Some("20040-020".to_string()), // antes era None
-            }
-        )
+            endereco_como_json(&end),
+            r#"{"logradouro":"r gen. glicerio","numero":null,"complemento":null,"localidade":null,"cep":null}"#.to_string()
+        );
+        //
+        // Invariante
+        assert_eq!(end.como_json(), endereco_como_json(&end));
     }
 }
