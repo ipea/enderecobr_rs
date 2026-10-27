@@ -667,11 +667,436 @@ mod testes_tipo_segmento {
     }
 
     #[test]
+    fn display_escreve_o_rotulo() {
+        assert_eq!(TipoSegmento::Cep.to_string(), "cep");
+        assert_eq!(
+            TipoSegmento::ModificadorNumero.to_string(),
+            "modificador_numero"
+        );
+        assert_eq!(format!("{}", TipoSegmento::Uf), "uf");
+    }
+
+    #[test]
     fn todos_cabe_no_enum() {
         // Se a lista `TODOS` repetir uma variante, a contagem denuncia.
         let mut vistos: Vec<&str> = TipoSegmento::TODOS.iter().map(|t| t.como_str()).collect();
         vistos.sort_unstable();
         vistos.dedup();
         assert_eq!(vistos.len(), TipoSegmento::TODOS.len());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::endereco::Endereco;
+    use crate::separador_endereco::modelo::{
+        NOME_ARQUIVO_MODELO, NOME_DIRETORIO_CACHE, VAR_AMBIENTE_MODELO, VAR_AMBIENTE_SEM_DOWNLOAD,
+        VERSAO_MODELO,
+    };
+
+    /// Constrói um segmento sem repetir a struct em cada teste.
+    fn criar_segmento(valor: &str, tipo: TipoSegmento) -> SegmentoEndereco {
+        SegmentoEndereco {
+            valor: valor.to_string(),
+            tipo,
+        }
+    }
+
+    /// Constrói uma segmentação a partir dos segmentos, na ordem em que aparecem.
+    fn criar_segmentado(segmentos: Vec<SegmentoEndereco>) -> EnderecoSegmentado {
+        EnderecoSegmentado { segmentos }
+    }
+
+    /// Caminho do modelo padrão no cache do sistema, sem passar pelas
+    /// variáveis de ambiente (portanto nunca baixa nada).
+    fn obter_modelo_no_cache() -> Option<PathBuf> {
+        dirs::cache_dir()
+            .map(|cache| {
+                cache
+                    .join(NOME_DIRETORIO_CACHE)
+                    .join(VERSAO_MODELO)
+                    .join(NOME_ARQUIVO_MODELO)
+            })
+            .filter(|caminho| caminho.is_file())
+    }
+
+    /// Prepara o ambiente para os testes que usam o modelo padrão:
+    /// devolve o caminho do modelo ou `None` (teste pulado) quando ele não
+    /// está disponível, como no CI, que não baixa o modelo.
+    ///
+    /// As variáveis de ambiente também são apontadas para esse modelo, para
+    /// evitar downloads acidentais e interferência dos testes de `modelo.rs`,
+    /// que manipulam as mesmas variáveis.
+    fn preparar_modelo_padrao() -> Option<PathBuf> {
+        let caminho = obter_modelo_no_cache()?;
+        std::env::set_var(VAR_AMBIENTE_MODELO, caminho.as_os_str());
+        std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "true");
+        Some(caminho)
+    }
+
+    #[test]
+    fn carregar_devolve_erro_com_caminho_inexistente() {
+        let Err(erro) = SeparadorEndereco::carregar(PathBuf::from("arquivo_inexistente.crf"))
+        else {
+            panic!("carregar deveria falhar com caminho inexistente");
+        };
+        assert!(erro.contains("arquivo_inexistente.crf"));
+    }
+
+    #[test]
+    fn carregar_devolve_erro_com_arquivo_invalido() {
+        // O `Cargo.toml` existe, mas não é um modelo.
+        assert!(SeparadorEndereco::carregar(PathBuf::from("Cargo.toml")).is_err());
+    }
+
+    #[test]
+    fn como_json_serializa_os_segmentos() {
+        let segmentado = criar_segmentado(vec![criar_segmento("123", TipoSegmento::Numero)]);
+
+        assert_eq!(
+            segmentado.como_json(),
+            r#"{"segmentos":[{"valor":"123","tipo":"numero"}]}"#
+        );
+        assert_eq!(segmento_como_json(&segmentado), segmentado.como_json());
+        assert_eq!(
+            EnderecoSegmentado::default().como_json(),
+            r#"{"segmentos":[]}"#
+        );
+    }
+
+    #[test]
+    fn segmento_como_endereco_agrupa_campos_padroes() {
+        let segmentado = criar_segmentado(vec![
+            criar_segmento("av atlantica", TipoSegmento::Logradouro),
+            criar_segmento("123", TipoSegmento::Numero),
+            criar_segmento("apt 203", TipoSegmento::Complemento),
+            criar_segmento("copacabana", TipoSegmento::Localidade),
+            criar_segmento("22000-000", TipoSegmento::Cep),
+        ]);
+
+        assert_eq!(
+            segmento_como_endereco(&segmentado, true),
+            Endereco {
+                logradouro: Some("AVENIDA ATLANTICA".to_string()),
+                numero: Some("123".to_string()),
+                complemento: Some("APARTAMENTO 203".to_string()),
+                localidade: Some("COPACABANA".to_string()),
+                cep: Some("22000-000".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn segmento_como_endereco_descarta_tipos_sem_campo() {
+        let segmentado = criar_segmentado(vec![
+            criar_segmento("r x", TipoSegmento::Logradouro),
+            // Segundo logradouro é ignorado: o campo já foi preenchido.
+            criar_segmento("r y", TipoSegmento::Logradouro),
+            criar_segmento("edifton bar", TipoSegmento::Empreendimento),
+            criar_segmento("esquina com r b", TipoSegmento::Referencia),
+            criar_segmento("antiga r c", TipoSegmento::Denominacao),
+            criar_segmento("rio de janeiro", TipoSegmento::Municipio),
+            criar_segmento("rj", TipoSegmento::Uf),
+            criar_segmento("vale qualquer coisa", TipoSegmento::Outro),
+        ]);
+
+        assert_eq!(
+            segmento_como_endereco(&segmentado, false),
+            Endereco {
+                logradouro: Some("r x".to_string()),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn segmento_como_endereco_junta_parcela_ao_logradouro() {
+        let segmentado = criar_segmentado(vec![
+            criar_segmento("r x", TipoSegmento::Logradouro),
+            criar_segmento("qd 5 lote 7", TipoSegmento::Parcela),
+        ]);
+
+        assert_eq!(
+            segmento_como_endereco(&segmentado, false),
+            Endereco {
+                logradouro: Some("r x qd 5 lote 7".to_string()),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn segmento_como_endereco_manda_parcela_sem_contexto_para_complemento() {
+        let segmentado = criar_segmentado(vec![criar_segmento("qd 5", TipoSegmento::Parcela)]);
+
+        assert_eq!(
+            segmento_como_endereco(&segmentado, false),
+            Endereco {
+                complemento: Some("qd 5".to_string()),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn segmento_como_endereco_direciona_quilometragem() {
+        // Sem número, a quilometragem vira o número.
+        let sem_numero = criar_segmentado(vec![criar_segmento(
+            "km 304",
+            TipoSegmento::QuilometragemVia,
+        )]);
+
+        assert_eq!(
+            segmento_como_endereco(&sem_numero, false),
+            Endereco {
+                numero: Some("km 304".to_string()),
+                ..Default::default()
+            }
+        );
+
+        // Com número, a quilometragem cai no complemento.
+        let com_numero = criar_segmentado(vec![
+            criar_segmento("r x", TipoSegmento::Logradouro),
+            criar_segmento("123", TipoSegmento::Numero),
+            criar_segmento("km 304", TipoSegmento::QuilometragemVia),
+        ]);
+
+        assert_eq!(
+            segmento_como_endereco(&com_numero, false),
+            Endereco {
+                logradouro: Some("r x".to_string()),
+                numero: Some("123".to_string()),
+                complemento: Some("km 304".to_string()),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn segmento_como_endereco_sem_padronizar_mantem_os_valores() {
+        let segmentado = criar_segmentado(vec![
+            criar_segmento("av atlantica", TipoSegmento::Logradouro),
+            criar_segmento("123", TipoSegmento::Numero),
+            // Modificador acompanha o número.
+            criar_segmento("bloco b", TipoSegmento::ModificadorNumero),
+            criar_segmento("apto 301", TipoSegmento::Complemento),
+        ]);
+
+        assert_eq!(
+            segmentado.como_endereco(false),
+            Endereco {
+                logradouro: Some("av atlantica".to_string()),
+                numero: Some("123 bloco b".to_string()),
+                complemento: Some("apto 301".to_string()),
+                ..Default::default()
+            }
+        );
+    }
+
+    // Os testes a seguir precisam do modelo. Ele nunca é baixado: quando não
+    // está no cache, como no CI, os testes simplesmente passam sem executar.
+
+    #[test]
+    fn carregar_permite_segmentar_com_o_modelo_do_cache() {
+        let Some(caminho) = obter_modelo_no_cache() else {
+            return;
+        };
+        let separador = SeparadorEndereco::carregar(caminho).unwrap();
+
+        let atributos = separador.tokens2attributes(&["rua", "brasil", "123"]);
+        assert_eq!(atributos.len(), 3);
+        for atributos_token in &atributos {
+            assert!(!atributos_token.is_empty());
+        }
+
+        assert_eq!(
+            separador.segmentar("rua brasil, 123"),
+            criar_segmentado(vec![
+                criar_segmento("rua brasil", TipoSegmento::Logradouro),
+                criar_segmento("123", TipoSegmento::Numero),
+            ])
+        );
+
+        assert_eq!(
+            separador.segmentar_enderecos(&["rua brasil, 123", "r brasil, 50"]),
+            vec![
+                criar_segmentado(vec![
+                    criar_segmento("rua brasil", TipoSegmento::Logradouro),
+                    criar_segmento("123", TipoSegmento::Numero),
+                ]),
+                criar_segmentado(vec![
+                    criar_segmento("r brasil", TipoSegmento::Logradouro),
+                    criar_segmento("50", TipoSegmento::Numero),
+                ]),
+            ]
+        );
+    }
+
+    #[test]
+    fn montar_segmentos_segue_os_rotulos_bio() {
+        let Some(caminho) = obter_modelo_no_cache() else {
+            return;
+        };
+        let separador = SeparadorEndereco::carregar(caminho).unwrap();
+
+        // `I-` de tipo diferente do segmento corrente é descartado, e token
+        // grudado (sem espaço antes) é colado sem espaço.
+        let (tokens, offsets) = separador.extrator.tokenize("a,b 100");
+        let tags: Vec<String> = ["B_logradouro", "O", "I_logradouro", "I_numero"]
+            .iter()
+            .map(|tag| tag.to_string())
+            .collect();
+
+        assert_eq!(
+            separador.montar_segmentos("a,b 100", &tokens, &tags, &offsets),
+            vec![criar_segmento("ab", TipoSegmento::Logradouro)]
+        );
+
+        // `I-` sem segmento anterior é descartado.
+        assert_eq!(
+            separador.montar_segmentos("z", &["z"], &["I_logradouro".to_string()], &[0],),
+            Vec::new()
+        );
+
+        // `I-` após espaço junta com espaço.
+        assert_eq!(
+            separador.montar_segmentos(
+                "x 1",
+                &["x", "1"],
+                &["B_numero".to_string(), "I_numero".to_string()],
+                &[0, 2],
+            ),
+            vec![criar_segmento("x 1", TipoSegmento::Numero)]
+        );
+
+        // Prefixo BIO desconhecido é descartado.
+        assert_eq!(
+            separador.montar_segmentos(
+                "a b",
+                &["a", "b"],
+                &["B_logradouro".to_string(), "X_logradouro".to_string()],
+                &[0, 2],
+            ),
+            vec![criar_segmento("a", TipoSegmento::Logradouro)]
+        );
+    }
+
+    #[test]
+    fn segmentar_endereco_separa_partes_simples() {
+        if preparar_modelo_padrao().is_none() {
+            return;
+        }
+
+        assert_eq!(
+            segmentar_endereco("rua brasil, 123"),
+            criar_segmentado(vec![
+                criar_segmento("rua brasil", TipoSegmento::Logradouro),
+                criar_segmento("123", TipoSegmento::Numero),
+            ])
+        );
+    }
+
+    #[test]
+    fn tentar_segmentar_endereco_devolve_ok() {
+        if preparar_modelo_padrao().is_none() {
+            return;
+        }
+
+        assert_eq!(
+            tentar_segmentar_endereco("r brasil, 50"),
+            Ok(criar_segmentado(vec![
+                criar_segmento("r brasil", TipoSegmento::Logradouro),
+                criar_segmento("50", TipoSegmento::Numero),
+            ]))
+        );
+    }
+
+    #[test]
+    fn segmentar_enderecos_mantem_a_ordem_da_entrada() {
+        if preparar_modelo_padrao().is_none() {
+            return;
+        }
+
+        let entradas = ["rua brasil, 123", "av atlantica, 123, apto 301"];
+        let saida_esperada = vec![
+            criar_segmentado(vec![
+                criar_segmento("rua brasil", TipoSegmento::Logradouro),
+                criar_segmento("123", TipoSegmento::Numero),
+            ]),
+            criar_segmentado(vec![
+                criar_segmento("av atlantica", TipoSegmento::Logradouro),
+                criar_segmento("123", TipoSegmento::Numero),
+                criar_segmento("apto 301", TipoSegmento::Complemento),
+            ]),
+        ];
+
+        assert_eq!(segmentar_enderecos(&entradas), saida_esperada);
+        assert_eq!(tentar_segmentar_enderecos(&entradas), Ok(saida_esperada));
+    }
+
+    #[test]
+    fn estruturar_endereco_padroniza_os_campos() {
+        if preparar_modelo_padrao().is_none() {
+            return;
+        }
+
+        assert_eq!(
+            estruturar_endereco("av atlantica, 123, apto 301", true),
+            Endereco {
+                logradouro: Some("AVENIDA ATLANTICA".to_string()),
+                numero: Some("123".to_string()),
+                complemento: Some("APARTAMENTO 301".to_string()),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn estruturar_endereco_sem_padronizar_mantem_os_segmentos() {
+        if preparar_modelo_padrao().is_none() {
+            return;
+        }
+
+        assert_eq!(
+            estruturar_endereco("av atlantica, 123, apto 301", false),
+            Endereco {
+                logradouro: Some("av atlantica".to_string()),
+                numero: Some("123".to_string()),
+                complemento: Some("apto 301".to_string()),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn estruturar_endereco_preenche_localidade_e_cep() {
+        if preparar_modelo_padrao().is_none() {
+            return;
+        }
+
+        assert_eq!(
+            estruturar_endereco(
+                "r a, 1, ap 2, copacabana, rio de janeiro, rj, 22000-000",
+                true,
+            ),
+            Endereco {
+                logradouro: Some("RUA A".to_string()),
+                numero: Some("1".to_string()),
+                complemento: Some("APARTAMENTO 2".to_string()),
+                localidade: Some("COPACABANA".to_string()),
+                cep: Some("22000-000".to_string()),
+            }
+        );
+
+        assert_eq!(
+            tentar_estruturar_endereco("r a, 1, ap 2", false),
+            Ok(Endereco {
+                logradouro: Some("r a".to_string()),
+                numero: Some("1".to_string()),
+                complemento: Some("ap 2".to_string()),
+                ..Default::default()
+            })
+        );
     }
 }

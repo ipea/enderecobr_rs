@@ -8,8 +8,7 @@ use enderecobr_rs::separador_endereco::segmento_como_endereco;
 use enderecobr_rs::{
     padronizar_bairros, padronizar_cep_leniente, padronizar_complementos, padronizar_logradouros,
     padronizar_municipios, padronizar_numeros, padronizar_tipo_logradouro,
-    separador_endereco::segmentar_endereco,
-    Endereco,
+    separador_endereco::segmentar_endereco, Endereco,
 };
 use itertools::Itertools;
 use polars::prelude::{

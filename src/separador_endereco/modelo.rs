@@ -79,7 +79,15 @@ pub fn obter_caminho_modelo(path_modelo: Option<&Path>) -> Result<PathBuf, Strin
         .filter(|x| !x.is_empty())
         .map(PathBuf::from);
 
-    let path_default = dirs::cache_dir().map(|x| x.join(NOME_DIRETORIO_CACHE));
+    // O caminho padrão é um diretório por construção, então a versão e o
+    // nome do arquivo são sempre anexados — o `is_dir` abaixo não serve
+    // para este caso: num primeiro uso o diretório ainda não existe e o
+    // modelo acabaria gravado no lugar do próprio diretório.
+    let path_default = dirs::cache_dir().map(|x| {
+        x.join(NOME_DIRETORIO_CACHE)
+            .join(VERSAO_MODELO)
+            .join(NOME_ARQUIVO_MODELO)
+    });
 
     path_param
         .or(path_env)
@@ -195,6 +203,48 @@ mod tests {
             obter_caminho_modelo(Some(Path::new("/tmp/modelo_arquivo.crf"))),
             Ok(PathBuf::from("/tmp/modelo_arquivo.crf"))
         );
+
+        // Parâmetro vazio é ignorado e cai na variável de ambiente.
+        assert_eq!(
+            obter_caminho_modelo(Some(Path::new(""))),
+            Ok(PathBuf::from("/tmp/modelo_env/")
+                .join(VERSAO_MODELO)
+                .join(NOME_ARQUIVO_MODELO))
+        );
+
+        // Variável de ambiente vazia também é ignorada e cai no cache.
+        std::env::set_var(VAR_AMBIENTE_MODELO, "");
+        let caminho_cache = dirs::cache_dir().map(|x| {
+            x.join(NOME_DIRETORIO_CACHE)
+                .join(VERSAO_MODELO)
+                .join(NOME_ARQUIVO_MODELO)
+        });
+        assert_eq!(obter_caminho_modelo(None).ok(), caminho_cache.clone());
+
+        // Sem variável de ambiente, segue o cache do sistema.
+        std::env::remove_var(VAR_AMBIENTE_MODELO);
+        assert_eq!(obter_caminho_modelo(None).ok(), caminho_cache);
+    }
+
+    #[test]
+    fn test_obter_modelo_sem_download_nao_baixa() {
+        // Com o download desativado, o caminho é devolvido mesmo sem existir.
+        std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "1");
+
+        let caminho = Path::new("/tmp/modelo_que_nunca_existiu.crf");
+        assert_eq!(obter_modelo(Some(caminho)), Ok(PathBuf::from(caminho)));
+    }
+
+    #[test]
+    fn test_obter_modelo_arquivo_existente_nao_baixa() {
+        // O `Cargo.toml` existe e não é vazio: é devolvido sem download,
+        // mesmo com o download ativado.
+        std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "0");
+
+        let caminho = Path::new("Cargo.toml");
+        assert_eq!(obter_modelo(Some(caminho)), Ok(PathBuf::from(caminho)));
+
+        std::env::remove_var(VAR_AMBIENTE_SEM_DOWNLOAD);
     }
 
     #[test]
@@ -207,5 +257,6 @@ mod tests {
         assert!(!variavel_ambiente_ativa(VAR_AMBIENTE_SEM_DOWNLOAD));
         std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "0");
         assert!(!variavel_ambiente_ativa(VAR_AMBIENTE_SEM_DOWNLOAD));
+        std::env::remove_var(VAR_AMBIENTE_SEM_DOWNLOAD);
     }
 }
