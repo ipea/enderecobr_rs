@@ -1,0 +1,141 @@
+"""Features por token usadas pelo CRF."""
+
+from collections.abc import Iterable
+
+from crf_endereco.features.texto import (
+    MARCADORES_CONHECIDOS_DF,
+    MARCADORES_CONHECIDOS_PALMAS,
+    SIGLAS_ESTADOS,
+    is_pontuacao,
+    normalize,
+    tokenize,
+)
+
+
+class ExtratorFeature:
+    def __init__(self, distancias_vizinhaca: Iterable[int] = (-2, -1, 1, 2)) -> None:
+        self.distancias_vizinhaca: Iterable[int] = distancias_vizinhaca
+
+    def sent2features(self, text: str) -> list[dict[str, float]]:
+        toks = tokenize(text)
+        return self.tokens2features(toks)
+
+    # uso direto quando já tokenizado
+    def tokens2features(self, toks: list[str]) -> list[dict[str, float]]:
+        return [
+            dict.fromkeys(self._features_posicao(toks, i), 1.0)
+            for i in range(len(toks))
+        ]
+
+    def _features_posicao(self, sent: list[str], i: int) -> list[str]:
+        """Gerador de features principal, baseado somente na posição do token solicitado e seus vizinhos."""
+        feats: list[str] = []
+        feats.append("bias")
+        feats.append(f"{int(i / len(sent) * 4)}_pos")
+        feats += self._features_token(sent[i], "0")
+
+        if i == 0:
+            feats.append("BOS")
+
+        if i == len(sent) - 1:
+            feats.append("EOS")
+
+        for distancia in self.distancias_vizinhaca:
+            feats += self._features_vizinhanca(
+                sent, indice_inicial=i, distancia=distancia
+            )
+
+        return feats
+
+    def _features_token(self, token: str, prefixo: str) -> list[str]:
+        """Gerador de feature para um token específico.
+
+        A ordem e o critério de classificação espelham o `ExtratorFeature` do
+        Rust (`src/separador_endereco.rs`), que é a implementação de referência.
+        """
+        token = normalize(token).upper().strip()
+
+        # `tam` usa o comprimento sem zeros à esquerda: "000123" e "123" caem
+        # no mesmo bucket. O Rust abandonou a feature `digit_len`.
+        sem_zeros = token.lstrip("0") if token.isdigit() else token
+        tam_palavra = min(len(sem_zeros), 10)
+
+        feats: list[str] = [token, f"tam:{tam_palavra}"]
+
+        if token in MARCADORES_CONHECIDOS_DF:
+            feats.append("marcador_df")
+        if token in MARCADORES_CONHECIDOS_PALMAS:
+            feats.append("marcador_palmas")
+        if token in SIGLAS_ESTADOS:
+            feats.append("sigla_estado")
+
+        if len(token) == 0:
+            # Provavelmente a palavra foi removida pelo normalize
+            feats.append("is_unknown")
+        elif is_pontuacao(token):
+            feats.append("is_punct")
+            # O tokenizador emite uma pontuação por token; o Rust trunca para um
+            # caractere por segurança e aqui seguimos a mesma regra.
+            feats[0] = token[0]
+        elif token.isdigit():
+            feats.append("is_digit")
+        elif token.isalpha():
+            feats.append("is_alpha")
+        else:
+            # Alcança os alfanuméricos, que o tokenizador nunca gera (ele separa
+            # letras de números) e que o Rust também trata como desconhecidos.
+            feats.append("is_unknown")
+
+        return [f"{prefixo}:{f}" for f in feats]
+
+    def _features_vizinhanca(
+        self, sent: list[str], indice_inicial: int, distancia: int
+    ) -> list[str]:
+        # Distância zero não faz sentido
+        assert distancia != 0
+
+        # direção da busca de novas palavras
+        direcao = 1 if distancia > 0 else -1
+
+        # Chamo seguidamente a função de localizar a próxima palavra para casos
+        # que desejo de vizinhos mais distantes.
+        posicao_vizinho: int | None = indice_inicial
+        posicao_vizinho_anterior: int | None = None
+        for _ in range(abs(distancia)):
+            if posicao_vizinho is not None:
+                posicao_vizinho_anterior = posicao_vizinho
+                posicao_vizinho = self._pos_prox_palavra(sent, posicao_vizinho, direcao)
+
+        if posicao_vizinho is None:
+            return []
+
+        feats: list[str] = []
+        # Prefixo com o sinal do próprio inteiro ("1", "-1"): igual ao Rust, evita
+        # uma concatenação por token e mantém as duas implementações idênticas.
+        sufixo = str(distancia)
+
+        feats += self._features_token(sent[posicao_vizinho], sufixo)
+
+        # Caso o vizinho solicitado não esteja na posição esperada, algum token
+        # (tipicamente pontuação) foi pulado pela busca de próxima palavra.
+        if (
+            posicao_vizinho != indice_inicial + distancia
+            and posicao_vizinho_anterior is not None
+        ):
+            inicio = min(posicao_vizinho_anterior, posicao_vizinho)
+            fim = max(posicao_vizinho_anterior, posicao_vizinho)
+            if any(is_pontuacao(tok) for tok in sent[inicio : fim + 1]):
+                feats.append(f"tem_pontuacao:{sufixo}")
+
+        return feats
+
+    def _pos_prox_palavra(
+        self, sent: list[str], indice_inicial: int, direcao: int
+    ) -> int | None:
+        i = indice_inicial + direcao
+        while i >= 0 and i < len(sent):
+            tok = sent[i]
+            # Alfabético ou numérico
+            if tok.isalnum():
+                return i
+            i += direcao

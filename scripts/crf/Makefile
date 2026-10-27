@@ -1,35 +1,37 @@
-.PHONY: test avaliacao-manual eval treinar
+.PHONY: test popular etiquetar treinar tunar avaliar segmentar diferencial comparar-geocode
 
-DIR_DADOS = ./dados
-DIR_BRUTOS = ./dados/brutos
-DIR_INTERMEDIARIOS = ./dados/intermediarios
-DIR_SQLS = ./src/sql
-DIR_PYTHON = ./src/crf_endereco
+DIR_DADOS = ./data
+DIR_SQLS = ./sql
 
 include .env
 export
 
-### Utilitários
+### Pipeline
+
+popular:
+	uv run crf popular $(TIPO) $(BASE) $(DIR_DADOS)/anotado/dataset.sqlite
+
+etiquetar:
+	uv run crf etiquetar lote $(DIR_DADOS)/anotado/dataset.sqlite
+
+treinar:
+	uv run crf treinar
+
+tunar:
+	uv run crf tunar
+
+avaliar: treinar
+	uv run crf avaliar
+
+segmentar:
+	uv run crf segmentar
+
+diferencial:
+	uv run crf diferencial
+
+comparar-geocode:
+	uv run crf comparar-geocode $(BASE)
 
 test:
 	uv run pytest
-
-avaliacao-manual:
-	uv run src/crf_endereco/teste_manual.py
-
-# Preferi não colocar o script de treinamento aqui para não precisar executar toda ver que uma virgula nele mudar. Além de que teria que colocar todas as dependências do projeto aqui para ser justo.
-treinar:
-	uv run $(DIR_PYTHON)/treinamento.py
-
-etiquetar:
-	uv run $(DIR_PYTHON)/etiquetar.py
-
-
-### Dataset final
-
-$(DIR_DADOS)/treino.parquet $(DIR_DADOS)/teste.parquet: $(DIR_SQLS)/dataset_final.sql $(DIR_INTERMEDIARIOS)/cneas.parquet $(DIR_INTERMEDIARIOS)/cno.parquet $(DIR_INTERMEDIARIOS)/cnes.parquet $(DIR_INTERMEDIARIOS)/censo_escolar.parquet $(DIR_INTERMEDIARIOS)/postos_cadunico.parquet $(DIR_INTERMEDIARIOS)/cnefe.parquet $(DIR_INTERMEDIARIOS)/cnpj.parquet
-	duckdb < $<
-
-eval: $(DIR_DADOS)/teste.parquet $(DIR_PYTHON)/eval.py $(DIR_DADOS)/tagger.crf
-	uv run $(DIR_PYTHON)/eval.py
 

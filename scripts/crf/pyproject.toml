@@ -17,10 +17,17 @@ dependencies = [
     "sklearn-crfsuite>=0.5.0",
     "typer>=0.27.2",
     "geocodebr>=0.2.0",
+    "pandas>=2.3.4",
+    "pyarrow>=21.0.0",
+    "tqdm>=4.67.1",
 ]
+
+[project.scripts]
+crf = "crf_endereco.cli:app"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+testpaths = ["tests"]
 
 [tool.uv]
 package = true
