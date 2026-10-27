@@ -24,11 +24,6 @@ name = "padronizar"
 path = "src/bin/padronizar.rs"
 required-features = ["cli"]
 
-[[bin]]
-name = "teste-comparativo"
-path = "src/bin/teste-comparativo.rs"
-required-features = ["polars_cli"]
-
 
 [[bin]]
 name = "padronizacao-lote"
