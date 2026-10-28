@@ -1,7 +1,6 @@
-.PHONY: test popular etiquetar treinar tunar avaliar segmentar diferencial comparar-geocode
+.PHONY: test popular etiquetar treinar tunar avaliar segmentar diferencial geocode instalar
 
 DIR_DADOS = ./data
-DIR_SQLS = ./sql
 
 include .env
 export
@@ -29,9 +28,8 @@ segmentar:
 diferencial:
 	uv run crf diferencial
 
-comparar-geocode:
-	uv run crf comparar-geocode $(BASE)
+geocode:
+	uv run crf geocode comparar $(BASE) --estado $(ESTADO) --municipio $(MUNICIPIO)
 
 test:
 	uv run pytest
-

@@ -88,7 +88,7 @@ def diferencial(
         enderecos, saida_rust, segmentos_python, strict=True
     ):
         try:
-            segmentos_rust = json.loads(bruto)
+            segmentos_rust = json.loads(bruto).get("segmentos", [])
         except json.JSONDecodeError as erro:
             raise typer.BadParameter(
                 f"o segmentador devolveu JSON invalido para {endereco!r}: {erro}"
