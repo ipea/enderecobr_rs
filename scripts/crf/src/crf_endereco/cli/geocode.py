@@ -11,7 +11,7 @@ import typer
 
 from crf_endereco.geocode import comparacao
 from crf_endereco.geocode.comparacao import relatar
-from crf_endereco.segmentador_rust import BINARIO_LOTE, segmentar_lote
+from crf_endereco.segmentador_rust import segmentar_lote
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
@@ -21,6 +21,7 @@ def comparar(
     base: Annotated[
         Path, typer.Argument(help="parquet (ou diretorio/glob) de entrada")
     ],
+    binario: Annotated[Path, typer.Option(help="caminho do binario padronizacao-lote")],
     estado: Annotated[str, typer.Option(help="coluna do estado (UF ou nome)")],
     municipio: Annotated[
         str, typer.Option(help="coluna do municipio (nome ou codigo IBGE)")
@@ -49,15 +50,13 @@ def comparar(
     saida: Annotated[
         Path | None, typer.Option(help="diretorio das saidas (padrao: o da base)")
     ] = None,
-    binario: Annotated[
-        Path, typer.Option(help="caminho do binario padronizacao-lote")
-    ] = BINARIO_LOTE,
     n_cores: Annotated[int, typer.Option(help="cores usados (0 = todos)")] = 0,
     reusar: Annotated[
         bool, typer.Option(help="reaproveita segmentacao e geocodificacoes ja feitas")
     ] = False,
     silencioso: Annotated[
-        bool, typer.Option("--silencioso", help="imprime apenas as tabelas do resultado")
+        bool,
+        typer.Option("--silencioso", help="imprime apenas as tabelas do resultado"),
     ] = False,
 ) -> None:
     """Compara o geocode do endereco bruto com o do endereco segmentado."""

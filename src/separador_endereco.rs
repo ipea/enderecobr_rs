@@ -625,6 +625,9 @@ pub fn segmento_como_endereco(segmentado: &EnderecoSegmentado, padronizar: bool)
             TipoSegmento::Parcela | TipoSegmento::QuilometragemVia | TipoSegmento::Complemento => {
                 Some(res.complemento.get_or_insert_with(String::new))
             }
+            TipoSegmento::Empreendimento if res.localidade.is_none() => {
+                Some(res.localidade.get_or_insert_with(String::new))
+            }
             TipoSegmento::Localidade => Some(res.localidade.get_or_insert_with(String::new)),
             TipoSegmento::Cep => Some(res.cep.get_or_insert_with(String::new)),
             _ => None,
