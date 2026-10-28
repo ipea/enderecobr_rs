@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Annotated
 
@@ -12,15 +12,9 @@ import typer
 from rich.console import Console
 from rich.pretty import pprint
 
-from crf_endereco.anotacao import consultas
-from crf_endereco.anotacao.amostragem import coletar_lote_balanceado
-from crf_endereco.anotacao.filtro_crf import (
-    contar_filtro_crf,
-    prever_tipos_crf,
-    registrar_filtro_crf,
-    validar_tipos_filtro,
-)
+from crf_endereco.anotacao.filtro_crf import prever_tipos, validar_tipos
 from crf_endereco.anotacao.lote import OpcoesLote, _dividir_filtros, executar_lote
+from crf_endereco.anotacao.pendentes import Filtros, pendentes
 from crf_endereco.anotacao.segmentacao import Contexto, segmentar
 from crf_endereco.config import carregar_config
 from crf_endereco.dataset import abrir_banco
@@ -203,11 +197,15 @@ def lote(
     ] = False,
 ) -> None:
     """Processa em lote os endereços pendentes do dataset de etiquetagem."""
-    ufs_filtro = _dividir_filtros(uf)
-    origens_filtro = _dividir_filtros(origem)
-    municipios_filtro = _dividir_filtros(municipio)
-    # Valida os argumentos antes de tocar no ambiente (falha rápida, sem .env).
-    tipos_filtro = validar_tipos_filtro(_dividir_filtros(apenas_tipos), modelo_crf)
+    filtros = Filtros(
+        lote=lote_id,
+        incluir_erros=retentar_erros,
+        ufs=_dividir_filtros(uf) or (),
+        origens=_dividir_filtros(origem) or (),
+        municipios=_dividir_filtros(municipio) or (),
+    )
+    # Valida os argumentos antes de tocar no ambiente (falha rapida, sem .env).
+    tipos = validar_tipos(_dividir_filtros(apenas_tipos), modelo_crf)
     if binario_crf is not None and not binario_crf.is_file():
         raise typer.BadParameter(
             f"Binário do segmentador não encontrado: {binario_crf}"
@@ -216,69 +214,28 @@ def lote(
     config = carregar_config(env)
     console_llm = console if verboso else Console(quiet=True)
 
-    # Valida o ambiente (CNEFE, municipios) uma vez, antes de começar o lote.
+    # Valida o ambiente (CNEFE, municipios) uma vez, antes de comecar o lote.
     Contexto.criar(config, console).fechar()
 
     conn = abrir_banco(banco)
     try:
-        if tipos_filtro:
-            candidatos = consultas.selecionar_pendentes(
-                conn,
-                lote=lote_id,
-                incluir_erros=retentar_erros,
-                ufs=ufs_filtro,
-                origens=origens_filtro,
-                municipios=municipios_filtro,
-            )
+        if tipos:
+            candidatos = pendentes(conn, filtros)
             console.print(
                 f"[dim]Segmentando {len(candidatos)} pendente(s) para filtrar "
-                f"por {', '.join(sorted(tipos_filtro))}...[/dim]"
+                f"por {', '.join(sorted(tipos))}...[/dim]"
             )
-            registrar_filtro_crf(
-                conn,
-                prever_tipos_crf(
-                    candidatos, tipos_filtro, modelo_crf, binario_crf, console
-                ),
+            aprovados = prever_tipos(
+                candidatos, tipos, modelo=modelo_crf, binario=binario_crf
             )
+            filtros = replace(filtros, ids=aprovados)
             console.print(
-                f"[dim]Filtro do CRF: {contar_filtro_crf(conn)} de "
-                f"{len(candidatos)} endereço(s) com ao menos um tipo previsto.[/dim]"
+                f"[dim]Filtro do CRF: {len(aprovados)} de {len(candidatos)} "
+                "endereço(s) com ao menos um tipo previsto.[/dim]"
             )
 
-        if balancear:
-            linhas, alocacao = coletar_lote_balanceado(
-                conn,
-                limite=limite,
-                lote=lote_id,
-                incluir_erros=retentar_erros,
-                ufs=ufs_filtro,
-                origens=origens_filtro,
-                municipios=municipios_filtro,
-                usar_filtro_crf=bool(tipos_filtro),
-            )
-            agrupado: dict[str, list[tuple[str, int]]] = {}
-            for estrato_uf, estrato_origem, quantidade in alocacao:
-                agrupado.setdefault(estrato_uf.chave, []).append(
-                    (estrato_origem.chave, quantidade)
-                )
-            for uf_chave, itens in agrupado.items():
-                total_uf = sum(quantidade for _, quantidade in itens)
-                detalhe = " ".join(
-                    f"{origem or '??'}={quantidade}" for origem, quantidade in itens
-                )
-                cabecalho = f"{uf_chave or '??'}: {total_uf} ({len(itens)} origem(ns))"
-                console.print(f"[dim]{cabecalho} — {detalhe}[/dim]")
-        else:
-            linhas = consultas.selecionar_pendentes(
-                conn,
-                limite=limite,
-                lote=lote_id,
-                incluir_erros=retentar_erros,
-                ufs=ufs_filtro,
-                origens=origens_filtro,
-                municipios=municipios_filtro,
-                usar_filtro_crf=bool(tipos_filtro),
-            )
+        quantidade = limite if balancear else None
+        linhas = pendentes(conn, filtros, quantidade)
         if not linhas:
             console.print("[yellow]Nenhum endereço pendente para processar.[/yellow]")
             return

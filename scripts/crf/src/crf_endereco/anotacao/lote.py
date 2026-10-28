@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 
 from rich.console import Console
 
-from crf_endereco.anotacao.estratificacao import LinhaPendente
+from crf_endereco.anotacao.pendentes import Pendente
 from crf_endereco.anotacao.segmentacao import Contexto, segmentar
 from crf_endereco.config import Config
 from crf_endereco.dataset import (
@@ -60,8 +60,8 @@ class FabricaContextos:
 
 
 def processar_linha(
-    fabrica: FabricaContextos, linha: LinhaPendente, opcoes: OpcoesLote
-) -> tuple[LinhaPendente, str, bool]:
+    fabrica: FabricaContextos, linha: Pendente, opcoes: OpcoesLote
+) -> tuple[Pendente, str, bool]:
     """Segmenta uma linha; falha de segmentação vira `{"erro": ...}`.
 
     A criação do contexto fica fora do `try`: um erro de ambiente (ex.: CNEFE
@@ -94,7 +94,7 @@ class ResumoLote:
 def executar_lote(
     conn: sqlite3.Connection,
     config: Config,
-    linhas: list[LinhaPendente],
+    linhas: list[Pendente],
     opcoes: OpcoesLote,
     *,
     console_llm: Console,
