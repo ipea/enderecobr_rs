@@ -10,10 +10,14 @@ import duckdb
 import typer
 
 from crf_endereco.geocode import comparacao
+from crf_endereco.geocode.comparacao import relatar
 from crf_endereco.segmentador_rust import BINARIO_LOTE, segmentar_lote
 
+app = typer.Typer(no_args_is_help=True, add_completion=False)
 
-def comparar_geocode(
+
+@app.command(name="comparar")
+def comparar(
     base: Annotated[
         Path, typer.Argument(help="parquet (ou diretorio/glob) de entrada")
     ],
@@ -53,6 +57,7 @@ def comparar_geocode(
         bool, typer.Option(help="reaproveita segmentacao e geocodificacoes ja feitas")
     ] = False,
 ) -> None:
+    """Compara o geocode do endereco bruto com o do endereco segmentado."""
     if not base.exists():
         raise typer.BadParameter(f"base nao encontrada: {base}")
     entrada = comparacao.resolver_entrada(base)
@@ -119,33 +124,6 @@ def comparar_geocode(
         comparacao.registrar_visoes(
             con, estagio, segmentado, destinos["bruto"], destinos["processado"]
         )
-        comparacao.imprime(
-            "Extracao de campos pelo segmentador",
-            comparacao.comparar_segmentacao(con, campos),
-        )
-        comparacao.imprime("Cobertura", comparacao.comparar_cobertura(con))
-        comparacao.imprime(
-            "Frequencia de precisao (% dentro de cada versao)",
-            comparacao.comparar_precisao(con),
-        )
-        comparacao.imprime(
-            "Desvio (metros) no total", comparacao.comparar_desvio_total(con)
-        )
-        comparacao.imprime(
-            "Desvio (metros) por precisao e versao", comparacao.comparar_desvio(con)
-        )
-        comparacao.imprime("Pareamento dos registros", comparacao.comparar_pareado(con))
-        comparacao.imprime(
-            "Mudanca de precisao (n de registros)",
-            comparacao.comparar_mudanca_precisao(con),
-        )
-        comparacao.imprime(
-            "Desvio (metros) nos mesmos registros",
-            comparacao.comparar_delta_desvio(con),
-        )
-        comparacao.imprime(
-            "Deslocamento (metros) entre as coordenadas bruto e processado",
-            comparacao.comparar_deslocamento(con),
-        )
+        relatar(con, campos)
     finally:
         temporaria.cleanup()

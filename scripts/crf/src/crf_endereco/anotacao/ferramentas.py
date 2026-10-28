@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Mapping
 from typing import Any
 
 import duckdb
@@ -11,7 +12,6 @@ import requests
 
 from crf_endereco.anotacao.cliente_http import USER_AGENT, ClienteHTTP
 from crf_endereco.anotacao.ontologia import TIPOS_SEGMENTO
-from crf_endereco.anotacao.resposta import ToolCall
 from crf_endereco.config import Config
 
 
@@ -118,16 +118,16 @@ class Ferramentas:
     def fechar(self) -> None:
         self.conn.close()
 
-    def despachar(self, chamada: ToolCall) -> str:
-        match chamada.nome:
+    def despachar(self, nome: str, argumentos: Mapping[str, Any]) -> str:
+        match nome:
             case "search":
-                return self.buscar_web(chamada.argumentos.get("query", ""))
+                return self.buscar_web(str(argumentos.get("query", "")))
             case "sql_query":
-                return self.consultar_sql(chamada.argumentos.get("sql", ""))
+                return self.consultar_sql(str(argumentos.get("sql", "")))
             case "fetch_url":
-                return self.buscar_url(chamada.argumentos.get("url", ""))
+                return self.buscar_url(str(argumentos.get("url", "")))
             case _:
-                return f"Requested tool {chamada.nome} does not exist"
+                return f"Requested tool {nome} does not exist"
 
     def buscar_web(self, query: str) -> str:
         if not self.config.searx_url:

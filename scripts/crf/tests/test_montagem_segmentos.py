@@ -1,5 +1,5 @@
 from crf_endereco.features import tokenize_com_offsets
-from crf_endereco.modelos.inferencia import montar_segmentos
+from crf_endereco.modelo.crf import montar_segmentos
 
 
 def segmentar_tokens(frase: str, tags: list[str]) -> list[dict[str, str]]:

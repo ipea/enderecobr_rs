@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
@@ -285,7 +285,7 @@ def imprime(titulo: str, df: pd.DataFrame) -> None:
     print(df.to_string(index=False, float_format="{:,.2f}".format))
 
 
-def comparar_segmentacao(
+def _segmentacao(
     con: duckdb.DuckDBPyConnection, campos: dict[str, str | None]
 ) -> pd.DataFrame:
     mapa = pd.DataFrame(
@@ -300,7 +300,7 @@ def comparar_segmentacao(
     return df
 
 
-def comparar_cobertura(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+def _cobertura(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.sql(
         """
         select versao,
@@ -317,7 +317,7 @@ def comparar_cobertura(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     ).df()
 
 
-def comparar_precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+def _precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     df = con.sql(
         """
         select versao, coalesce(precisao, '(sem resultado)') as precisao,
@@ -332,7 +332,7 @@ def comparar_precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return tabela.round(2).reset_index()
 
 
-def comparar_desvio_total(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+def _desvio_total(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.sql(
         """
         select versao,
@@ -353,7 +353,7 @@ def comparar_desvio_total(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     ).df()
 
 
-def comparar_desvio(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+def _desvio_por_precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.sql(
         """
         select versao,
@@ -372,7 +372,7 @@ def comparar_desvio(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     ).df()
 
 
-def comparar_pareado(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+def _pareado(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.sql(
         """
         select count(*) as pares,
@@ -391,7 +391,7 @@ def comparar_pareado(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     ).df()
 
 
-def comparar_mudanca_precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+def _mudanca_precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     df = con.sql(
         """
         select coalesce(precisao_bruto, '(sem)') as precisao_bruto,
@@ -405,7 +405,7 @@ def comparar_mudanca_precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return tabela.fillna(0).astype(int).reset_index()
 
 
-def comparar_delta_desvio(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+def _delta_desvio(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     grupos = con.sql(
         """
         select case when precisao_bruto = precisao_proc
@@ -439,5 +439,30 @@ def comparar_delta_desvio(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return pd.concat([todos, grupos], ignore_index=True)
 
 
-def comparar_deslocamento(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+def _deslocamento(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.sql(SQL_DESLOCAMENTO).df()
+
+
+# Um relatorio por linha: (titulo impresso, funcao que devolve a tabela).
+RELATORIOS: tuple[
+    tuple[str, Callable[[duckdb.DuckDBPyConnection], pd.DataFrame]], ...
+] = (
+    ("Cobertura", _cobertura),
+    ("Frequencia de precisao (% dentro de cada versao)", _precisao),
+    ("Desvio (metros) no total", _desvio_total),
+    ("Desvio (metros) por precisao e versao", _desvio_por_precisao),
+    ("Pareamento dos registros", _pareado),
+    ("Mudanca de precisao (n de registros)", _mudanca_precisao),
+    ("Desvio (metros) nos mesmos registros", _delta_desvio),
+    (
+        "Deslocamento (metros) entre as coordenadas bruto e processado",
+        _deslocamento,
+    ),
+)
+
+
+def relatar(con: duckdb.DuckDBPyConnection, campos: dict[str, str | None]) -> None:
+    """Imprime todos os relatorios da comparacao."""
+    imprime("Extracao de campos pelo segmentador", _segmentacao(con, campos))
+    for titulo, gerar in RELATORIOS:
+        imprime(titulo, gerar(con))
