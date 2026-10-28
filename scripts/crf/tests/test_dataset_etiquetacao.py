@@ -3,8 +3,8 @@ import random
 import pytest
 
 from crf_endereco.anotacao.populacao import (
-    POPULADORES,
-    PopuladorCadUnico,
+    FONTE_CADUNICO,
+    FONTES,
     formatar_cep,
     montar_endereco_cadunico,
     normalizar_localidade,
@@ -114,4 +114,4 @@ def test_montar_endereco_cadunico_omite_campos_vazios() -> None:
 
 
 def test_cadunico_registrado() -> None:
-    assert POPULADORES.get("cadunico") is PopuladorCadUnico
+    assert FONTES.get("cadunico") is FONTE_CADUNICO

@@ -7,15 +7,9 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from rich.console import Console
 
-from crf_endereco.anotacao.populacao import carregar_populador
+from crf_endereco.anotacao.populacao import carregar_fonte
 from crf_endereco.anotacao.populacao.amostragem import amostrar_diverso
-from crf_endereco.anotacao.populacao.populador import (
-    FiltroDiversidade,
-    FiltroDiversidadeFuzzy,
-    SemFiltroDiversidade,
-)
 from crf_endereco.dataset import (
     contar_registros,
     criar_banco,
@@ -23,13 +17,12 @@ from crf_endereco.dataset import (
     ler_enderecos_existentes,
     montar_lote,
 )
-
-console = Console()
+from crf_endereco.ui import console
 
 
 def popular(
     tipo_dataset: Annotated[
-        str, typer.Argument(help="Chave do populador (ex.: imoveis_uniao).")
+        str, typer.Argument(help="Chave da base (ex.: imoveis_uniao).")
     ],
     arquivo: Annotated[Path, typer.Argument(help="Arquivo de origem.")],
     destino: Annotated[
@@ -60,46 +53,37 @@ def popular(
     if not arquivo.exists():
         raise typer.BadParameter(f"Origem não encontrada: {arquivo}")
 
-    populador = carregar_populador(tipo_dataset, arquivo, aba)
+    fonte = carregar_fonte(tipo_dataset)
     lote = montar_lote(tipo_dataset)
 
     destino.parent.mkdir(parents=True, exist_ok=True)
     conn_destino = sqlite3.connect(str(destino))
     try:
         criar_banco(conn_destino)
-
         existentes = (
             ler_enderecos_existentes(conn_destino)
             if similaridade_maxima is not None
             else []
         )
-
-        def criar_filtro() -> FiltroDiversidade:
-            if similaridade_maxima is None:
-                return SemFiltroDiversidade()
-            return FiltroDiversidadeFuzzy(
-                existentes, similaridade_maxima=similaridade_maxima
-            )
-
         if similaridade_maxima is not None:
             console.print(
                 f"[dim]Filtro fuzzy comparando com {len(existentes)} "
                 "endereços já no banco.[/dim]"
             )
         console.print(
-            f"[bold]{populador.rotulo}[/bold] — lendo a origem e "
+            f"[bold]{fonte.rotulo}[/bold] — lendo a origem e "
             f"amostrando até {tamanho_amostra} endereços…"
         )
 
         resultado = amostrar_diverso(
-            populador,
-            criar_filtro,
+            fonte,
+            arquivo,
             tamanho=tamanho_amostra,
             seed=seed,
-            # Sem filtro não há descarte: o pool já é o tamanho final.
-            fator_inicial=1 if similaridade_maxima is None else 3,
+            similaridade_maxima=similaridade_maxima,
+            existentes=existentes,
+            aba=aba,
         )
-
         escrita = gravar_registros(conn_destino, resultado.amostra, lote)
         total = contar_registros(conn_destino)
     finally:

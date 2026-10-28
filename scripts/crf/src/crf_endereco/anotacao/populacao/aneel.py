@@ -1,99 +1,65 @@
-"""Populador das unidades consumidoras da ANEEL."""
+"""Base: unidades consumidoras PJ da ANEEL (BDGD)."""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import ClassVar
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
-import duckdb
+from crf_endereco.anotacao.populacao.populador import Fonte, parametros_municipios
+from crf_endereco.registro import Registro, montar_extras, registro, texto
 
-from crf_endereco.anotacao.populacao.populador import Populador, municipios_csv
-from crf_endereco.registro import Registro, montar_extras, texto
+TIPO = "aneel_uc_pj"
+ROTULO = "ANEEL (Unidades Consumidoras PJ — BDGD)"
+
+# O endereco ja vem bruto em `LGRD` (logradouro + numero + complemento); bairro,
+# CEP, municipio/UF (resolvidos do codigo IBGE `MUN`), CNAE e situacao entram
+# so nas extras.
+CONSULTA = """
+    SELECT a.COD_ID_ENCR, a.PN_CON, a.LGRD, a.BRR, a.CEP, a.MUN,
+           m.municipio, m.uf, a.CNAE, a.SIT_ATIV, a.POINT_X, a.POINT_Y
+    FROM read_parquet(?) a
+    LEFT JOIN read_csv(?, header = true) m
+           ON try_cast(m.cod_ibge AS BIGINT) = a.MUN
+    WHERE a.LGRD IS NOT NULL AND trim(a.LGRD) <> ''
+"""
 
 
-class PopuladorAneel(Populador):
-    """Unidades Consumidoras PJ da ANEEL (BDGD): endereço concatenado + geo.
+def registrar(linha: Sequence[Any], arquivo: Path, _aba: str | None) -> Registro:
+    cod_id, pn_con, lgrd, brr, cep, mun, municipio, uf, cnae, situacao, x, y = linha
+    return registro(
+        endereco=lgrd,
+        extras=montar_extras(
+            texto(municipio),
+            texto(uf),
+            texto(brr),
+            banco=ROTULO,
+            extras_adicionais=[
+                ("CEP", texto(cep)),
+                ("CNAE", texto(cnae)),
+                ("Situação", texto(situacao)),
+            ],
+        ),
+        meta={
+            "latitude": y,
+            "longitude": x,
+            "cod_ibge": mun,
+            "cep": texto(cep) or None,
+            "cnae": texto(cnae) or None,
+            "situacao": texto(situacao) or None,
+            "arquivo": str(arquivo),
+        },
+        origem=TIPO,
+        origem_id=texto(cod_id) or texto(pn_con),
+        municipio=municipio,
+        uf=uf,
+    )
 
-    A origem é o parquet consolidado da ANEEL (`aneel.py` gera
-    `aneel_uc_pj.parquet`, ou um por classe: UCAT/UCMT/UCBT PJ). O endereço já
-    vem bruto em `LGRD` (logradouro + número + complemento) e é mantido como
-    veio; bairro, CEP, município/UF (resolvidos do código IBGE `MUN` via
-    `municipios.csv`), CNAE e situação entram em `extras`, sem popular
-    segmentos.
-    """
 
-    tipo = "aneel_uc_pj"
-    rotulo = "ANEEL (Unidades Consumidoras PJ — BDGD)"
-    TAM_LOTE: ClassVar[int] = 20_000
-
-    CONSULTA: ClassVar[str] = """
-        SELECT a.COD_ID_ENCR, a.PN_CON, a.LGRD, a.BRR, a.CEP, a.MUN,
-               m.municipio, m.uf, a.CNAE, a.SIT_ATIV,
-               a.POINT_X, a.POINT_Y
-        FROM read_parquet(?) a
-        LEFT JOIN read_csv(?, header = true) m
-               ON try_cast(m.cod_ibge AS BIGINT) = a.MUN
-        WHERE a.LGRD IS NOT NULL AND trim(a.LGRD) <> ''
-    """
-
-    def popular(
-        self,
-        conn: duckdb.DuckDBPyConnection,
-    ) -> Iterator[Registro]:
-        municipios = municipios_csv()
-        if municipios is None:
-            raise RuntimeError(
-                "municipios.csv (cod_ibge, municipio, uf) não encontrado para "
-                "resolver o código IBGE da ANEEL"
-            )
-        resultado = conn.execute(self.CONSULTA, [str(self.arquivo), str(municipios)])
-
-        while True:
-            linhas = resultado.fetchmany(self.TAM_LOTE)
-            if not linhas:
-                break
-            for linha in linhas:
-                (
-                    cod_id,
-                    pn_con,
-                    lgrd,
-                    brr,
-                    cep,
-                    mun,
-                    municipio,
-                    uf,
-                    cnae,
-                    situacao,
-                    point_x,
-                    point_y,
-                ) = linha
-                cep = texto(cep)
-                cnae = texto(cnae)
-                situacao = texto(situacao)
-                yield Registro(
-                    endereco=texto(lgrd),
-                    extras=montar_extras(
-                        texto(municipio),
-                        texto(uf),
-                        texto(brr),
-                        banco="ANEEL (Unidades Consumidoras PJ)",
-                        extras_adicionais=[
-                            ("CEP", cep),
-                            ("CNAE", cnae),
-                            ("Situação", situacao),
-                        ],
-                    ),
-                    meta={
-                        "latitude": point_y,
-                        "longitude": point_x,
-                        "cod_ibge": mun,
-                        "cep": cep or None,
-                        "cnae": cnae or None,
-                        "situacao": situacao or None,
-                        "arquivo": str(self.arquivo),
-                    },
-                    origem=self.tipo,
-                    origem_id=texto(cod_id) or texto(pn_con) or None,
-                    municipio=texto(municipio),
-                    uf=texto(uf),
-                )
+FONTE = Fonte(
+    tipo=TIPO,
+    rotulo=ROTULO,
+    consulta=CONSULTA,
+    registrar=registrar,
+    parametros=parametros_municipios,
+)
