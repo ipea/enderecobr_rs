@@ -8,7 +8,7 @@ from crf_endereco.anotacao.consultas import (
     listar_ufs_pendentes,
 )
 from crf_endereco.anotacao.estratificacao import EstratoPendente, alocar
-from crf_endereco.anotacao.persistencia import criar_banco
+from crf_endereco.dataset import criar_banco
 
 
 def estrato(chave: str, anotados: int, pendentes: int) -> EstratoPendente:

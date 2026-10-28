@@ -50,6 +50,7 @@ TIPOS_SEGMENTO_CRF = frozenset(
 # de saída JSON por endereço).
 TAMANHO_BLOCO_CRF = 5_000
 
+
 def garantir_tabela_filtro(conn: sqlite3.Connection) -> None:
     """Cria a tabela temporária `_filtro_crf` usada pelas consultas de lote.
 
@@ -59,6 +60,7 @@ def garantir_tabela_filtro(conn: sqlite3.Connection) -> None:
     _ = conn.execute(
         "CREATE TEMP TABLE IF NOT EXISTS _filtro_crf (id INTEGER PRIMARY KEY)"
     )
+
 
 def registrar_filtro_crf(conn: sqlite3.Connection, ids: Iterable[int]) -> None:
     """Grava em `_filtro_crf` os ids que passaram pelo filtro do modelo."""
@@ -70,11 +72,13 @@ def registrar_filtro_crf(conn: sqlite3.Connection, ids: Iterable[int]) -> None:
     )
     conn.commit()
 
+
 def contar_filtro_crf(conn: sqlite3.Connection) -> int:
     """Quantos ids passaram pelo filtro do modelo na conexão."""
     garantir_tabela_filtro(conn)
     linha = conn.execute("SELECT count(*) FROM _filtro_crf").fetchone()
     return cast(int, linha[0]) if linha is not None else 0
+
 
 def validar_tipos_filtro(
     valores: list[str] | None, modelo: Path | None
@@ -105,6 +109,7 @@ def validar_tipos_filtro(
         )
     return tipos
 
+
 def filtrar_ids_por_tipos(
     saida: Sequence[str], ids: Sequence[int], tipos: frozenset[str]
 ) -> set[int]:
@@ -124,6 +129,7 @@ def filtrar_ids_por_tipos(
                 selecionados.add(identificador)
                 break
     return selecionados
+
 
 def prever_tipos_crf(
     linhas: Sequence[LinhaPendente],
@@ -158,5 +164,3 @@ def prever_tipos_crf(
             )
             progresso.advance(tarefa, len(bloco))
     return selecionados
-
-

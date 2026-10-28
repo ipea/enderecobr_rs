@@ -93,7 +93,9 @@ def segmentar_lote(
     if n_cores > 0:
         ambiente["POLARS_MAX_THREADS"] = str(n_cores)
         ambiente["RAYON_NUM_THREADS"] = str(n_cores)
-    resultado = subprocess.run(comando, env=ambiente, capture_output=True, text=True)
+    resultado = subprocess.run(
+        comando, check=False, env=ambiente, capture_output=True, text=True
+    )
     if resultado.returncode != 0:
         raise typer.BadParameter(
             f"falha ao segmentar ({resultado.returncode}):\n{resultado.stderr.strip()}"

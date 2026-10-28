@@ -7,13 +7,8 @@ from typing import ClassVar
 
 import duckdb
 
-from crf_endereco.anotacao.populacao.populador import (
-    Populador,
-    RegistroEtiquetacao,
-    _municipios_csv_padrao,
-    limpar_texto,
-    montar_extras,
-)
+from crf_endereco.anotacao.populacao.populador import Populador, municipios_csv
+from crf_endereco.registro import Registro, montar_extras, texto
 
 
 class PopuladorAneel(Populador):
@@ -44,16 +39,14 @@ class PopuladorAneel(Populador):
     def popular(
         self,
         conn: duckdb.DuckDBPyConnection,
-    ) -> Iterator[RegistroEtiquetacao]:
-        municipios = _municipios_csv_padrao()
+    ) -> Iterator[Registro]:
+        municipios = municipios_csv()
         if municipios is None:
             raise RuntimeError(
                 "municipios.csv (cod_ibge, municipio, uf) não encontrado para "
                 "resolver o código IBGE da ANEEL"
             )
-        resultado = conn.execute(
-            self.CONSULTA, [str(self.arquivo), str(municipios)]
-        )
+        resultado = conn.execute(self.CONSULTA, [str(self.arquivo), str(municipios)])
 
         while True:
             linhas = resultado.fetchmany(self.TAM_LOTE)
@@ -74,15 +67,15 @@ class PopuladorAneel(Populador):
                     point_x,
                     point_y,
                 ) = linha
-                cep = limpar_texto(cep)
-                cnae = limpar_texto(cnae)
-                situacao = limpar_texto(situacao)
-                yield RegistroEtiquetacao(
-                    endereco=limpar_texto(lgrd),
+                cep = texto(cep)
+                cnae = texto(cnae)
+                situacao = texto(situacao)
+                yield Registro(
+                    endereco=texto(lgrd),
                     extras=montar_extras(
-                        limpar_texto(municipio),
-                        limpar_texto(uf),
-                        limpar_texto(brr),
+                        texto(municipio),
+                        texto(uf),
+                        texto(brr),
                         banco="ANEEL (Unidades Consumidoras PJ)",
                         extras_adicionais=[
                             ("CEP", cep),
@@ -100,9 +93,7 @@ class PopuladorAneel(Populador):
                         "arquivo": str(self.arquivo),
                     },
                     origem=self.tipo,
-                    origem_id=limpar_texto(cod_id)
-                    or limpar_texto(pn_con)
-                    or None,
-                    municipio=limpar_texto(municipio),
-                    uf=limpar_texto(uf),
+                    origem_id=texto(cod_id) or texto(pn_con) or None,
+                    municipio=texto(municipio),
+                    uf=texto(uf),
                 )

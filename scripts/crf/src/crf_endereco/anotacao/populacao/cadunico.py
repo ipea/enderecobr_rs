@@ -10,19 +10,14 @@ import duckdb
 
 from crf_endereco.anotacao.populacao.populador import (
     Populador,
-    RegistroEtiquetacao,
-    _limpar_cep,
-    _municipios_csv_padrao,
-    _rnd_registro,
-    limpar_texto,
-    montar_extras,
+    municipios_csv,
+    rng_registro,
 )
+from crf_endereco.registro import Registro, cep, montar_extras, numero, texto
 
 # Sufixos de `no_unidade_territorial_fam` que apenas repetem/rotulam o bairro,
 # sem acrescentar submidade útil.
-SUFIXOS_UNIDADE_TERRITORIAL_RUIDO: frozenset[str] = frozenset(
-    {"OUTROS", "AREA NORMAL"}
-)
+SUFIXOS_UNIDADE_TERRITORIAL_RUIDO: frozenset[str] = frozenset({"OUTROS", "AREA NORMAL"})
 
 # Descritor da base no campo `extras` (vai no prompt da LLM). O vínculo real
 # com a origem fica só na coluna interna `origem`.
@@ -46,6 +41,7 @@ ARRANJOS_CADUNICO: tuple[tuple[str, float], ...] = (
 
 SEPARADORES_CADUNICO: tuple[str, ...] = (", ", " ")
 
+
 def normalizar_numero(valor: Any) -> str:
     """Número do logradouro sem os zeros à esquerda.
 
@@ -53,13 +49,14 @@ def normalizar_numero(valor: Any) -> str:
     `000…0` ou vazio) devolve ''. Valores não numéricos (ex.: `S/N`) ficam
     como vieram.
     """
-    texto = limpar_texto(valor)
-    return texto.lstrip("0") if texto.isdigit() else texto
+    return numero(valor)
+
 
 def formatar_cep(valor: Any) -> str:
     """CEP com hífen ('21061-300') a partir dos 8 dígitos do cadastro."""
-    digitos = "".join(ch for ch in _limpar_cep(valor) if ch.isdigit())
+    digitos = "".join(ch for ch in cep(valor) if ch.isdigit())
     return f"{digitos[:5]}-{digitos[5:]}" if len(digitos) == 8 else digitos
+
 
 def normalizar_localidade(localidade: Any, unidade_territorial: Any) -> str:
     """Melhor localidade do cadastro: o bairro enriquecido pela submidade.
@@ -71,8 +68,8 @@ def normalizar_localidade(localidade: Any, unidade_territorial: Any) -> str:
     quando ele ESTENDE o bairro (`no_localidade_fam`); sufixo vazio, de ruído
     ('OUTROS', 'AREA NORMAL') ou o bairro repetido caem para o bairro puro.
     """
-    loc = limpar_texto(localidade).upper()
-    ut = limpar_texto(unidade_territorial).upper()
+    loc = texto(localidade).upper()
+    ut = texto(unidade_territorial).upper()
     if not loc:
         return ut
     if not ut or ut == loc:
@@ -83,6 +80,7 @@ def normalizar_localidade(localidade: Any, unidade_territorial: Any) -> str:
             return loc
         return ut
     return loc
+
 
 def montar_endereco_cadunico(campos: dict[str, str], rnd: random.Random) -> str:
     """Junta os campos segmentados do CadÚnico numa linha bruta.
@@ -97,6 +95,7 @@ def montar_endereco_cadunico(campos: dict[str, str], rnd: random.Random) -> str:
     separador = rnd.choice(SEPARADORES_CADUNICO)
     valores = [campos[campo] for campo in formato if campos.get(campo)]
     return separador.join(valores)
+
 
 class PopuladorCadUnico(Populador):
     """CadÚnico (MDS): endereço por família, já segmentado em campos.
@@ -145,16 +144,14 @@ class PopuladorCadUnico(Populador):
     def popular(
         self,
         conn: duckdb.DuckDBPyConnection,
-    ) -> Iterator[RegistroEtiquetacao]:
-        municipios = _municipios_csv_padrao()
+    ) -> Iterator[Registro]:
+        municipios = municipios_csv()
         if municipios is None:
             raise RuntimeError(
                 "municipios.csv (cod_ibge, municipio, uf) não encontrado para "
                 "resolver o código IBGE do CadÚnico"
             )
-        resultado = conn.execute(
-            self.CONSULTA, [str(self.arquivo), str(municipios)]
-        )
+        resultado = conn.execute(self.CONSULTA, [str(self.arquivo), str(municipios)])
 
         while True:
             linhas = resultado.fetchmany(self.TAM_LOTE)
@@ -179,28 +176,28 @@ class PopuladorCadUnico(Populador):
                 logradouro = " ".join(
                     parte
                     for parte in (
-                        limpar_texto(tip_logradouro),
-                        limpar_texto(tit_logradouro),
-                        limpar_texto(nome_logradouro),
+                        texto(tip_logradouro),
+                        texto(tit_logradouro),
+                        texto(nome_logradouro),
                     )
                     if parte
                 )
                 localidade = normalizar_localidade(localidade, unidade_territorial)
                 cep = formatar_cep(cep)
-                municipio = limpar_texto(municipio)
-                uf = limpar_texto(uf)
+                municipio = texto(municipio)
+                uf = texto(uf)
                 campos = {
                     "logradouro": logradouro,
                     "numero": normalizar_numero(numero),
-                    "complemento": limpar_texto(complemento),
-                    "complemento_adic": limpar_texto(complemento_adic),
-                    "referencia": limpar_texto(referencia),
+                    "complemento": texto(complemento),
+                    "complemento_adic": texto(complemento_adic),
+                    "referencia": texto(referencia),
                     "localidade": localidade,
                 }
                 # Semente pelo próprio endereço: sem identificador de família
                 # (privacidade) e garante a mesma junção para endereço igual.
-                rnd = _rnd_registro("|".join(v for v in campos.values() if v))
-                yield RegistroEtiquetacao(
+                rnd = rng_registro("|".join(v for v in campos.values() if v))
+                yield Registro(
                     endereco=montar_endereco_cadunico(campos, rnd),
                     extras=montar_extras(
                         municipio,
@@ -213,9 +210,7 @@ class PopuladorCadUnico(Populador):
                         "cod_ibge": cod_ibge,
                         "cep": cep or None,
                         "localidade": localidade or None,
-                        "unidade_territorial": (
-                            limpar_texto(unidade_territorial) or None
-                        ),
+                        "unidade_territorial": (texto(unidade_territorial) or None),
                         "arquivo": str(self.arquivo),
                     },
                     origem=self.tipo,

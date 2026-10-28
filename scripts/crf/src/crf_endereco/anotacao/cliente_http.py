@@ -11,6 +11,7 @@ USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0"
 )
 
+
 def _pode_retentar(status: int) -> bool:
     """Indica se o status HTTP merece nova tentativa.
 
@@ -18,6 +19,7 @@ def _pode_retentar(status: int) -> bool:
     o conteúdo (payload/schema), então repetir só gasta tempo.
     """
     return status == 429 or status >= 500
+
 
 class ErroHTTP(RuntimeError):
     """Resposta de erro do servidor, com o corpo incluído para diagnóstico.
@@ -36,6 +38,7 @@ class ErroHTTP(RuntimeError):
         super().__init__(
             f"{metodo} {url} → HTTP {status}: {recorte or '<corpo vazio>'}"
         )
+
 
 class ClienteHTTP:
     """Cliente HTTP com retry para erros transientes.

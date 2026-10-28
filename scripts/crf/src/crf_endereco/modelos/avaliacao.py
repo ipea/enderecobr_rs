@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import random
-import sqlite3
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from pathlib import Path
 from pprint import pprint
 
 import sklearn_crfsuite
 from sklearn_crfsuite import metrics
 
-from crf_endereco.config import CAMINHO_DATASET, CAMINHO_TAGGER
+from crf_endereco.config import CAMINHO_TAGGER
 
 
 def erros_mais_comuns_feature(x, y_true, y_pred, n=20):
@@ -21,6 +21,7 @@ def erros_mais_comuns_feature(x, y_true, y_pred, n=20):
             if t != p:
                 errors[(str(feats[i]), f"true={t}", f"pred={p}")] += 1
     return errors.most_common(n)
+
 
 def erros_mais_comuns_token(x, y_true, y_pred, n=20):
     errors = Counter()
@@ -32,7 +33,8 @@ def erros_mais_comuns_token(x, y_true, y_pred, n=20):
                     errors[(str(token_atual[0]), f"true={t}", f"pred={p}")] += 1
     return errors.most_common(n)
 
-def amostra_erros(tokens, y_true, y_pred, n=10, classes: list[str] = []):
+
+def amostra_erros(tokens, y_true, y_pred, n=10, classes: Sequence[str] = ()):
     erros = []
     for toks, true, pred in zip(tokens, y_true, y_pred):
         for t, p in zip(true, pred):
@@ -42,6 +44,7 @@ def amostra_erros(tokens, y_true, y_pred, n=10, classes: list[str] = []):
 
     random.shuffle(erros)
     return erros[:n]
+
 
 def acuracia_labels(y_true, y_pred, labels):
     n = 0
@@ -56,6 +59,7 @@ def acuracia_labels(y_true, y_pred, labels):
 
     return acertos, n
 
+
 def acuracia_proporcional(y_true, y_pred):
     proporcoes = []
     for true, pred in zip(y_true, y_pred):
@@ -67,6 +71,7 @@ def acuracia_proporcional(y_true, y_pred):
         proporcoes.append(prop_sent)
 
     return sum(proporcoes) / len(proporcoes)
+
 
 def erros_mais_comuns_por_categoria(x, y_true, y_pred, categorias, n=20):
     errors = Counter()
@@ -82,9 +87,10 @@ def erros_mais_comuns_por_categoria(x, y_true, y_pred, categorias, n=20):
 
     return errors.most_common(n)
 
+
 def acuracia_completa_por_categoria(y_true, y_pred, categorias):
     for categoria_pos in range(len(categorias[0])):
-        cat_dict = defaultdict(lambda: (list(), list()))
+        cat_dict = defaultdict(lambda: ([], []))
 
         for y_t, y_p, cs in zip(y_true, y_pred, categorias):
             categoria = cs[categoria_pos]
@@ -106,6 +112,7 @@ def acuracia_completa_por_categoria(y_true, y_pred, categorias):
             print(f"{cat:<15} | {100.0 * acc_total:.2f} | {100.0 * acc_prop:.2f}")
         print()
 
+
 def show(sent: list[str], y_true: list[str], y_pred: list[str]):
     if len(sent) == 0:
         return
@@ -116,6 +123,7 @@ def show(sent: list[str], y_true: list[str], y_pred: list[str]):
     for s, t, p in zip(sent, y_true, y_pred):
         print(f"{s:<{max_len}} {t:<10} {p:<10}")
     print("################################")
+
 
 def avaliar(
     x: list[list[dict[str, float]]],
@@ -184,15 +192,3 @@ def avaliar(
         print(f"Amostra de Erros de {classes!s}")
         for a in amostra:
             show(*a)
-
-def consulta_duckdb(
-    query: str, dataset: Path = CAMINHO_DATASET, batch_size: int = 1000
-):
-    con = sqlite3.connect(str(dataset))
-    consulta = con.execute(query)
-
-    while batch := consulta.fetchmany(batch_size):
-        for b in batch:
-            yield b
-
-    con.close()

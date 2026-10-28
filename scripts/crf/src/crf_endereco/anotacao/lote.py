@@ -2,30 +2,22 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
-from typing import cast
+from dataclasses import asdict, dataclass
 
 from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    TextColumn,
-    TimeElapsedColumn,
-)
 
-from crf_endereco.anotacao.config import Config
 from crf_endereco.anotacao.estratificacao import LinhaPendente
-from crf_endereco.anotacao.persistencia import (
+from crf_endereco.anotacao.segmentacao import Contexto, segmentar
+from crf_endereco.config import Config
+from crf_endereco.dataset import (
     gravar_resposta,
     serializar_erro,
     serializar_sucesso,
 )
-from crf_endereco.anotacao.segmentacao import Contexto, segmentar
+from crf_endereco.ui import progresso
 
 
 @dataclass(frozen=True)
@@ -35,6 +27,7 @@ class OpcoesLote:
     iteracoes: int
     tolerancia_erro: int
     concorrencia: int
+
 
 class FabricaContextos:
     """Cria um `Contexto` por thread de trabalho.
@@ -65,9 +58,10 @@ class FabricaContextos:
         for contexto in criados:
             contexto.fechar()
 
+
 def processar_linha(
     fabrica: FabricaContextos, linha: LinhaPendente, opcoes: OpcoesLote
-) -> tuple[LinhaPendente, str]:
+) -> tuple[LinhaPendente, str, bool]:
     """Segmenta uma linha; falha de segmentação vira `{"erro": ...}`.
 
     A criação do contexto fica fora do `try`: um erro de ambiente (ex.: CNEFE
@@ -83,8 +77,10 @@ def processar_linha(
             tolerancia_erro=opcoes.tolerancia_erro,
         )
     except Exception as e:  # noqa: BLE001 — a falha é o resultado da linha
-        return linha, serializar_erro(f"{type(e).__name__}: {e}")
-    return linha, serializar_sucesso(resultado)
+        return linha, serializar_erro(f"{type(e).__name__}: {e}"), False
+    segmentos = [asdict(segmento) for segmento in resultado.segmentos]
+    return linha, serializar_sucesso(segmentos, resultado.comentario), True
+
 
 @dataclass
 class ResumoLote:
@@ -93,6 +89,7 @@ class ResumoLote:
     total: int = 0
     sucesso: int = 0
     erro: int = 0
+
 
 def executar_lote(
     conn: sqlite3.Connection,
@@ -110,35 +107,27 @@ def executar_lote(
     fabrica = FabricaContextos(config, console_llm)
     resumo = ResumoLote(total=len(linhas))
 
-    progresso = Progress(
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        MofNCompleteColumn(),
-        TimeElapsedColumn(),
-        console=Console(stderr=True),
-    )
-
     pool = ThreadPoolExecutor(max_workers=opcoes.concorrencia)
     try:
-        with progresso:
-            tarefa = progresso.add_task("Etiquetando", total=len(linhas))
+        with progresso(stderr=True) as barra:
+            tarefa = barra.add_task("Etiquetando", total=len(linhas))
             futuros = [
                 pool.submit(processar_linha, fabrica, linha, opcoes) for linha in linhas
             ]
             for futuro in as_completed(futuros):
-                linha, resposta_json = futuro.result()
-                gravar_resposta(conn, linha, resposta_json, config.api_model)
-                conteudo = cast(dict[str, object], json.loads(resposta_json))
-                if "erro" in conteudo:
-                    resumo.erro += 1
-                else:
+                linha, resposta_json, sucesso = futuro.result()
+                gravar_resposta(conn, linha.id, resposta_json, config.api_model)
+                if sucesso:
                     resumo.sucesso += 1
-                progresso.advance(tarefa)
+                else:
+                    resumo.erro += 1
+                barra.advance(tarefa)
     finally:
         pool.shutdown(wait=True, cancel_futures=True)
         fabrica.fechar()
 
     return resumo
+
 
 def _dividir_filtros(valores: list[str] | None) -> list[str] | None:
     """Divide valores repetidos/CSV de uma opção em uma lista limpa (ou None)."""

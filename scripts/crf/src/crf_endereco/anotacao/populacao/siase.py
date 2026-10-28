@@ -9,13 +9,11 @@ import duckdb
 
 from crf_endereco.anotacao.populacao.populador import (
     Populador,
-    RegistroEtiquetacao,
-    _limpar_cep,
-    _municipios_csv_padrao,
-    _ultimo_campo,
-    limpar_texto,
-    montar_extras,
+    municipios_csv,
+    ultimo_campo,
 )
+from crf_endereco.registro import Registro, montar_extras, texto
+from crf_endereco.registro import cep as cep_texto
 
 
 class PopuladorSiase(Populador):
@@ -51,8 +49,8 @@ class PopuladorSiase(Populador):
     def popular(
         self,
         conn: duckdb.DuckDBPyConnection,
-    ) -> Iterator[RegistroEtiquetacao]:
-        municipios = _municipios_csv_padrao()
+    ) -> Iterator[Registro]:
+        municipios = municipios_csv()
         if municipios is None:
             raise RuntimeError(
                 "municipios.csv (cod_ibge, municipio, uf) não encontrado para "
@@ -77,14 +75,14 @@ class PopuladorSiase(Populador):
                     municipio,
                     uf,
                 ) = linha
-                endereco = limpar_texto(dsc_endereco)
-                bairro = _ultimo_campo(endereco)
-                cep = _limpar_cep(num_cep)
-                municipio = limpar_texto(municipio)
-                uf = limpar_texto(uf)
-                ide_cad = limpar_texto(ide_cad)
-                num_uc = limpar_texto(num_uc)
-                yield RegistroEtiquetacao(
+                endereco = texto(dsc_endereco)
+                bairro = ultimo_campo(endereco)
+                cep = cep_texto(num_cep)
+                municipio = texto(municipio)
+                uf = texto(uf)
+                ide_cad = texto(ide_cad)
+                num_uc = texto(num_uc)
+                yield Registro(
                     endereco=endereco,
                     extras=montar_extras(
                         municipio,

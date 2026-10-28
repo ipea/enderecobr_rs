@@ -8,7 +8,6 @@ from typing import Any
 from rich.console import Console
 
 from crf_endereco.anotacao.cliente_http import ClienteHTTP
-from crf_endereco.anotacao.config import Config
 from crf_endereco.anotacao.ferramentas import Ferramentas, criar_ferramentas
 from crf_endereco.anotacao.prompt import (
     renderizar_prompt_sistema,
@@ -21,6 +20,7 @@ from crf_endereco.anotacao.resposta import (
     processar_resultado_final,
     validar_resposta_final,
 )
+from crf_endereco.config import Config
 
 
 @dataclass
@@ -44,6 +44,7 @@ class Contexto:
 
     def fechar(self) -> None:
         self.ferramentas.fechar()
+
 
 def segmentar(
     contexto: Contexto,

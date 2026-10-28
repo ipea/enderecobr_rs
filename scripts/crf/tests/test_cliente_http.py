@@ -8,8 +8,8 @@ import requests
 from rich.console import Console
 
 from crf_endereco.anotacao.cliente_http import ClienteHTTP, ErroHTTP, _pode_retentar
-from crf_endereco.anotacao.config import Config
 from crf_endereco.anotacao.ferramentas import criar_ferramentas
+from crf_endereco.config import Config
 
 
 class RespostaFalsa(requests.Response):
@@ -127,7 +127,9 @@ def test_4xx_falha_na_primeira_tentativa():
 
 
 def test_json_invalido_vira_erro_com_corpo():
-    cliente = cliente_com([RespostaFalsa(200, "<html>manutencao</html>")], n_tentativas=1)
+    cliente = cliente_com(
+        [RespostaFalsa(200, "<html>manutencao</html>")], n_tentativas=1
+    )
 
     with pytest.raises(ErroHTTP) as erro:
         _ = cliente.enviar_json("https://exemplo/api", {})
@@ -151,8 +153,8 @@ def config(
         api_url="https://exemplo/api",
         api_key="chave",
         api_model="modelo",
-        cnefe_path="/cnefe.parquet",
-        municipios_path=Path("municipios.csv"),
+        cnefe=Path("/cnefe.parquet"),
+        municipios=Path("municipios.csv"),
         searx_url=searx_url,
         tools_estritas=tools_estritas,
     )

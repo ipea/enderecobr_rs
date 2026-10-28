@@ -105,6 +105,7 @@ select count(*) as pares,
 from pontos
 """
 
+
 @contextmanager
 def cronometrar(rotulo: str) -> Generator[None]:
     """Imprime o tempo gasto por uma etapa."""
@@ -113,23 +114,29 @@ def cronometrar(rotulo: str) -> Generator[None]:
     yield
     print(f"[{rotulo}] {time.perf_counter() - inicio:.1f}s", flush=True)
 
+
 def identificador(nome: str) -> str:
     if not PADRAO_IDENTIFICADOR.match(nome):
         raise typer.BadParameter(f"nome de coluna invalido: {nome!r}")
     return f'"{nome}"'
 
+
 def texto(coluna: str) -> str:
     return f"nullif(trim(cast({identificador(coluna)} as varchar)), '')"
 
+
 def texto_numero(coluna: str) -> str:
     return SQL_NUMERO.format(identificador(coluna))
+
 
 def resolver_entrada(base: Path) -> str:
     """Aceita um parquet, um diretorio de parquets ou um glob."""
     return str(base / "*.parquet") if base.is_dir() else str(base)
 
+
 def ler_colunas(con: duckdb.DuckDBPyConnection, caminho: str) -> list[str]:
     return con.read_parquet(caminho).columns
+
 
 def validar_campos(
     colunas: list[str], campos: dict[str, str | None], chave: str | None
@@ -151,6 +158,7 @@ def validar_campos(
             "informe ao menos uma coluna de endereco: --logradouro, --numero, "
             + "--complemento, --localidade, --cep ou --endereco"
         )
+
 
 def montar_estagio(
     con: duckdb.DuckDBPyConnection,
@@ -177,7 +185,9 @@ def montar_estagio(
     if endereco is not None:
         partes = [texto(endereco)]
     else:
-        origens = [campos[c] for c in ("logradouro", "numero", "complemento", "localidade")]
+        origens = [
+            campos[c] for c in ("logradouro", "numero", "complemento", "localidade")
+        ]
         partes = [texto(coluna) for coluna in origens if coluna is not None]
     if not partes:
         raise typer.BadParameter("nenhuma coluna de texto para segmentar")
@@ -187,6 +197,7 @@ def montar_estagio(
     if limite > 0:
         relacao = relacao.limit(limite)
     relacao.project(", ".join(selecao)).write_parquet(str(destino), compression="zstd")
+
 
 def montar_entradas(
     con: duckdb.DuckDBPyConnection,
@@ -226,6 +237,7 @@ def montar_entradas(
     )
     return {"bruto": bruto, "processado": processado}
 
+
 def geocodificar(
     con: duckdb.DuckDBPyConnection,
     entrada: Path,
@@ -251,6 +263,7 @@ def geocodificar(
     _ = con.table("resultado_geocode").write_parquet(str(destino), compression="zstd")
     return resultado.num_rows
 
+
 def registrar_visoes(
     con: duckdb.DuckDBPyConnection,
     estagio: Path,
@@ -266,9 +279,11 @@ def registrar_visoes(
     _ = con.sql(SQL_GEOCODE)
     _ = con.sql(SQL_PAR)
 
+
 def imprime(titulo: str, df: pd.DataFrame) -> None:
     print(f"\n{titulo}\n{'=' * len(titulo)}")
     print(df.to_string(index=False, float_format="{:,.2f}".format))
+
 
 def comparar_segmentacao(
     con: duckdb.DuckDBPyConnection, campos: dict[str, str | None]
@@ -283,6 +298,7 @@ def comparar_segmentacao(
     df["extraidos_pct"] = 100 * df["extraidos"] / df["registros"]
     df["diferentes_pct"] = 100 * df["diferentes"] / df["registros"]
     return df
+
 
 def comparar_cobertura(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.sql(
@@ -300,6 +316,7 @@ def comparar_cobertura(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         """
     ).df()
 
+
 def comparar_precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     df = con.sql(
         """
@@ -313,6 +330,7 @@ def comparar_precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     tabela = df.pivot(index="precisao", columns="versao", values="freq_pct").fillna(0.0)
     tabela.index.name = "precisao (% de cada versao)"
     return tabela.round(2).reset_index()
+
 
 def comparar_desvio_total(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.sql(
@@ -334,6 +352,7 @@ def comparar_desvio_total(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         """
     ).df()
 
+
 def comparar_desvio(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.sql(
         """
@@ -351,6 +370,7 @@ def comparar_desvio(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         order by precisao, versao
         """
     ).df()
+
 
 def comparar_pareado(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.sql(
@@ -370,6 +390,7 @@ def comparar_pareado(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         """
     ).df()
 
+
 def comparar_mudanca_precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     df = con.sql(
         """
@@ -382,6 +403,7 @@ def comparar_mudanca_precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     ).df()
     tabela = df.pivot(index="precisao_bruto", columns="precisao_proc", values="n")
     return tabela.fillna(0).astype(int).reset_index()
+
 
 def comparar_delta_desvio(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     grupos = con.sql(
@@ -415,6 +437,7 @@ def comparar_delta_desvio(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         """
     ).df()
     return pd.concat([todos, grupos], ignore_index=True)
+
 
 def comparar_deslocamento(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.sql(SQL_DESLOCAMENTO).df()

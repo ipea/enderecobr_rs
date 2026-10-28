@@ -1,4 +1,5 @@
 """Estratos de pendentes e a ponderacao entre eles."""
+
 import math
 from dataclasses import dataclass
 
@@ -16,6 +17,7 @@ class EstratoPendente:
     anotados: int
     pendentes: int
 
+
 @dataclass(frozen=True)
 class LinhaPendente:
     """Uma linha ainda não processada do dataset de etiquetagem."""
@@ -23,6 +25,7 @@ class LinhaPendente:
     id: int
     endereco: str
     extras: str
+
 
 def alocar(
     estratos: list[EstratoPendente], tamanho: int

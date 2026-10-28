@@ -7,12 +7,8 @@ from typing import ClassVar
 
 import duckdb
 
-from crf_endereco.anotacao.populacao.populador import (
-    Populador,
-    RegistroEtiquetacao,
-    limpar_texto,
-    montar_extras,
-)
+from crf_endereco.anotacao.populacao.populador import Populador
+from crf_endereco.registro import Registro, montar_extras, texto
 
 
 class PopuladorCafir(Populador):
@@ -39,7 +35,7 @@ class PopuladorCafir(Populador):
     def popular(
         self,
         conn: duckdb.DuckDBPyConnection,
-    ) -> Iterator[RegistroEtiquetacao]:
+    ) -> Iterator[Registro]:
         padrao = str(self.arquivo)
         if self.arquivo.is_dir():
             padrao = str(self.arquivo / "*.parquet")
@@ -63,14 +59,14 @@ class PopuladorCafir(Populador):
                     situacao,
                     situacao_descricao,
                 ) = linha
-                nome = limpar_texto(nome)
-                distrito = limpar_texto(distrito)
-                municipio = limpar_texto(municipio)
-                uf = limpar_texto(uf)
-                cep = limpar_texto(cep)
+                nome = texto(nome)
+                distrito = texto(distrito)
+                municipio = texto(municipio)
+                uf = texto(uf)
+                cep = texto(cep)
                 area = f"{area_ha:g} ha" if area_ha is not None else ""
-                yield RegistroEtiquetacao(
-                    endereco=limpar_texto(logradouro),
+                yield Registro(
+                    endereco=texto(logradouro),
                     extras=montar_extras(
                         municipio,
                         uf,
@@ -81,21 +77,21 @@ class PopuladorCafir(Populador):
                             ("Distrito", distrito),
                             ("CEP", cep),
                             ("Área", area),
-                            ("Situação", limpar_texto(situacao_descricao)),
+                            ("Situação", texto(situacao_descricao)),
                         ],
                     ),
                     meta={
-                        "nirf": limpar_texto(nirf),
-                        "incra": limpar_texto(incra) or None,
+                        "nirf": texto(nirf),
+                        "incra": texto(incra) or None,
                         "nome_imovel": nome,
                         "area_ha": area_ha,
-                        "situacao": limpar_texto(situacao),
-                        "situacao_descricao": limpar_texto(situacao_descricao),
+                        "situacao": texto(situacao),
+                        "situacao_descricao": texto(situacao_descricao),
                         "cep": cep or None,
                         "arquivo": str(self.arquivo),
                     },
                     origem=self.tipo,
-                    origem_id=limpar_texto(nirf) or None,
+                    origem_id=texto(nirf) or None,
                     municipio=municipio,
                     uf=uf,
                 )

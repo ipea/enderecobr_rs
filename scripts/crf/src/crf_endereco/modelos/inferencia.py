@@ -1,4 +1,5 @@
 """Inferencia do CRF: preve rotulos e remonta os segmentos."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,6 +14,7 @@ from crf_endereco.features import ExtratorFeature, tokenize_com_offsets
 # (inclui NBSP, por exemplo); o conjunto explícito mantém as duas
 # implementações equivalentes.
 ESPACOS_ASCII = frozenset(" \t\n\x0c\r")
+
 
 def montar_segmentos(
     frase: str,
@@ -47,15 +49,6 @@ def montar_segmentos(
 
     return segmentos
 
-def extrair_campos(
-    crf: sklearn_crfsuite.CRF, extrator: ExtratorFeature, frase: str
-) -> list[tuple[str, str]]:
-    """Tokens e rótulos previstos pelo CRF para a frase."""
-    toks = tokenize_com_offsets(frase)
-    x = extrator.tokens2features([tok for tok, _ in toks])
-    pred = crf.predict_single(x)
-
-    return list(zip([tok for tok, _ in toks], pred, strict=True))
 
 def segmentar(
     crf: sklearn_crfsuite.CRF, extrator: ExtratorFeature, frase: str

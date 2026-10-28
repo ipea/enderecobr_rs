@@ -1,4 +1,5 @@
 """Consultas de pendentes no dataset (SQLite)."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -29,6 +30,7 @@ def _lista_delimitada(valores: Sequence[str] | None, *, caixa: str) -> str | Non
     elif caixa == "lower":
         itens = [item.lower() for item in itens]
     return "," + ",".join(itens) + ","
+
 
 def listar_ufs_pendentes(
     conn: sqlite3.Connection,
@@ -75,9 +77,12 @@ def listar_ufs_pendentes(
         },
     ).fetchall()
     return [
-        EstratoPendente(chave=cast(str, u), anotados=cast(int, a), pendentes=cast(int, p))
+        EstratoPendente(
+            chave=cast(str, u), anotados=cast(int, a), pendentes=cast(int, p)
+        )
         for u, a, p in linhas
     ]
+
 
 def listar_origens_pendentes(
     conn: sqlite3.Connection,
@@ -127,9 +132,12 @@ def listar_origens_pendentes(
         },
     ).fetchall()
     return [
-        EstratoPendente(chave=cast(str, o), anotados=cast(int, a), pendentes=cast(int, p))
+        EstratoPendente(
+            chave=cast(str, o), anotados=cast(int, a), pendentes=cast(int, p)
+        )
         for o, a, p in linhas
     ]
+
 
 def selecionar_pendentes(
     conn: sqlite3.Connection,

@@ -33,4 +33,6 @@ def inspecionar(
             for (attr, label), weight in features:
                 arquivo.write(f"{weight:0.6f} {label:<8} {attr}\n")
     except OSError as erro:
-        raise typer.BadParameter(f"nao foi possivel escrever {output}: {erro}") from erro
+        raise typer.BadParameter(
+            f"nao foi possivel escrever {output}: {erro}"
+        ) from erro

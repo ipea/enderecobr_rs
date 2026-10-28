@@ -1,4 +1,5 @@
 """Normalizacao e tokenizacao do texto do endereco."""
+
 import unicodedata
 
 import regex
@@ -178,8 +179,10 @@ SIGLAS_ESTADOS = {
 
 PADRAO_TOKEN = regex.compile(r"\p{N}+|\p{L}+|[^\s\p{L}\p{N}]")
 
+
 def tokenize(text: str) -> list[str]:
     return PADRAO_TOKEN.findall(text)
+
 
 def tokenize_com_offsets(text: str) -> list[tuple[str, int]]:
     """Tokens junto do offset (em caracteres) onde cada um começa em `text`.
@@ -189,11 +192,14 @@ def tokenize_com_offsets(text: str) -> list[tuple[str, int]]:
     """
     return [(m.group(0), m.start()) for m in PADRAO_TOKEN.finditer(text)]
 
+
 def normalize(text: str):
     normalized = unicodedata.normalize("NFKD", text)
     return "".join([c for c in normalized if c.isascii()])
 
+
 PONTUACAO = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~¨´°§¶·«»–—…“”‘’")
+
 
 def is_pontuacao(word: str) -> bool:
     return bool(word) and word[0] in PONTUACAO

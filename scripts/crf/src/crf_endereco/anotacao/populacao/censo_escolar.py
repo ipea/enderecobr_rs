@@ -7,13 +7,8 @@ from typing import Any, ClassVar
 
 import duckdb
 
-from crf_endereco.anotacao.populacao.populador import (
-    Populador,
-    RegistroEtiquetacao,
-    converter_float,
-    limpar_texto,
-    montar_extras,
-)
+from crf_endereco.anotacao.populacao.populador import Populador
+from crf_endereco.registro import Registro, decimal, montar_extras, texto
 
 
 class PopuladorCensoEscolar(Populador):
@@ -48,7 +43,7 @@ class PopuladorCensoEscolar(Populador):
     def popular(
         self,
         conn: duckdb.DuckDBPyConnection,
-    ) -> Iterator[RegistroEtiquetacao]:
+    ) -> Iterator[Registro]:
         resultado = conn.execute(self.CONSULTA, [str(self.arquivo)])
 
         while True:
@@ -67,12 +62,12 @@ class PopuladorCensoEscolar(Populador):
                     lat,
                     lon,
                 ) = linha
-                escola = limpar_texto(escola)
-                dependencia = limpar_texto(dependencia)
+                escola = texto(escola)
+                dependencia = texto(dependencia)
                 localidade = self._limpar_localidade(localidade)
-                municipio = limpar_texto(municipio)
-                uf = limpar_texto(uf)
-                yield RegistroEtiquetacao(
+                municipio = texto(municipio)
+                uf = texto(uf)
+                yield Registro(
                     endereco=str(endereco).strip(),
                     extras=montar_extras(
                         municipio,
@@ -86,24 +81,24 @@ class PopuladorCensoEscolar(Populador):
                         ],
                     ),
                     meta={
-                        "latitude": converter_float(lat),
-                        "longitude": converter_float(lon),
+                        "latitude": decimal(lat),
+                        "longitude": decimal(lon),
                         "escola": escola,
                         "dependencia_administrativa": dependencia,
                         "localidade_diferenciada": localidade or None,
                         "arquivo": str(self.arquivo),
                     },
                     origem=self.tipo,
-                    origem_id=limpar_texto(codigo_inep) or None,
+                    origem_id=texto(codigo_inep) or None,
                     municipio=municipio,
                     uf=uf,
                 )
 
     def _limpar_localidade(self, valor: Any) -> str:
         """Descarta marcadores sem conteúdo útil de localidade diferenciada."""
-        texto = limpar_texto(valor)
-        if texto.casefold() in {
+        bruto = texto(valor)
+        if bruto.casefold() in {
             ignorar.casefold() for ignorar in self.LOCALIDADE_DIFERENCIADA_IGNORAR
         }:
             return ""
-        return texto
+        return bruto

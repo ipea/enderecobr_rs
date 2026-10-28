@@ -13,14 +13,18 @@ from crf_endereco.anotacao.filtro_crf import (
     registrar_filtro_crf,
     validar_tipos_filtro,
 )
-from crf_endereco.anotacao.persistencia import criar_banco
+from crf_endereco.dataset import criar_banco
 from crf_endereco.segmentador_rust import comando_segmentacao
 
 
 def segmentacao(*tipos: str) -> str:
     """JSON de saída do segmentador, no formato de `padronizar segmentacao`."""
     return json.dumps(
-        {"segmentos": [{"valor": f"v{i}", "tipo": tipo} for i, tipo in enumerate(tipos)]}
+        {
+            "segmentos": [
+                {"valor": f"v{i}", "tipo": tipo} for i, tipo in enumerate(tipos)
+            ]
+        }
     )
 
 
@@ -77,7 +81,9 @@ def test_filtrar_ids_por_tipos_sem_segmentos_nao_seleciona():
 
 def test_filtrar_ids_por_tipos_exige_mesmo_numero_de_linhas():
     with pytest.raises(ValueError):
-        _ = filtrar_ids_por_tipos([segmentacao("referencia")], [1, 2], frozenset({"referencia"}))
+        _ = filtrar_ids_por_tipos(
+            [segmentacao("referencia")], [1, 2], frozenset({"referencia"})
+        )
 
 
 # --- validar_tipos_filtro --------------------------------------------------
@@ -138,9 +144,9 @@ def test_registrar_filtro_substitui_o_filtro_anterior():
     registrar_filtro_crf(conn, [1, 2])
     registrar_filtro_crf(conn, [3])
 
-    assert {
-        linha.id for linha in selecionar_pendentes(conn, usar_filtro_crf=True)
-    } == {3}
+    assert {linha.id for linha in selecionar_pendentes(conn, usar_filtro_crf=True)} == {
+        3
+    }
 
 
 def test_filtro_nao_inclui_linhas_ja_etiquetadas():
@@ -152,9 +158,9 @@ def test_filtro_nao_inclui_linhas_ja_etiquetadas():
     conn.commit()
     registrar_filtro_crf(conn, [1, 2])
 
-    assert {
-        linha.id for linha in selecionar_pendentes(conn, usar_filtro_crf=True)
-    } == {2}
+    assert {linha.id for linha in selecionar_pendentes(conn, usar_filtro_crf=True)} == {
+        2
+    }
 
 
 def test_estrato_sem_pendentes_filtrados_nao_aparece():

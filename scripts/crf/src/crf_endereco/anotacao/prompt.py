@@ -1,11 +1,11 @@
 """Prompts enviados a LLM."""
+
 from pathlib import Path
 
-from crf_endereco.anotacao.config import Config
+from crf_endereco.config import Config
 
-TEMPLATE_PROMPT_SISTEMA = (
-    Path(__file__).resolve().parent / "prompt_sistema.md"
-)
+TEMPLATE_PROMPT_SISTEMA = Path(__file__).resolve().parent / "prompt_sistema.md"
+
 
 def renderizar_prompt_sistema(config: Config) -> str:
     """Preenche o template do prompt de sistema com as ferramentas disponíveis."""
@@ -24,6 +24,7 @@ def renderizar_prompt_sistema(config: Config) -> str:
 
     template = TEMPLATE_PROMPT_SISTEMA.read_text(encoding="utf-8")
     return template.replace("{secao_ferramentas}", "\n".join(ferramentas))
+
 
 def renderizar_prompt_usuario(endereco: str, extras: str, n_rodadas: int) -> str:
     return f"""Extra info (context only; it does NOT populate segments):

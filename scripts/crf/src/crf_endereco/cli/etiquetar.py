@@ -14,7 +14,6 @@ from rich.pretty import pprint
 
 from crf_endereco.anotacao import consultas
 from crf_endereco.anotacao.amostragem import coletar_lote_balanceado
-from crf_endereco.anotacao.config import carregar_config, console
 from crf_endereco.anotacao.filtro_crf import (
     contar_filtro_crf,
     prever_tipos_crf,
@@ -22,10 +21,13 @@ from crf_endereco.anotacao.filtro_crf import (
     validar_tipos_filtro,
 )
 from crf_endereco.anotacao.lote import OpcoesLote, _dividir_filtros, executar_lote
-from crf_endereco.anotacao.persistencia import abrir_banco
 from crf_endereco.anotacao.segmentacao import Contexto, segmentar
+from crf_endereco.config import carregar_config
+from crf_endereco.dataset import abrir_banco
+from crf_endereco.ui import console
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
+
 
 @app.command()
 def avulso(
@@ -90,6 +92,7 @@ def avulso(
         console.print(f"[green]Salvo em {saida}[/green]")
     else:
         console.print(texto)
+
 
 @app.command()
 def lote(
@@ -206,7 +209,9 @@ def lote(
     # Valida os argumentos antes de tocar no ambiente (falha rápida, sem .env).
     tipos_filtro = validar_tipos_filtro(_dividir_filtros(apenas_tipos), modelo_crf)
     if binario_crf is not None and not binario_crf.is_file():
-        raise typer.BadParameter(f"Binário do segmentador não encontrado: {binario_crf}")
+        raise typer.BadParameter(
+            f"Binário do segmentador não encontrado: {binario_crf}"
+        )
 
     config = carregar_config(env)
     console_llm = console if verboso else Console(quiet=True)

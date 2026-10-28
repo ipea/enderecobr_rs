@@ -14,7 +14,9 @@ from crf_endereco.segmentador_rust import BINARIO_LOTE, segmentar_lote
 
 
 def comparar_geocode(
-    base: Annotated[Path, typer.Argument(help="parquet (ou diretorio/glob) de entrada")],
+    base: Annotated[
+        Path, typer.Argument(help="parquet (ou diretorio/glob) de entrada")
+    ],
     estado: Annotated[str, typer.Option(help="coluna do estado (UF ou nome)")],
     municipio: Annotated[
         str, typer.Option(help="coluna do municipio (nome ou codigo IBGE)")
@@ -76,7 +78,9 @@ def comparar_geocode(
     comparacao.validar_campos(comparacao.ler_colunas(con, entrada), campos, chave)
 
     print(f"base: {entrada}\nsaida: {pasta_saida}\nsegmentador: {binario}")
-    print("campos: " + ", ".join(f"{k}={v}" for k, v in campos.items() if v is not None))
+    print(
+        "campos: " + ", ".join(f"{k}={v}" for k, v in campos.items() if v is not None)
+    )
     if endereco is not None:
         print(f"texto segmentado: coluna {endereco!r}")
     else:
@@ -86,7 +90,9 @@ def comparar_geocode(
     estagio = Path(temporaria.name) / "estagio.parquet"
     try:
         with comparacao.cronometrar("estagio"):
-            comparacao.montar_estagio(con, entrada, estagio, campos, endereco, chave, limite)
+            comparacao.montar_estagio(
+                con, entrada, estagio, campos, endereco, chave, limite
+            )
 
         if reusar and segmentado.exists():
             print(f"segmentacao reutilizada: {segmentado}")
@@ -110,15 +116,33 @@ def comparar_geocode(
             if not destino.exists():
                 raise typer.BadParameter(f"saida ausente: {destino}")
 
-        comparacao.registrar_visoes(con, estagio, segmentado, destinos["bruto"], destinos["processado"])
-        comparacao.imprime("Extracao de campos pelo segmentador", comparacao.comparar_segmentacao(con, campos))
+        comparacao.registrar_visoes(
+            con, estagio, segmentado, destinos["bruto"], destinos["processado"]
+        )
+        comparacao.imprime(
+            "Extracao de campos pelo segmentador",
+            comparacao.comparar_segmentacao(con, campos),
+        )
         comparacao.imprime("Cobertura", comparacao.comparar_cobertura(con))
-        comparacao.imprime("Frequencia de precisao (% dentro de cada versao)", comparacao.comparar_precisao(con))
-        comparacao.imprime("Desvio (metros) no total", comparacao.comparar_desvio_total(con))
-        comparacao.imprime("Desvio (metros) por precisao e versao", comparacao.comparar_desvio(con))
+        comparacao.imprime(
+            "Frequencia de precisao (% dentro de cada versao)",
+            comparacao.comparar_precisao(con),
+        )
+        comparacao.imprime(
+            "Desvio (metros) no total", comparacao.comparar_desvio_total(con)
+        )
+        comparacao.imprime(
+            "Desvio (metros) por precisao e versao", comparacao.comparar_desvio(con)
+        )
         comparacao.imprime("Pareamento dos registros", comparacao.comparar_pareado(con))
-        comparacao.imprime("Mudanca de precisao (n de registros)", comparacao.comparar_mudanca_precisao(con))
-        comparacao.imprime("Desvio (metros) nos mesmos registros", comparacao.comparar_delta_desvio(con))
+        comparacao.imprime(
+            "Mudanca de precisao (n de registros)",
+            comparacao.comparar_mudanca_precisao(con),
+        )
+        comparacao.imprime(
+            "Desvio (metros) nos mesmos registros",
+            comparacao.comparar_delta_desvio(con),
+        )
         comparacao.imprime(
             "Deslocamento (metros) entre as coordenadas bruto e processado",
             comparacao.comparar_deslocamento(con),

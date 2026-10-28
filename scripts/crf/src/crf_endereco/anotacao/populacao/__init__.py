@@ -31,6 +31,7 @@ POPULADORES: dict[str, type[Populador]] = {
     PopuladorCadUnico.tipo: PopuladorCadUnico,
 }
 
+
 def carregar_populador(tipo: str, arquivo: Path, aba: str | None) -> Populador:
     classe = POPULADORES.get(tipo)
     if classe is None:
@@ -39,6 +40,7 @@ def carregar_populador(tipo: str, arquivo: Path, aba: str | None) -> Populador:
             f"tipo_dataset desconhecido: {tipo!r}. Opções: {opcoes}."
         )
     return classe(arquivo, aba)
+
 
 __all__ = [
     "POPULADORES",

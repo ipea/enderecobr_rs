@@ -1,52 +1,44 @@
-"""Treino do CRF sobre o dataset anotado."""
+"""Dados de treino: do SQLite anotado para features e rotulos do CRF."""
 
-import json
-import sqlite3
+from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
 
 from crf_endereco.config import CAMINHO_DATASET
+from crf_endereco.dataset import carregar_anotados, segmentos_de
 from crf_endereco.features import ExtratorFeature, tokenize
 from crf_endereco.rotulos import mergear
 
 
-def carregar_dados(
-    caminho: Path = CAMINHO_DATASET,
-) -> tuple[list[list[dict[str, float]]], list[list[str]]]:
-    """Lê o dataset etiquetado e devolve (features, rótulos) prontos para o CRF.
+@dataclass(frozen=True)
+class Exemplos:
+    """Dataset pronto para o CRF: features, rotulos, tokens e categorias."""
 
-    Compartilhado entre `treinamento.py` e `tunning.py` para que os dois usem
-    exatamente o mesmo caminho de dados e de etiquetagem.
+    x: list[list[dict[str, float]]]
+    y: list[list[str]]
+    tokens: list[list[str]]
+    categorias: list[list[str]]
+
+
+def carregar_exemplos(caminho: Path = CAMINHO_DATASET) -> Exemplos:
+    """Le o dataset etiquetado e monta features/rotulos.
+
+    E o unico caminho de dados do modelo: treino, busca de hiperparametros e
+    avaliacao usam exatamente as mesmas linhas, features e etiquetas.
     """
-    try:
-        con = sqlite3.connect(caminho)
-        print("Coletando dados...")
-        dados = con.execute("""select endereco, resposta_llm
-from enderecos
-where resposta_llm is not null
-  and (resposta_llm ->> '$.erro') is null;
-""").fetchall()
-        con.close()
-    except sqlite3.Error as erro:
-        raise RuntimeError(f"Falha ao ler {caminho}: {erro}") from erro
-
-    extrator_features = ExtratorFeature()
-
+    extrator = ExtratorFeature()
     x: list[list[dict[str, float]]] = []
     y: list[list[str]] = []
+    tokens: list[list[str]] = []
+    categorias: list[list[str]] = []
 
     print("Preprocessando dados...")
-    for endereco, resposta_str in dados:
-        try:
-            resposta = json.loads(resposta_str)
-        except json.JSONDecodeError as erro:
-            raise RuntimeError(
-                f"Resposta inválida no endereço {endereco!r}: {erro}"
-            ) from erro
-        segmentos = resposta.get("segmentos", [])
-        tokens, labels = mergear(endereco, segmentos, tokenize)
-        features = extrator_features.tokens2features(tokens)
-
-        x.append(features)
+    for exemplo in carregar_anotados(caminho):
+        toks, labels = mergear(exemplo.endereco, segmentos_de(exemplo), tokenize)
+        x.append(extrator.tokens2features(toks))
         y.append(labels)
+        tokens.append(toks)
+        categorias.append([exemplo.origem, exemplo.uf])
 
-    return x, y
+    return Exemplos(x=x, y=y, tokens=tokens, categorias=categorias)

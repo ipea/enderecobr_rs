@@ -7,13 +7,8 @@ from typing import ClassVar
 
 import duckdb
 
-from crf_endereco.anotacao.populacao.populador import (
-    Populador,
-    RegistroEtiquetacao,
-    converter_float,
-    limpar_texto,
-    montar_extras,
-)
+from crf_endereco.anotacao.populacao.populador import Populador
+from crf_endereco.registro import Registro, decimal, montar_extras, texto
 
 
 class PopuladorImoveisUniao(Populador):
@@ -39,7 +34,7 @@ class PopuladorImoveisUniao(Populador):
     def popular(
         self,
         conn: duckdb.DuckDBPyConnection,
-    ) -> Iterator[RegistroEtiquetacao]:
+    ) -> Iterator[Registro]:
         conn.execute("INSTALL excel; LOAD excel;")
         resultado = conn.execute(
             self.CONSULTA, [str(self.arquivo), self.aba or "Sheet1"]
@@ -51,16 +46,16 @@ class PopuladorImoveisUniao(Populador):
                 break
             for linha in linhas:
                 rip, uf, municipio, bairro, endereco, lat, lon, precisao = linha
-                municipio = limpar_texto(municipio)
-                uf = limpar_texto(uf)
-                yield RegistroEtiquetacao(
+                municipio = texto(municipio)
+                uf = texto(uf)
+                yield Registro(
                     endereco=str(endereco).strip(),
                     extras=montar_extras(
                         municipio, uf, bairro, banco="Imóveis da União"
                     ),
                     meta={
-                        "latitude": converter_float(lat),
-                        "longitude": converter_float(lon),
+                        "latitude": decimal(lat),
+                        "longitude": decimal(lon),
                         "nivel_precisao": precisao,
                         "arquivo": str(self.arquivo),
                         "aba": self.aba or "Sheet1",

@@ -21,7 +21,9 @@ def printa_segmentos(segmentos: list[dict[str, str]]) -> None:
 
 
 def diferencial(
-    dataset: Annotated[Path, typer.Argument(help="banco de anotacao")] = CAMINHO_DATASET,
+    dataset: Annotated[
+        Path, typer.Argument(help="banco de anotacao")
+    ] = CAMINHO_DATASET,
     tagger: Annotated[Path, typer.Option(help="tagger treinado")] = CAMINHO_TAGGER,
 ) -> None:
     """Compara a segmentacao do CRF em Python e no binario Rust.
@@ -33,7 +35,9 @@ def diferencial(
     extrator = ExtratorFeature()
 
     con = sqlite3.connect(str(dataset))
-    enderecos = [str(linha[0]) for linha in con.execute("select endereco from enderecos")]
+    enderecos = [
+        str(linha[0]) for linha in con.execute("select endereco from enderecos")
+    ]
     con.close()
 
     segmentos_python = [segmentar(crf, extrator, endereco) for endereco in enderecos]

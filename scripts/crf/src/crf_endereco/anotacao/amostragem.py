@@ -1,4 +1,5 @@
 """Coleta de um lote balanceado entre UF e origem."""
+
 from __future__ import annotations
 
 import random
@@ -41,9 +42,7 @@ def coletar_lote_balanceado(
         municipios=municipios,
         usar_filtro_crf=usar_filtro_crf,
     )
-    tamanho = (
-        limite if limite is not None else sum(u.pendentes for u in estratos_uf)
-    )
+    tamanho = limite if limite is not None else sum(u.pendentes for u in estratos_uf)
 
     linhas: list[LinhaPendente] = []
     alocacao: list[tuple[EstratoPendente, EstratoPendente, int]] = []

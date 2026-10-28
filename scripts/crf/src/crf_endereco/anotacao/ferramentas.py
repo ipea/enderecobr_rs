@@ -10,9 +10,9 @@ import markitdown
 import requests
 
 from crf_endereco.anotacao.cliente_http import USER_AGENT, ClienteHTTP
-from crf_endereco.anotacao.config import Config
 from crf_endereco.anotacao.ontologia import TIPOS_SEGMENTO
 from crf_endereco.anotacao.resposta import ToolCall
+from crf_endereco.config import Config
 
 
 def _criar_json_schema_funcao(
@@ -43,6 +43,7 @@ def _criar_json_schema_funcao(
     if estrita:
         funcao["strict"] = True
     return {"type": "function", "function": funcao}
+
 
 def criar_ferramentas(config: Config) -> list[dict[str, Any]]:
     """Monta as ferramentas expostas à LLM, conforme a configuração."""
@@ -99,6 +100,7 @@ def criar_ferramentas(config: Config) -> list[dict[str, Any]]:
 
     return ferramentas
 
+
 class Ferramentas:
     """Executa as ferramentas chamadas pela LLM (CNEFE, busca web, fetch)."""
 
@@ -110,8 +112,8 @@ class Ferramentas:
         # Conexão efêmera e privada da thread: DuckDB não é thread-safe, então
         # cada `Ferramentas` (e cada worker do modo lote) tem a sua.
         self.conn = duckdb.connect()
-        self.conn.register("cnefe", self.conn.read_parquet(config.cnefe_path))
-        self.conn.register("municipio", self.conn.read_csv(str(config.municipios_path)))
+        self.conn.register("cnefe", self.conn.read_parquet(config.cnefe))
+        self.conn.register("municipio", self.conn.read_csv(str(config.municipios)))
 
     def fechar(self) -> None:
         self.conn.close()

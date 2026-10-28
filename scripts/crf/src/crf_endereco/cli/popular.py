@@ -9,13 +9,6 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from crf_endereco.anotacao.persistencia import (
-    contar_registros,
-    criar_banco,
-    gravar_registros,
-    ler_enderecos_existentes,
-    montar_lote,
-)
 from crf_endereco.anotacao.populacao import carregar_populador
 from crf_endereco.anotacao.populacao.amostragem import amostrar_diverso
 from crf_endereco.anotacao.populacao.populador import (
@@ -23,8 +16,16 @@ from crf_endereco.anotacao.populacao.populador import (
     FiltroDiversidadeFuzzy,
     SemFiltroDiversidade,
 )
+from crf_endereco.dataset import (
+    contar_registros,
+    criar_banco,
+    gravar_registros,
+    ler_enderecos_existentes,
+    montar_lote,
+)
 
 console = Console()
+
 
 def popular(
     tipo_dataset: Annotated[
@@ -99,7 +100,7 @@ def popular(
             fator_inicial=1 if similaridade_maxima is None else 3,
         )
 
-        inseridos, ignorados = gravar_registros(conn_destino, resultado.amostra, lote)
+        escrita = gravar_registros(conn_destino, resultado.amostra, lote)
         total = contar_registros(conn_destino)
     finally:
         conn_destino.close()
@@ -113,6 +114,6 @@ def popular(
     console.print(
         f"Tamanho da amostra: [bold]{len(resultado.amostra)}[/bold] / {tamanho_amostra}"
     )
-    console.print(f"Inseridos: [green]{inseridos}[/green]")
-    console.print(f"Ignorados (hash duplicado): {ignorados}")
+    console.print(f"Inseridos: [green]{escrita.inseridos}[/green]")
+    console.print(f"Ignorados (hash duplicado): {escrita.ignorados}")
     console.print(f"Total no banco: [bold]{total}[/bold]")

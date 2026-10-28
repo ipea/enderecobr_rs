@@ -8,13 +8,8 @@ from typing import ClassVar
 
 import duckdb
 
-from crf_endereco.anotacao.populacao.populador import (
-    Populador,
-    RegistroEtiquetacao,
-    _rnd_registro,
-    limpar_texto,
-    montar_extras,
-)
+from crf_endereco.anotacao.populacao.populador import Populador, rng_registro
+from crf_endereco.registro import Registro, montar_extras, texto
 
 # Arranjos (ordem dos campos) para montar a linha bruta do CNEAS, com peso
 # relativo. Os pesos espelham a frequência em cadastros reais: o padrão
@@ -36,9 +31,8 @@ SEPARADORES_CNEAS: tuple[str, ...] = (", ", " ")
 # Probabilidade de injetar o nome da entidade no texto (candidato a empreendimento).
 PROB_NOME_CNEAS: float = 0.35
 
-def montar_endereco_cneas(
-    campos: dict[str, str], nome: str, rnd: random.Random
-) -> str:
+
+def montar_endereco_cneas(campos: dict[str, str], nome: str, rnd: random.Random) -> str:
     """Junta os campos segmentados do CNEAS numa linha bruta.
 
     Sorteia um arranjo de campo (por peso relativo) e um separador, descarta os
@@ -58,6 +52,7 @@ def montar_endereco_cneas(
         valores.insert(rnd.randint(0, len(valores)), nome)
 
     return separador.join(valores)
+
 
 class PopuladorCneas(Populador):
     """CNEAS (Entidades de Assistência Social do MDS): endereço em campos separados.
@@ -104,7 +99,7 @@ class PopuladorCneas(Populador):
     def popular(
         self,
         conn: duckdb.DuckDBPyConnection,
-    ) -> Iterator[RegistroEtiquetacao]:
+    ) -> Iterator[Registro]:
         resultado = conn.execute(self.CONSULTA, [str(self.arquivo)])
 
         while True:
@@ -126,21 +121,21 @@ class PopuladorCneas(Populador):
                     uf,
                     situacao,
                 ) = linha
-                cod_entidade = limpar_texto(cod_entidade)
-                razao_social = limpar_texto(razao_social)
-                nome_fantasia = limpar_texto(nome_fantasia)
+                cod_entidade = texto(cod_entidade)
+                razao_social = texto(razao_social)
+                nome_fantasia = texto(nome_fantasia)
                 nome = nome_fantasia or razao_social
                 campos = {
-                    "logradouro": limpar_texto(logradouro),
-                    "numero": limpar_texto(numero),
-                    "complemento": limpar_texto(complemento),
-                    "bairro": limpar_texto(bairro),
-                    "cep": limpar_texto(cep),
-                    "municipio": limpar_texto(municipio),
-                    "uf": limpar_texto(uf),
+                    "logradouro": texto(logradouro),
+                    "numero": texto(numero),
+                    "complemento": texto(complemento),
+                    "bairro": texto(bairro),
+                    "cep": texto(cep),
+                    "municipio": texto(municipio),
+                    "uf": texto(uf),
                 }
-                rnd = _rnd_registro(cod_entidade or nome or campos["logradouro"])
-                yield RegistroEtiquetacao(
+                rnd = rng_registro(cod_entidade or nome or campos["logradouro"])
+                yield Registro(
                     endereco=montar_endereco_cneas(campos, nome, rnd),
                     extras=montar_extras(
                         None,
@@ -149,18 +144,18 @@ class PopuladorCneas(Populador):
                         banco="CNEAS (Entidades de Assistência Social)",
                         extras_adicionais=[
                             ("Entidade", nome),
-                            ("Situação", limpar_texto(situacao)),
+                            ("Situação", texto(situacao)),
                         ],
                     ),
                     meta={
                         "cod_entidade": cod_entidade,
-                        "cnpj": limpar_texto(cnpj) or None,
+                        "cnpj": texto(cnpj) or None,
                         "razao_social": razao_social,
                         "nome_fantasia": nome_fantasia,
                         "municipio": campos["municipio"],
                         "uf": campos["uf"],
                         "cep": campos["cep"] or None,
-                        "situacao": limpar_texto(situacao),
+                        "situacao": texto(situacao),
                         "arquivo": str(self.arquivo),
                     },
                     origem=self.tipo,

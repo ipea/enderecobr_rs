@@ -9,31 +9,29 @@ from dataclasses import dataclass
 import duckdb
 from tqdm import tqdm
 
-from crf_endereco.anotacao.populacao.populador import (
-    FiltroDiversidade,
-    Populador,
-    RegistroEtiquetacao,
-)
+from crf_endereco.anotacao.populacao.populador import FiltroDiversidade, Populador
+from crf_endereco.registro import Registro
 
 
 @dataclass
 class ResultadoAmostragem:
-    amostra: list[RegistroEtiquetacao]
+    amostra: list[Registro]
     candidatos: int
     aceitos: int
 
+
 def reservatorio(
-    fonte: Iterator[RegistroEtiquetacao],
+    fonte: Iterator[Registro],
     tamanho: int,
     seed: int | None,
-) -> list[RegistroEtiquetacao]:
+) -> list[Registro]:
     """Reservoir sampling (Algoritmo R): amostra uniforme de `tamanho`.
 
     Um único passe e memória constante (`tamanho` registros), independente do
     tamanho da origem.
     """
     rnd = random.Random(seed)
-    reserva: list[RegistroEtiquetacao] = []
+    reserva: list[Registro] = []
 
     for i, registro in enumerate(fonte):
         if i < tamanho:
@@ -45,6 +43,7 @@ def reservatorio(
                 reserva[escolhido] = registro
 
     return reserva
+
 
 def amostrar_diverso(
     populador: Populador,
@@ -72,7 +71,7 @@ def amostrar_diverso(
     fator = fator_inicial
     candidatos = 0
     aceitos = 0
-    amostra: list[RegistroEtiquetacao] = []
+    amostra: list[Registro] = []
     rnd = random.Random(seed)
 
     for _ in range(max_rodadas):
