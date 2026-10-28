@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Callable, Generator
+import warnings
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
@@ -24,13 +25,61 @@ CAMPOS_ENDERECO = (
     "localidade",
 )
 
-CAMPOS_EXTRAIVEIS = ("logradouro", "numero", "complemento", "localidade", "cep")
-
+# campos que o geocodebr aceita
 CAMPOS_GEOCODEBR = ("estado", "municipio", "logradouro", "numero", "cep", "localidade")
+
+# campos da base que entram no texto a segmentar
+CAMPOS_TEXTO = ("logradouro", "numero", "complemento", "localidade")
 
 COLUNAS_RESERVADAS = {"id", "endereco", *CAMPOS_ENDERECO}
 
 PADRAO_IDENTIFICADOR = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# precisao do geocodebr, da mais para a menos precisa
+ORDEM_PRECISAO = (
+    "numero",
+    "numero_aproximado",
+    "logradouro",
+    "cep",
+    "localidade",
+    "municipio",
+)
+
+# mesma ordem da tabela do artigo do geocodebr: agrupado por precisao e, dentro
+# do grupo, deterministico (d) antes do probabilistico (p)
+# https://ipea.github.io/geocodebr/articles/geocode.html
+ORDEM_TIPO_RESULTADO = (
+    "dn01",
+    "dn02",
+    "dn03",
+    "dn04",
+    "pn01",
+    "pn02",
+    "pn03",
+    "pn04",
+    "da01",
+    "da02",
+    "da03",
+    "da04",
+    "pa01",
+    "pa02",
+    "pa03",
+    "pa04",
+    "dl01",
+    "dl02",
+    "dl03",
+    "dl04",
+    "pl01",
+    "pl02",
+    "pl03",
+    "pl04",
+    "dc01",
+    "dc02",
+    "db01",
+    "dm01",
+)
+
+SEM_RESULTADO = "(nao encontrado)"
 
 # numero pode vir como double (ex.: exportado do R) e o cast viraria "315.0",
 # que o geocodebr nao reconhece como numero
@@ -40,79 +89,44 @@ SQL_EXTRAIDO = "nullif(trim({}), '')"
 
 SQL_GEOCODE = """
 create or replace view geocode as
-select 'bruto' as versao, * from bruto
+select 'bruto' as versao, precisao, tipo_resultado from bruto
 union all
-select 'processado' as versao, * from processado
+select 'processado' as versao, precisao, tipo_resultado from processado
 """
 
-SQL_PAR = """
-create or replace view par as
-select b.id,
-       b.lat as lat_bruto, b.lon as lon_bruto,
-       b.precisao as precisao_bruto, b.desvio_metros as desvio_bruto,
-       p.lat as lat_proc, p.lon as lon_proc,
-       p.precisao as precisao_proc, p.desvio_metros as desvio_proc
-from bruto as b
-full join processado as p using (id)
-"""
-
-# o mesmo SQL serve para qualquer base: `estagio` traz os campos originais e
-# `segmentado` o que o segmentador extraiu de cada um deles
-SQL_SEGMENTACAO = """
-with j as (
-    select s.*, g.logradouro_extraido, g.numero_extraido, g.complemento_extraido,
-           g.localidade_extraido, g.cep_extraido
-    from estagio as s
-    left join segmentado as g using (id)
+# `delta_pp` sai depois, no pandas: diferenca de frequencia entre as versoes
+SQL_COMPARAR = """
+with contagem as (
+    select versao,
+           coalesce({coluna}, '{sem}') as categoria,
+           count(*) as n
+    from geocode
+    group by versao, categoria
 ),
-longo as (
-    select 'logradouro' as campo, logradouro as original, logradouro_extraido as extraido from j
-    union all select 'numero', numero, numero_extraido from j
-    union all select 'complemento', complemento, complemento_extraido from j
-    union all select 'localidade', localidade, localidade_extraido from j
-    union all select 'cep', cep, cep_extraido from j
-),
-limpo as (
-    select campo, original, nullif(trim(extraido), '') as extraido from longo
+frequencia as (
+    select versao, categoria, n,
+           cast(100.0 * n / sum(n) over (partition by versao) as double) as pct
+    from contagem
 )
-select campo,
-       count(*) as registros,
-       count(extraido) as extraidos,
-       count(*) filter (where extraido is not null
-                          and extraido is distinct from original) as diferentes
-from limpo
-group by campo
-"""
-
-SQL_DESLOCAMENTO = """
-with pontos as (
-    -- raio medio da Terra (IUGG), em metros
-    select 2 * 6371008.8 * asin(sqrt(least(1.0,
-               sin(radians(lat_proc - lat_bruto) / 2) ^ 2
-               + cos(radians(lat_bruto)) * cos(radians(lat_proc))
-               * sin(radians(lon_proc - lon_bruto) / 2) ^ 2))) as metros
-    from par
-    where lat_bruto is not null and lat_proc is not null
-)
-select count(*) as pares,
-       avg(metros) as media,
-       median(metros) as mediana,
-       quantile_cont(metros, 0.75) as p75,
-       quantile_cont(metros, 0.90) as p90,
-       quantile_cont(metros, 0.99) as p99,
-       count(*) filter (where metros < 1) as abaixo_1m,
-       count(*) filter (where metros > 1000) as acima_1km
-from pontos
+select categoria,
+       cast(coalesce(sum(n) filter (where versao = 'bruto'), 0) as bigint) as n_bruto,
+       cast(coalesce(sum(pct) filter (where versao = 'bruto'), 0) as double) as prop_bruto,
+       cast(coalesce(sum(n) filter (where versao = 'processado'), 0) as bigint) as n_estruturado,
+       cast(coalesce(sum(pct) filter (where versao = 'processado'), 0) as double) as prop_estruturado
+from frequencia
+group by categoria
 """
 
 
 @contextmanager
-def cronometrar(rotulo: str) -> Generator[None]:
+def cronometrar(rotulo: str, silencioso: bool = False) -> Generator[None]:
     """Imprime o tempo gasto por uma etapa."""
     inicio = time.perf_counter()
-    print(f"[{rotulo}] ...", flush=True)
+    if not silencioso:
+        print(f"[{rotulo}] ...", flush=True)
     yield
-    print(f"[{rotulo}] {time.perf_counter() - inicio:.1f}s", flush=True)
+    if not silencioso:
+        print(f"[{rotulo}] {time.perf_counter() - inicio:.1f}s", flush=True)
 
 
 def identificador(nome: str) -> str:
@@ -144,20 +158,11 @@ def validar_campos(
     for campo, coluna in campos.items():
         if coluna is not None and coluna not in colunas:
             raise typer.BadParameter(f"coluna de {campo} ausente na base: {coluna!r}")
-    if campos["estado"] is None or campos["municipio"] is None:
-        raise typer.BadParameter("--estado e --municipio sao obrigatorios")
-    if chave is not None:
-        if chave not in colunas:
-            raise typer.BadParameter(f"coluna chave ausente na base: {chave!r}")
-        if chave in COLUNAS_RESERVADAS:
-            raise typer.BadParameter(
-                f"--chave nao pode ser uma coluna reservada: {chave!r}"
-            )
-    if not any(campos[c] for c in CAMPOS_EXTRAIVEIS):
-        raise typer.BadParameter(
-            "informe ao menos uma coluna de endereco: --logradouro, --numero, "
-            + "--complemento, --localidade, --cep ou --endereco"
-        )
+    for campo in ("estado", "municipio"):
+        if campos[campo] is None:
+            raise typer.BadParameter("--estado e --municipio sao obrigatorios")
+    if chave is not None and (chave not in colunas or chave in COLUNAS_RESERVADAS):
+        raise typer.BadParameter(f"--chave ausente na base ou reservada: {chave!r}")
 
 
 def montar_estagio(
@@ -185,9 +190,7 @@ def montar_estagio(
     if endereco is not None:
         partes = [texto(endereco)]
     else:
-        origens = [
-            campos[c] for c in ("logradouro", "numero", "complemento", "localidade")
-        ]
+        origens = [campos[c] for c in CAMPOS_TEXTO]
         partes = [texto(coluna) for coluna in origens if coluna is not None]
     if not partes:
         raise typer.BadParameter("nenhuma coluna de texto para segmentar")
@@ -199,6 +202,10 @@ def montar_estagio(
     relacao.project(", ".join(selecao)).write_parquet(str(destino), compression="zstd")
 
 
+# campos que a base sempre traz prontos: o CRF nao extrai nenhum dos dois
+CAMPOS_FIXOS = ("estado", "municipio")
+
+
 def montar_entradas(
     con: duckdb.DuckDBPyConnection,
     estagio: Path,
@@ -207,23 +214,30 @@ def montar_entradas(
     campos: dict[str, str | None],
     chave: str | None,
 ) -> dict[str, Path]:
-    """Parquets de entrada do geocodebr: campos originais e campos extraidos."""
-    disponiveis = [c for c in CAMPOS_ENDERECO if campos[c] is not None]
-    identificacao = ["id"] + (["chave"] if chave is not None else [])
-    fixos = [c for c in ("estado", "municipio") if c in disponiveis]
-    variaveis = [c for c in disponiveis if c not in fixos]
+    """Entradas do geocodebr: so a base e a base mais a extracao do CRF.
 
-    colunas_bruto = ", ".join([*identificacao, *fixos, *variaveis])
+    Em `processado` a extração vence sempre que encontra algo, mesmo em campo
+    que a base ja tinha: o valor estruturado pode vir sujo (o logradouro da
+    RAIS e o endereço inteiro) e quem mede a melhoria e a extração. So
+    estado e município ficam intocados.
+    """
+    identificacao = ["id"] + (["chave"] if chave is not None else [])
+    estruturados = [c for c in CAMPOS_GEOCODEBR if campos[c] is not None]
+
     bruto = pasta / "bruto_entrada.parquet"
+    colunas_bruto = ", ".join([*identificacao, *estruturados])
     con.read_parquet(str(estagio)).project(colunas_bruto).write_parquet(
         str(bruto), compression="zstd"
     )
 
-    # fallback campo a campo: extracao vazia mantem o valor original
-    selecao = [f"s.{c} as {c}" for c in (*identificacao, *fixos)]
-    for campo in variaveis:
-        extraido = SQL_EXTRAIDO.format(f"g.{campo}_extraido")
-        selecao.append(f"coalesce({extraido}, s.{campo}) as {campo}")
+    # no join as duas relacoes tem `id`: tudo sai com alias
+    selecao = [f"s.{c} as {c}" for c in identificacao]
+    for campo in CAMPOS_GEOCODEBR:
+        if campo in CAMPOS_FIXOS:
+            selecao.append(f"s.{campo} as {campo}")
+        else:
+            extraido = SQL_EXTRAIDO.format(f"g.{campo}_extraido")
+            selecao.append(f"coalesce({extraido}, s.{campo}) as {campo}")
 
     processado = pasta / "processado_entrada.parquet"
     (
@@ -238,46 +252,100 @@ def montar_entradas(
     return {"bruto": bruto, "processado": processado}
 
 
+# o geocodebr materializa no DuckDB o CNEFE inteiro dos municipios presentes na
+# entrada (~10 GB no Brasil todo): fatiar por municipios mantem a memoria
+# proporcional ao lote, e nao ao pais
+MUNICIPIOS_POR_LOTE = 200
+
+SQL_LOTES = """
+create or replace temp table lotes as
+select estado, municipio,
+       (row_number() over (order by estado, municipio) - 1) // ? as lote
+from municipios_base
+"""
+
+
+def contar(con: duckdb.DuckDBPyConnection, consulta: str) -> int:
+    """Devolve a primeira coluna da primeira linha de uma consulta."""
+    linha = con.sql(consulta).fetchone()
+    return 0 if linha is None or linha[0] is None else int(linha[0])
+
+
 def geocodificar(
     con: duckdb.DuckDBPyConnection,
     entrada: Path,
     destino: Path,
-    campos: dict[str, str | None],
     n_cores: int,
+    silencioso: bool = False,
 ) -> int:
+    """Geocodifica o parquet por lotes de municípios, com todos os campos dele."""
     import geocodebr
 
+    colunas = set(ler_colunas(con, str(entrada)))
     campos_endereco: dict[str, str | None] = {
-        c: c for c in CAMPOS_GEOCODEBR if campos[c] is not None
+        c: c for c in CAMPOS_GEOCODEBR if c in colunas
     }
-    resultado = cast(
-        pa.Table,
-        geocodebr.geocode(
-            entrada,
-            campos_endereco=campos_endereco,
-            n_cores=n_cores if n_cores > 0 else None,
-            verboso=True,
-        ),
+
+    _ = (
+        con.read_parquet(str(entrada))
+        .project("estado, municipio")
+        .distinct()
+        .to_view("municipios_base")
     )
-    _ = con.register("resultado_geocode", resultado)
-    _ = con.table("resultado_geocode").write_parquet(str(destino), compression="zstd")
-    return resultado.num_rows
+    _ = con.sql(SQL_LOTES, params=[MUNICIPIOS_POR_LOTE])
+    n_lotes = contar(con, "select max(lote) + 1 from lotes")
+
+    pasta = entrada.parent / "lotes"
+    pasta.mkdir(exist_ok=True)
+    trechos: list[str] = []
+    linhas = 0
+    for lote in range(n_lotes):
+        trecho = pasta / f"entrada_{lote}.parquet"
+        resultado = pasta / f"resultado_{lote}.parquet"
+        municipios = con.sql(
+            "select estado, municipio from lotes where lote = ?", params=[lote]
+        ).set_alias("m")
+        condicao = "e.estado = m.estado and e.municipio = m.municipio"
+        _ = (
+            con.read_parquet(str(entrada))
+            .set_alias("e")
+            .join(municipios, condicao, how="semi")
+            .write_parquet(str(trecho), compression="zstd")
+        )
+        if not silencioso:
+            print(f"[geocode lote {lote + 1}/{n_lotes}] {trecho.name}", flush=True)
+        with warnings.catch_warnings():
+            if silencioso:
+                warnings.simplefilter("ignore")
+            tabela = cast(
+                pa.Table,
+                geocodebr.geocode(
+                    trecho,
+                    campos_endereco=campos_endereco,
+                    n_cores=n_cores if n_cores > 0 else None,
+                    verboso=not silencioso,
+                ),
+            )
+        _ = con.register("resultado_geocode", tabela)
+        _ = con.table("resultado_geocode").write_parquet(
+            str(resultado), compression="zstd"
+        )
+        _ = con.unregister("resultado_geocode")
+        linhas += tabela.num_rows
+        trechos.append(str(resultado))
+        del tabela
+
+    _ = con.read_parquet(trechos).write_parquet(str(destino), compression="zstd")
+    return linhas
 
 
 def registrar_visoes(
-    con: duckdb.DuckDBPyConnection,
-    estagio: Path,
-    segmentado: Path,
-    bruto: Path,
-    processado: Path,
+    con: duckdb.DuckDBPyConnection, bruto: Path, processado: Path
 ) -> None:
-    _ = con.read_parquet(str(estagio)).to_view("estagio")
-    _ = con.read_parquet(str(segmentado)).to_view("segmentado")
-    colunas = "id, lat, lon, precisao, tipo_resultado, desvio_metros"
-    _ = con.read_parquet(str(bruto)).project(colunas).to_view("bruto")
-    _ = con.read_parquet(str(processado)).project(colunas).to_view("processado")
+    for versao, arquivo in (("bruto", bruto), ("processado", processado)):
+        colunas = "precisao, tipo_resultado"
+        _ = con.read_parquet(str(arquivo)).project(colunas).to_view(versao)
     _ = con.sql(SQL_GEOCODE)
-    _ = con.sql(SQL_PAR)
 
 
 def imprime(titulo: str, df: pd.DataFrame) -> None:
@@ -285,184 +353,21 @@ def imprime(titulo: str, df: pd.DataFrame) -> None:
     print(df.to_string(index=False, float_format="{:,.2f}".format))
 
 
-def _segmentacao(
-    con: duckdb.DuckDBPyConnection, campos: dict[str, str | None]
+def _comparar(
+    con: duckdb.DuckDBPyConnection, coluna: str, ordem: tuple[str, ...]
 ) -> pd.DataFrame:
-    mapa = pd.DataFrame(
-        {
-            "campo": list(CAMPOS_EXTRAIVEIS),
-            "mapeada": [campos[c] is not None for c in CAMPOS_EXTRAIVEIS],
-        }
-    )
-    df = con.sql(SQL_SEGMENTACAO).df().merge(mapa, on="campo", how="left")
-    df["extraidos_pct"] = 100 * df["extraidos"] / df["registros"]
-    df["diferentes_pct"] = 100 * df["diferentes"] / df["registros"]
-    return df
+    """Frequência de cada categoria nas duas versões, na ordem recebida."""
+    df = con.sql(SQL_COMPARAR.format(coluna=coluna, sem=SEM_RESULTADO)).df()
+    df["delta"] = df["prop_estruturado"] - df["prop_bruto"]
+    categorias = [str(c) for c in df["categoria"]]
+    # categoria fora da ordem conhecida vai para o fim, antes de `sem resultado`
+    posicao = {c: i for i, c in enumerate(ordem)}
+    posicao[SEM_RESULTADO] = len(ordem) + 1
+    df["_posicao"] = [posicao.get(c, len(ordem)) for c in categorias]
+    return df.sort_values("_posicao").drop(columns="_posicao").reset_index(drop=True)
 
 
-def _cobertura(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
-    return con.sql(
-        """
-        select versao,
-               count(*) as registros,
-               count(lat) as geolocalizados,
-               100.0 * count(lat) / count(*) as cobertura_pct,
-               count(*) filter (where precisao = 'numero') as numero_exato,
-               100.0 * count(*) filter (where precisao = 'numero') / count(lat)
-                   as numero_exato_pct
-        from geocode
-        group by versao
-        order by versao
-        """
-    ).df()
-
-
-def _precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
-    df = con.sql(
-        """
-        select versao, coalesce(precisao, '(sem resultado)') as precisao,
-               count(*) as n
-        from geocode
-        group by versao, precisao
-        """
-    ).df()
-    df["freq_pct"] = 100 * df["n"] / df.groupby("versao")["n"].transform("sum")
-    tabela = df.pivot(index="precisao", columns="versao", values="freq_pct").fillna(0.0)
-    tabela.index.name = "precisao (% de cada versao)"
-    return tabela.round(2).reset_index()
-
-
-def _desvio_total(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
-    return con.sql(
-        """
-        select versao,
-               count(*) filter (where desvio_metros is not null) as com_desvio,
-               avg(desvio_metros) as media,
-               median(desvio_metros) as mediana,
-               quantile_cont(desvio_metros, 0.75) as p75,
-               quantile_cont(desvio_metros, 0.90) as p90,
-               quantile_cont(desvio_metros, 0.99) as p99,
-               100.0 * count(*) filter (where desvio_metros <= 100)
-                   / count(desvio_metros) as ate_100m_pct,
-               100.0 * count(*) filter (where desvio_metros > 1000)
-                   / count(desvio_metros) as acima_1km_pct
-        from geocode
-        group by versao
-        order by versao
-        """
-    ).df()
-
-
-def _desvio_por_precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
-    return con.sql(
-        """
-        select versao,
-               coalesce(precisao, '(sem resultado)') as precisao,
-               count(*) as registros,
-               count(desvio_metros) as com_desvio,
-               avg(desvio_metros) as media,
-               median(desvio_metros) as mediana,
-               quantile_cont(desvio_metros, 0.75) as p75,
-               quantile_cont(desvio_metros, 0.90) as p90,
-               quantile_cont(desvio_metros, 0.99) as p99
-        from geocode
-        group by versao, precisao
-        order by precisao, versao
-        """
-    ).df()
-
-
-def _pareado(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
-    return con.sql(
-        """
-        select count(*) as pares,
-               count(lat_bruto) as geoc_bruto,
-               count(lat_proc) as geoc_proc,
-               count(*) filter (where lat_bruto is not null and lat_proc is not null)
-                   as ambos,
-               count(*) filter (where lat_bruto is null and lat_proc is not null)
-                   as so_processado,
-               count(*) filter (where lat_bruto is not null and lat_proc is null)
-                   as so_bruto,
-               count(*) filter (where precisao_bruto is distinct from precisao_proc)
-                   as precisao_mudou
-        from par
-        """
-    ).df()
-
-
-def _mudanca_precisao(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
-    df = con.sql(
-        """
-        select coalesce(precisao_bruto, '(sem)') as precisao_bruto,
-               coalesce(precisao_proc, '(sem)') as precisao_proc,
-               count(*) as n
-        from par
-        group by 1, 2
-        """
-    ).df()
-    tabela = df.pivot(index="precisao_bruto", columns="precisao_proc", values="n")
-    return tabela.fillna(0).astype(int).reset_index()
-
-
-def _delta_desvio(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
-    grupos = con.sql(
-        """
-        select case when precisao_bruto = precisao_proc
-                    then 'mesma precisao' else 'precisao diferente' end as grupo,
-               count(*) as n,
-               avg(desvio_bruto) as media_bruto,
-               avg(desvio_proc) as media_proc,
-               median(desvio_bruto) as mediana_bruto,
-               median(desvio_proc) as mediana_proc,
-               avg(desvio_proc - desvio_bruto) as delta_medio,
-               median(desvio_proc - desvio_bruto) as delta_mediano
-        from par
-        where desvio_bruto is not null and desvio_proc is not null
-        group by grupo
-        """
-    ).df()
-    todos = con.sql(
-        """
-        select 'todos os pares' as grupo,
-               count(*) as n,
-               avg(desvio_bruto) as media_bruto,
-               avg(desvio_proc) as media_proc,
-               median(desvio_bruto) as mediana_bruto,
-               median(desvio_proc) as mediana_proc,
-               avg(desvio_proc - desvio_bruto) as delta_medio,
-               median(desvio_proc - desvio_bruto) as delta_mediano
-        from par
-        where desvio_bruto is not null and desvio_proc is not null
-        """
-    ).df()
-    return pd.concat([todos, grupos], ignore_index=True)
-
-
-def _deslocamento(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
-    return con.sql(SQL_DESLOCAMENTO).df()
-
-
-# Um relatorio por linha: (titulo impresso, funcao que devolve a tabela).
-RELATORIOS: tuple[
-    tuple[str, Callable[[duckdb.DuckDBPyConnection], pd.DataFrame]], ...
-] = (
-    ("Cobertura", _cobertura),
-    ("Frequencia de precisao (% dentro de cada versao)", _precisao),
-    ("Desvio (metros) no total", _desvio_total),
-    ("Desvio (metros) por precisao e versao", _desvio_por_precisao),
-    ("Pareamento dos registros", _pareado),
-    ("Mudanca de precisao (n de registros)", _mudanca_precisao),
-    ("Desvio (metros) nos mesmos registros", _delta_desvio),
-    (
-        "Deslocamento (metros) entre as coordenadas bruto e processado",
-        _deslocamento,
-    ),
-)
-
-
-def relatar(con: duckdb.DuckDBPyConnection, campos: dict[str, str | None]) -> None:
-    """Imprime todos os relatorios da comparacao."""
-    imprime("Extracao de campos pelo segmentador", _segmentacao(con, campos))
-    for titulo, gerar in RELATORIOS:
-        imprime(titulo, gerar(con))
+def relatar(con: duckdb.DuckDBPyConnection) -> None:
+    """Imprime a precisão e o tipo de resultado das duas versoes."""
+    imprime("Precisao", _comparar(con, "precisao", ORDEM_PRECISAO))
+    imprime("Tipo de resultado", _comparar(con, "tipo_resultado", ORDEM_TIPO_RESULTADO))

@@ -77,6 +77,7 @@ def segmentar_lote(
     destino: Path,
     n_cores: int,
     manter_chave: bool,
+    silencioso: bool = False,
 ) -> None:
     """Segmenta um parquet de trabalho com o `padronizacao-lote`."""
     if not binario.is_file():
@@ -100,7 +101,7 @@ def segmentar_lote(
         raise typer.BadParameter(
             f"falha ao segmentar ({resultado.returncode}):\n{resultado.stderr.strip()}"
         )
-    if resultado.stdout.strip():
+    if resultado.stdout.strip() and not silencioso:
         print(resultado.stdout.strip(), flush=True)
     if not destino.exists():
         raise typer.BadParameter(

@@ -56,8 +56,16 @@ def comparar(
     reusar: Annotated[
         bool, typer.Option(help="reaproveita segmentacao e geocodificacoes ja feitas")
     ] = False,
+    silencioso: Annotated[
+        bool, typer.Option("--silencioso", help="imprime apenas as tabelas do resultado")
+    ] = False,
 ) -> None:
     """Compara o geocode do endereco bruto com o do endereco segmentado."""
+
+    def avisar(mensagem: str) -> None:
+        if not silencioso:
+            print(mensagem, flush=True)
+
     if not base.exists():
         raise typer.BadParameter(f"base nao encontrada: {base}")
     entrada = comparacao.resolver_entrada(base)
@@ -82,28 +90,35 @@ def comparar(
     }
     comparacao.validar_campos(comparacao.ler_colunas(con, entrada), campos, chave)
 
-    print(f"base: {entrada}\nsaida: {pasta_saida}\nsegmentador: {binario}")
-    print(
+    avisar(f"base: {entrada}\nsaida: {pasta_saida}\nsegmentador: {binario}")
+    avisar(
         "campos: " + ", ".join(f"{k}={v}" for k, v in campos.items() if v is not None)
     )
     if endereco is not None:
-        print(f"texto segmentado: coluna {endereco!r}")
+        avisar(f"texto segmentado: coluna {endereco!r}")
     else:
-        print("texto segmentado: logradouro + numero + complemento + localidade")
+        avisar("texto segmentado: logradouro + numero + complemento + localidade")
 
     temporaria = tempfile.TemporaryDirectory(dir=pasta_saida, prefix=".tmp_")
     estagio = Path(temporaria.name) / "estagio.parquet"
     try:
-        with comparacao.cronometrar("estagio"):
+        with comparacao.cronometrar("estagio", silencioso):
             comparacao.montar_estagio(
                 con, entrada, estagio, campos, endereco, chave, limite
             )
 
         if reusar and segmentado.exists():
-            print(f"segmentacao reutilizada: {segmentado}")
+            avisar(f"segmentacao reutilizada: {segmentado}")
         else:
-            with comparacao.cronometrar("segmentacao"):
-                segmentar_lote(binario, estagio, segmentado, n_cores, chave is not None)
+            with comparacao.cronometrar("segmentacao", silencioso):
+                segmentar_lote(
+                    binario,
+                    estagio,
+                    segmentado,
+                    n_cores,
+                    chave is not None,
+                    silencioso,
+                )
 
         entradas = comparacao.montar_entradas(
             con, estagio, segmentado, Path(temporaria.name), campos, chave
@@ -111,19 +126,19 @@ def comparar(
         for versao, arquivo in entradas.items():
             destino = destinos[versao]
             if reusar and destino.exists():
-                print(f"{versao}: reutilizado -> {destino}")
+                avisar(f"{versao}: reutilizado -> {destino}")
                 continue
-            with comparacao.cronometrar(f"geocode {versao}"):
-                linhas = comparacao.geocodificar(con, arquivo, destino, campos, n_cores)
-            print(f"{versao}: {linhas:,} linhas -> {destino}".replace(",", "."))
+            with comparacao.cronometrar(f"geocode {versao}", silencioso):
+                linhas = comparacao.geocodificar(
+                    con, arquivo, destino, n_cores, silencioso
+                )
+            avisar(f"{versao}: {linhas:,} linhas -> {destino}".replace(",", "."))
 
         for destino in destinos.values():
             if not destino.exists():
                 raise typer.BadParameter(f"saida ausente: {destino}")
 
-        comparacao.registrar_visoes(
-            con, estagio, segmentado, destinos["bruto"], destinos["processado"]
-        )
-        relatar(con, campos)
+        comparacao.registrar_visoes(con, destinos["bruto"], destinos["processado"])
+        relatar(con)
     finally:
         temporaria.cleanup()
