@@ -24,6 +24,8 @@ class Filtros:
 
     lote: str | None = None
     incluir_erros: bool = False
+    # Só linhas com `$.erro`: retry da fila sem varrer os nunca-anotados.
+    apenas_erros: bool = False
     ufs: Sequence[str] = ()
     origens: Sequence[str] = ()
     municipios: Sequence[str] = ()
@@ -40,6 +42,7 @@ class Filtros:
         return {
             "lote": self.lote,
             "incluir_erros": self.incluir_erros,
+            "apenas_erros": self.apenas_erros,
             "ufs": lista(self.ufs),
             "origens": lista(self.origens),
             "municipios": lista(self.municipios),
@@ -67,8 +70,20 @@ pend AS (
     SELECT id, endereco, extras, coalesce(uf, '') AS uf, origem
     FROM enderecos
     WHERE (
-            resposta_llm IS NULL
-            OR (:incluir_erros AND json_extract(resposta_llm, '$.erro') IS NOT NULL)
+            (
+                :apenas_erros
+                AND json_extract(resposta_llm, '$.erro') IS NOT NULL
+            )
+            OR (
+                NOT :apenas_erros
+                AND (
+                    resposta_llm IS NULL
+                    OR (
+                        :incluir_erros
+                        AND json_extract(resposta_llm, '$.erro') IS NOT NULL
+                    )
+                )
+            )
           )
       AND (:lote IS NULL OR lote = :lote)
       AND (

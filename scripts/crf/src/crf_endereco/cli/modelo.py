@@ -18,6 +18,12 @@ from crf_endereco.segmentador_rust import rodar_segmentacao
 
 OpcaoDataset = Annotated[Path, typer.Option(help="banco de anotacao")]
 OpcaoTagger = Annotated[Path, typer.Option(help="tagger treinado")]
+OpcaoEstratificar = Annotated[
+    str,
+    typer.Option(
+        help="estratificacao do split: origem, origem_uf ou nenhum."
+    ),
+]
 
 
 def treinar(
@@ -26,9 +32,10 @@ def treinar(
     fracao_teste: Annotated[
         float, typer.Option(help="fracao separada para teste")
     ] = 0.1,
+    estratificar_por: OpcaoEstratificar = "origem",
 ) -> None:
     """Treina o CRF sobre o dataset anotado."""
-    modelo_crf.treinar(dataset, saida, fracao_teste)
+    modelo_crf.treinar(dataset, saida, fracao_teste, estratificar_por=estratificar_por)
 
 
 def tunar() -> None:
@@ -37,13 +44,19 @@ def tunar() -> None:
 
 
 def avaliar(
-    dataset: OpcaoDataset = CAMINHO_DATASET, tagger: OpcaoTagger = CAMINHO_TAGGER
+    dataset: OpcaoDataset = CAMINHO_DATASET,
+    tagger: OpcaoTagger = CAMINHO_TAGGER,
+    fracao_teste: Annotated[
+        float, typer.Option(help="mesma fracao de teste usada no treino")
+    ] = 0.1,
+    estratificar_por: OpcaoEstratificar = "origem",
 ) -> None:
-    """Avalia o CRF por token e por classe."""
+    """Avalia o CRF no recorte de teste do treino, nunca no dataset inteiro."""
     exemplos = modelo_crf.carregar_exemplos(dataset)
-    relatorio.avaliar(
-        exemplos.x, exemplos.y, exemplos.categorias, exemplos.tokens, tagger
+    _, teste = modelo_crf.dividir(
+        exemplos, fracao_teste, estratificar_por=estratificar_por
     )
+    relatorio.avaliar(teste.x, teste.y, teste.categorias, teste.tokens, tagger)
 
 
 def segmentar(tagger: OpcaoTagger = CAMINHO_TAGGER) -> None:

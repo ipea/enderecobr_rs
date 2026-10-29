@@ -10,14 +10,16 @@ import typer
 
 from crf_endereco.anotacao.ontologia import TIPOS_SEGMENTO
 from crf_endereco.anotacao.pendentes import Pendente
+from crf_endereco.rotulos import mapa_tipo_segmento
 from crf_endereco.segmentador_rust import rodar_segmentacao
 from crf_endereco.ui import progresso
 
 # Rotulos que o CRF consegue emitir: espelham `TipoSegmento::TODOS` do Rust.
-# Ficam de fora `cadastro`, `ruido` e `outros`: `rotulos.mapa_tipo_segmento` os
-# colapsa em `O`, entao o modelo nunca os preve (`outros` so aparece como
-# fallback de rotulo desconhecido no Rust).
-TIPOS_QUE_O_CRF_EMITE = frozenset(TIPOS_SEGMENTO) - {"cadastro", "ruido", "outros"}
+# Derivados do proprio mapa: o que o treino colapsa em `O` (valor `None`) nao sai
+# do modelo (`outros` so aparece como fallback de rotulo desconhecido no Rust).
+TIPOS_QUE_O_CRF_EMITE = frozenset(
+    tipo for tipo in TIPOS_SEGMENTO if mapa_tipo_segmento.get(tipo, tipo) is not None
+)
 
 # Quantos enderecos vao por chamada ao segmentador (uma linha de entrada e uma
 # de saida JSON por endereco).

@@ -54,10 +54,10 @@ def test_filtrar_ids_por_tipos_seleciona_so_quem_tem_o_tipo():
     saida = [
         segmentacao("logradouro", "numero"),
         segmentacao("referencia"),
-        segmentacao("logradouro", "descricao_area"),
+        segmentacao("logradouro", "nucleo_rural"),
     ]
     selecionados = filtrar_ids_por_tipos(
-        saida, [10, 11, 12], frozenset({"referencia", "descricao_area"})
+        saida, [10, 11, 12], frozenset({"referencia", "nucleo_rural"})
     )
     assert selecionados == {11, 12}
 
@@ -87,8 +87,8 @@ def test_filtrar_ids_por_tipos_exige_mesmo_numero_de_linhas():
 
 
 def test_validar_tipos_aceita_tipo_do_modelo():
-    assert validar_tipos(["Referencia", " descricao_area "], None) == frozenset(
-        {"referencia", "descricao_area"}
+    assert validar_tipos(["Referencia", " nucleo_rural "], None) == frozenset(
+        {"referencia", "nucleo_rural"}
     )
 
 

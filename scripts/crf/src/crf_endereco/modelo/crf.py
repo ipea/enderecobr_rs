@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +22,11 @@ from crf_endereco.rotulos import mergear
 # (inclui NBSP, por exemplo); o conjunto explícito mantém as duas
 # implementações equivalentes.
 ESPACOS_ASCII = frozenset(" \t\n\x0c\r")
+
+# Como separar treino e teste. Estrategia `origem`: garante que toda origem
+# apareca dos dois lados (67% do corpus vem de tres origens, entao um split
+# aleatorio pode deixar uma delas inteira fora do teste).
+ESTRATIFICACOES = ("origem", "origem_uf", "nenhum")
 
 
 @dataclass(frozen=True)
@@ -55,18 +62,70 @@ def carregar_exemplos(caminho: Path = CAMINHO_DATASET) -> Exemplos:
     return Exemplos(x=x, y=y, tokens=tokens, categorias=categorias)
 
 
+def _chaves_estratificacao(exemplos: Exemplos, por: str) -> list[str] | None:
+    """Chave de estratificacao por exemplo (`None` desliga o estrato)."""
+    if por not in ESTRATIFICACOES:
+        raise ValueError(f"estratificacao invalida: {por} (use {ESTRATIFICACOES})")
+    if por == "nenhum":
+        return None
+    if por == "origem_uf":
+        return [f"{categoria[0]}|{categoria[1]}" for categoria in exemplos.categorias]
+    return [categoria[0] for categoria in exemplos.categorias]
+
+
+def _recortar(exemplos: Exemplos, indices: Sequence[int]) -> Exemplos:
+    """Subconjunto de `Exemplos`, preservando a ordem original."""
+    ordenados = sorted(indices)
+    return Exemplos(
+        x=[exemplos.x[i] for i in ordenados],
+        y=[exemplos.y[i] for i in ordenados],
+        tokens=[exemplos.tokens[i] for i in ordenados],
+        categorias=[exemplos.categorias[i] for i in ordenados],
+    )
+
+
+def dividir(
+    exemplos: Exemplos,
+    fracao_teste: float = 0.1,
+    semente: int = 42,
+    estratificar_por: str = "origem",
+) -> tuple[Exemplos, Exemplos]:
+    """Separa treino e teste de forma reproduzivel e estratificada.
+
+    O mesmo par (semente, estratificacao) reproduz o split em `treinar` e em
+    `avaliar`, entao a avaliacao nunca cai no dataset inteiro.
+    """
+    chaves = _chaves_estratificacao(exemplos, estratificar_por)
+    indices = list(range(len(exemplos.y)))
+    treino, teste = train_test_split(
+        indices, test_size=fracao_teste, random_state=semente, stratify=chaves
+    )
+    return _recortar(exemplos, list(treino)), _recortar(exemplos, list(teste))
+
+
+def _composicao(exemplos: Exemplos) -> Counter[tuple[str, str]]:
+    """Quantos exemplos por celula (origem, uf)."""
+    return Counter((c[0], c[1]) for c in exemplos.categorias)
+
+
 def treinar(
     dataset: Path = CAMINHO_DATASET,
     saida: Path = CAMINHO_TAGGER,
     fracao_teste: float = 0.1,
+    estratificar_por: str = "origem",
 ) -> None:
     """Treina o CRF e reporta a acuracia na fracao de teste."""
     exemplos = carregar_exemplos(dataset)
-    x_train, x_test, y_train, y_test = train_test_split(
-        exemplos.x, exemplos.y, test_size=fracao_teste, random_state=42
+    treino, teste = dividir(
+        exemplos, fracao_teste, estratificar_por=estratificar_por
     )
+    print(
+        f"Treino: {len(treino.y)} | teste: {len(teste.y)} "
+        + f"(estratificado por {estratificar_por})"
+    )
+    print(f"Composicao do teste: {dict(_composicao(teste).most_common())}")
 
-    print(f"Realizando treinamento (n={len(x_train)})...")
+    print(f"Realizando treinamento (n={len(treino.y)})...")
     saida.parent.mkdir(parents=True, exist_ok=True)
     crf = sklearn_crfsuite.CRF(
         algorithm="lbfgs",
@@ -78,11 +137,11 @@ def treinar(
         min_freq=2,
         model_filename=str(saida),
     )
-    modelo = crf.fit(x_train, y_train)
-    y_pred = modelo.predict(x_test)
+    modelo = crf.fit(treino.x, treino.y)
+    y_pred = modelo.predict(teste.x)
 
-    print(f"Acurácia: {flat_accuracy_score(y_test, y_pred):.2f}")
-    print(flat_classification_report(y_test, y_pred, zero_division=0.0))
+    print(f"Acurácia: {flat_accuracy_score(teste.y, y_pred):.2f}")
+    print(flat_classification_report(teste.y, y_pred, zero_division=0.0))
 
 
 def tunar() -> None:

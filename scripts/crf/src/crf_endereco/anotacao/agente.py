@@ -14,7 +14,10 @@ from crf_endereco.anotacao.ferramentas import Ferramentas, criar_ferramentas
 from crf_endereco.config import Config
 from crf_endereco.ui import console as console_padrao
 
-TEMPLATE_PROMPT = Path(__file__).resolve().parent / "prompt_sistema.md"
+DIR_PROMPT = Path(__file__).resolve().parent
+TEMPLATE_PROMPT = DIR_PROMPT / "prompt_sistema.md"
+EXEMPLOS = DIR_PROMPT / "exemplos.md"
+SCHEMA_CNEFE = DIR_PROMPT / "cnefe_schema.md"
 
 # `str.isspace()` e mais amplo que o `u8::is_ascii_whitespace` usado pelo Rust
 # (inclui NBSP, por exemplo); o conjunto explicito mantem as implementacoes
@@ -75,21 +78,30 @@ def fechar_agente(agente: Agente) -> None:
 
 
 def prompt_sistema(config: Config) -> str:
-    """Preenche o template do prompt de sistema com as ferramentas disponiveis."""
+    """Preenche o template do prompt de sistema com as secoes disponiveis."""
     ferramentas = [
         "- `responder`: submit the final result. Always use this tool to answer.",
         (
-            "- `sql_query`: query CNEFE in DuckDB. Restrict by município and/or "
-            "uf, always use LIMIT and avoid SELECT *."
+            "- `search`: search across several search engines to learn what an "
+            "unknown abbreviation or place name means."
         ),
+        "- `fetch_url`: fetch a URL and return its content as markdown (markitdown).",
     ]
-    if config.searx_url:
-        ferramentas.append("- `search`: search across several search engines.")
-    ferramentas.append(
-        "- `fetch_url`: fetch a URL and return its content as markdown (markitdown)."
-    )
+    if config.com_cnefe:
+        ferramentas.insert(
+            1,
+            "- `sql_query`: query CNEFE in DuckDB. Restrict by município and/or "
+            "uf, always use LIMIT and avoid SELECT *.",
+        )
     template = TEMPLATE_PROMPT.read_text(encoding="utf-8")
-    return template.replace("{secao_ferramentas}", "\n".join(ferramentas))
+    return (
+        template.replace("{secao_ferramentas}", "\n".join(ferramentas))
+        .replace(
+            "{secao_cnefe}",
+            SCHEMA_CNEFE.read_text(encoding="utf-8") if config.com_cnefe else "",
+        )
+        .replace("{secao_exemplos}", EXEMPLOS.read_text(encoding="utf-8"))
+    )
 
 
 def prompt_usuario(endereco: str, extras: str, n_rodadas: int) -> str:

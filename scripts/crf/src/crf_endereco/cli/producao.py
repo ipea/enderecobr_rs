@@ -66,9 +66,16 @@ def avulso(
         Path | None,
         typer.Option("--saida", "-o", help="Arquivo JSON de saída (padrão: stdout)."),
     ] = None,
+    com_cnefe: Annotated[
+        bool,
+        typer.Option(
+            "--com-cnefe",
+            help="Liga a ferramenta de SQL sobre o CNEFE (desligada por padrão).",
+        ),
+    ] = True,
 ) -> None:
     """Segmenta um endereço bruto em campos rotulados usando uma LLM."""
-    agente = criar_agente(carregar_config(env), console)
+    agente = criar_agente(carregar_config(env, com_cnefe=com_cnefe), console)
     try:
         resultado = segmentar(
             agente, endereco, extras, n_iter=iteracoes, tolerancia_erro=tolerancia_erro
@@ -140,6 +147,20 @@ def lote(
             help="Reprocessa linhas cujo resultado anterior foi um erro.",
         ),
     ] = False,
+    apenas_erros: Annotated[
+        bool,
+        typer.Option(
+            "--apenas-erros",
+            help="Processa SOMENTE linhas com erro anterior (não os nunca-anotados).",
+        ),
+    ] = False,
+    com_cnefe: Annotated[
+        bool,
+        typer.Option(
+            "--com-cnefe",
+            help="Liga a ferramenta de SQL sobre o CNEFE (desligada por padrão).",
+        ),
+    ] = True,
     balancear: Annotated[
         bool,
         typer.Option(
@@ -189,7 +210,8 @@ def lote(
     """Processa em lote os endereços pendentes do dataset de etiquetagem."""
     filtros = Filtros(
         lote=lote_id,
-        incluir_erros=retentar_erros,
+        incluir_erros=retentar_erros or apenas_erros,
+        apenas_erros=apenas_erros,
         ufs=dividir_filtros(uf),
         origens=dividir_filtros(origem),
         municipios=dividir_filtros(municipio),
@@ -201,7 +223,7 @@ def lote(
             f"Binário do segmentador não encontrado: {binario_crf}"
         )
 
-    config = carregar_config(env)
+    config = carregar_config(env, com_cnefe=com_cnefe)
     console_llm = console if verboso else Console(quiet=True)
 
     # Valida o ambiente (CNEFE, municipios) uma vez, antes de começar o lote.

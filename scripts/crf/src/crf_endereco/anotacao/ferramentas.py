@@ -10,9 +10,36 @@ import duckdb
 import markitdown
 import requests
 
-from crf_endereco.anotacao.cliente_http import USER_AGENT, ClienteHTTP
+from crf_endereco.anotacao.cliente_http import (
+    USER_AGENT,
+    ClienteHTTP,
+    ErroHTTP,
+)
 from crf_endereco.anotacao.ontologia import TIPOS_SEGMENTO
 from crf_endereco.config import Config
+
+
+# Primeira palavra aceita em `sql_query`: a ferramenta executa SQL escrito pela
+# LLM, então só leitura passa. Sem isso o modelo poderia escrever arquivos
+# (`COPY ... TO`), instalar extensões ou anexar outro banco.
+CONSULTAS_PERMITIDAS = frozenset({"select", "with", "describe", "summarize", "explain"})
+
+
+def validar_consulta(sql: str) -> str:
+    """Devolve a consulta normalizada ou levanta `ValueError` se não for leitura."""
+    limpo = sql.strip().rstrip(";").strip()
+    if not limpo:
+        raise ValueError("consulta vazia")
+    if ";" in limpo:
+        raise ValueError("uma instrução por chamada")
+    primeira = limpo.split(None, 1)[0].lower()
+    if primeira not in CONSULTAS_PERMITIDAS:
+        raise ValueError(
+            "apenas consultas de leitura ("
+            + ", ".join(sorted(CONSULTAS_PERMITIDAS))
+            + ")"
+        )
+    return limpo
 
 
 def _criar_json_schema_funcao(
@@ -78,14 +105,19 @@ def criar_ferramentas(config: Config) -> list[dict[str, Any]]:
             ["url"],
             estrita=estrita,
         ),
-        _criar_json_schema_funcao(
-            "sql_query",
-            "Run a SQL query using DuckDB over CNEFE.",
-            {"sql": {"type": "string", "description": "SQL to execute"}},
-            ["sql"],
-            estrita=estrita,
-        ),
     ]
+
+    if config.com_cnefe:
+        ferramentas.insert(
+            1,
+            _criar_json_schema_funcao(
+                "sql_query",
+                "Run a SQL query using DuckDB over CNEFE.",
+                {"sql": {"type": "string", "description": "SQL to execute"}},
+                ["sql"],
+                estrita=estrita,
+            ),
+        )
 
     if config.searx_url:
         ferramentas.append(
@@ -110,13 +142,27 @@ class Ferramentas:
         self.md = markitdown.MarkItDown()
 
         # Conexão efêmera e privada da thread: DuckDB não é thread-safe, então
-        # cada `Ferramentas` (e cada worker do modo lote) tem a sua.
-        self.conn = duckdb.connect()
-        self.conn.register("cnefe", self.conn.read_parquet(config.cnefe))
-        self.conn.register("municipio", self.conn.read_csv(str(config.municipios)))
+        # cada `Ferramentas` (e cada worker do modo lote) tem a sua. Só existe
+        # quando a ferramenta de SQL está ligada (`--com-cnefe`).
+        self.conn: duckdb.DuckDBPyConnection | None = None
+        if config.com_cnefe:
+            self.conn = duckdb.connect()
+            self.conn.register("cnefe", self.conn.read_parquet(config.cnefe))
+            self.conn.register(
+                "municipio", self.conn.read_csv(str(config.municipios))
+            )
 
     def fechar(self) -> None:
-        self.conn.close()
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
+
+    @property
+    def conexao(self) -> duckdb.DuckDBPyConnection:
+        """Conexao do DuckDB, exigindo a ferramenta ligada (`--com-cnefe`)."""
+        if self.conn is None:
+            raise RuntimeError("sql_query desligada: rode com --com-cnefe")
+        return self.conn
 
     def despachar(self, nome: str, argumentos: Mapping[str, Any]) -> str:
         match nome:
@@ -138,7 +184,7 @@ class Ferramentas:
                 self.config.searx_url, params={"q": query, "format": "json"}
             )
             resultados = res.json().get("results", [])
-        except (requests.RequestException, ValueError) as e:
+        except (requests.RequestException, ErroHTTP, ValueError) as e:
             return f"An error occurred while searching for '{query}': {e!s}"
 
         blocos = []
@@ -160,6 +206,7 @@ conteúdo: {resultado.get("content", "")}
             return str(self.md.convert(res).markdown)
         except (
             requests.RequestException,
+            ErroHTTP,
             markitdown.MarkItDownException,
             ValueError,
             OSError,
@@ -167,18 +214,31 @@ conteúdo: {resultado.get("content", "")}
             return f"An error occurred while fetching '{url}': {e!s}"
 
     def consultar_sql(self, sql: str) -> str:
+        """Executa SQL arbitrario da LLM sobre `cnefe`/`municipio`.
+
+        E o objetivo da ferramenta: a LLM consulta a base livremente. O sandbox
+        e o DuckDB local (efemero, por thread, so com as duas tabelas
+        registradas) mais o `interrupt()` do watchdog — nao ha escrita nem
+        usuario no caminho.
+        """
+        if self.conn is None:
+            return "The SQL tool is disabled in this run; answer without it."
+        try:
+            consulta_sql = validar_consulta(sql)
+        except ValueError as erro:
+            return f"Query rejected: {erro!s}"
         # Watchdog: interrompe a query se passar de `timeout_sql` segundos.
-        # `interrupt()` é thread-safe e deixa a conexão reutilizável.
+        # `interrupt()` e thread-safe e deixa a conexao reutilizavel.
         expirou = threading.Event()
 
         def _interromper() -> None:
             expirou.set()
-            self.conn.interrupt()
+            self.conexao.interrupt()
 
         timer = threading.Timer(self.config.timeout_sql, _interromper)
         timer.start()
         try:
-            consulta = self.conn.execute(sql)
+            consulta = self.conexao.execute(consulta_sql)
             colunas = [str(col[0]) for col in consulta.description]
             resultado = consulta.fetchall()
         except duckdb.Error as e:

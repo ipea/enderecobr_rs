@@ -2,12 +2,12 @@
 
 from collections.abc import Callable
 
+# Tradução tipo da anotação -> rótulo do treino. Ausente do mapa = treina com o
+# próprio tipo; `None` = não treina (o token vira `O`).
 mapa_tipo_segmento: dict[str, str | None] = {
-    "logradouro_interno": "logradouro",
     "cadastro": None,
     "ruido": None,
     "outros": None,
-    "descricao_area": "logradouro",
 }
 
 

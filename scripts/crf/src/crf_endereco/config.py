@@ -39,13 +39,17 @@ class Config:
     # `strict: true` no schema das ferramentas e opcional: alguns backends
     # (`deepseek-v4.1-flash`, por exemplo) respondem HTTP 500 com ele.
     tools_estritas: bool = False
+    # Liga a ferramenta `sql_query` (CNEFE). Desligada por padrao: consultar a
+    # base fazia o modelo herdar a convencao de rotulo de cada municipio
+    # (VILA virava `logradouro` so quando havia consulta).
+    com_cnefe: bool = True
 
     @property
     def url_chat(self) -> str:
         return f"{self.api_url}/v1/chat/completions"
 
 
-def carregar_config(env: Path = Path(".env")) -> Config:
+def carregar_config(env: Path = Path(".env"), *, com_cnefe: bool = True) -> Config:
     """Le o `.env` (quando existe) e resolve o ambiente da anotacao."""
     if env.is_file():
         load_dotenv(env)
@@ -65,6 +69,7 @@ def carregar_config(env: Path = Path(".env")) -> Config:
         searx_url=searx_url,
         timeout_sql=_float("TIMEOUT_SQL", 15.0),
         tools_estritas=_booleano("API_TOOLS_STRICT", False),
+        com_cnefe=com_cnefe,
     )
 
 
