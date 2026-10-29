@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import time
 import warnings
@@ -367,7 +368,28 @@ def _comparar(
     return df.sort_values("_posicao").drop(columns="_posicao").reset_index(drop=True)
 
 
+# Pesos lineares decrescentes: posição 0 = 1.0, última = 1/n
+def calcular_score_linear(df: pd.DataFrame) -> float:
+    n = len(df)
+    props = df["prop_estruturado"].tolist()
+    total = sum(((n - i) / n) * (prop / 100.0) for i, prop in enumerate(props))
+    return float(total)
+
+
+def calcular_ndcg(df: pd.DataFrame) -> float:
+    n = len(df)
+    props = df["prop_estruturado"].tolist()
+    dcg = sum((prop / 100.0) / math.log2(i + 2) for i, prop in enumerate(props))
+    idcg = sum(1 / math.log2(i + 2) for i in range(n))
+    return float(dcg / idcg) if idcg > 0 else 0.0
+
+
 def relatar(con: duckdb.DuckDBPyConnection) -> None:
     """Imprime a precisão e o tipo de resultado das duas versoes."""
     imprime("Precisao", _comparar(con, "precisao", ORDEM_PRECISAO))
-    imprime("Tipo de resultado", _comparar(con, "tipo_resultado", ORDEM_TIPO_RESULTADO))
+    df_tipo_resultado = _comparar(con, "tipo_resultado", ORDEM_TIPO_RESULTADO)
+    imprime("Tipo de resultado", df_tipo_resultado)
+
+    print("Scores de qualidade do geocode: \n=============")
+    print(f"Score linear: {100 * calcular_score_linear(df_tipo_resultado):.2f}")
+    print(f"NDCG: {100 * calcular_ndcg(df_tipo_resultado):.2f}")
