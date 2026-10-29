@@ -1,6 +1,7 @@
-.PHONY: test popular etiquetar treinar tunar avaliar segmentar diferencial geocode instalar
+.PHONY: test popular etiquetar treinar tunar avaliar segmentar diferencial geocode otimizar instalar
 
 DIR_DADOS = ./data
+N ?= 60000
 
 include .env
 export
@@ -30,6 +31,9 @@ diferencial:
 
 geocode:
 	uv run crf geocode comparar $(BASE) --estado $(ESTADO) --municipio $(MUNICIPIO)
+
+otimizar:
+	uv run python scripts/otimizar_politica.py --n $(N)
 
 test:
 	uv run pytest
