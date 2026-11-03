@@ -1087,7 +1087,7 @@ class TipoSegmento:
 
     As variantes são exatamente as mesmas do enum `TipoSegmento` do Rust, na
     mesma ordem, e cada uma se compara igual ao seu valor inteiro
-    (``TipoSegmento.Cep == 12``, ``int(TipoSegmento.Cep) == 12``).
+    (``TipoSegmento.Cep == 14``, ``int(TipoSegmento.Cep) == 14``).
 
     Variantes, na ordem do enum:
 
@@ -1098,14 +1098,18 @@ class TipoSegmento:
     - [Complemento][enderecobr.TipoSegmento.Complemento]
     - [Empreendimento][enderecobr.TipoSegmento.Empreendimento]
     - [Parcela][enderecobr.TipoSegmento.Parcela]
-    - [DescricaoArea][enderecobr.TipoSegmento.DescricaoArea]
     - [QuilometragemVia][enderecobr.TipoSegmento.QuilometragemVia]
     - [Referencia][enderecobr.TipoSegmento.Referencia]
+    - [PontoReferencia][enderecobr.TipoSegmento.PontoReferencia]
     - [Denominacao][enderecobr.TipoSegmento.Denominacao]
     - [Localidade][enderecobr.TipoSegmento.Localidade]
+    - [NucleoRural][enderecobr.TipoSegmento.NucleoRural]
+    - [RecursoNatural][enderecobr.TipoSegmento.RecursoNatural]
     - [Cep][enderecobr.TipoSegmento.Cep]
     - [Municipio][enderecobr.TipoSegmento.Municipio]
     - [Uf][enderecobr.TipoSegmento.Uf]
+    - [Cadastro][enderecobr.TipoSegmento.Cadastro]
+    - [Ruido][enderecobr.TipoSegmento.Ruido]
     - [Outro][enderecobr.TipoSegmento.Outro]
 
     Examples
@@ -1144,11 +1148,6 @@ class TipoSegmento:
     Identificador cadastral do terreno (uma `gleba` pode conter uma `quadra` que pode conter um `lote`): `QD 34 LOTE 17`.
     """
 
-    DescricaoArea: TipoSegmento
-    """
-    Descrição textual de área, seu uso ou medição; nunca um identificador. Ex.: `8.000,00 m²`, `ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...`, `MAR TERRITORIAL`, `MARGEM ESQUERDA`.
-    """
-
     QuilometragemVia: TipoSegmento
     """
     Quilometragem em rodovia, onde o número é a posição ao longo da via: `KM 304`.
@@ -1159,11 +1158,26 @@ class TipoSegmento:
     Trecho que aponta para outro endereço ou lugar: `ESQUINA COM AV BOA VIAGEM`.
     """
 
+    PontoReferencia: TipoSegmento
+    """
+    Referente de uma referência que não é via, lugar nem feição natural: `CLUBE`, `CASA DE GRACIENE`.
+    """
+
     Denominacao: TipoSegmento
     """Nome atual ou antigo da via ou do lugar: `ANTIGA RUA B`."""
 
     Localidade: TipoSegmento
     """Localidade, bairro, distrito, vila ou zona: `PINA`, `ZONA RURAL`."""
+
+    NucleoRural: TipoSegmento
+    """
+    Cabeça + nome de lugar rural: `POVOADO AGUA PRETA`, `SITIO MIRADOR`, `ALDEIA X`. Especialização de `localidade`.
+    """
+
+    RecursoNatural: TipoSegmento
+    """
+    Feição natural nomeada, onde quer que apareça: `RIO`, `CORREGO`, `LAGOA`, `MORRO`, `SERRA`, `ILHA`.
+    """
 
     Cep: TipoSegmento
     """Código de endereçamento postal."""
@@ -1173,6 +1187,14 @@ class TipoSegmento:
 
     Uf: TipoSegmento
     """Unidade federativa."""
+
+    Cadastro: TipoSegmento
+    """Código de cadastro do imóvel ou da unidade: `RI 16.282`, `MAT. 219.747`."""
+
+    Ruido: TipoSegmento
+    """
+    Token solto sem valor: pontuação, separador, id de processo vazado, lat/lon.
+    """
 
     Outro: TipoSegmento
     """

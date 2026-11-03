@@ -90,22 +90,33 @@ pub enum TipoSegmento {
     Empreendimento,
     /// Identificador cadastral do terreno (gleba ⊃ quadra ⊃ lote): `QD 34 LOTE 17`.
     Parcela,
-    /// Descrição textual de área, seu uso ou medição. Nunca é um identificador. Ex.: `8.000,00 m²`, `ÁREA DE TERRA SITUADA NO LUGAR DENOMINADO...`, `MAR TERRITORIAL`, `MARGEM ESQUERDA`.
-    DescricaoArea,
     /// Quilometragem em rodovia, onde o número é a posição ao longo da via: `KM 304`.
     QuilometragemVia,
-    /// Trecho que aponta para outro endereço ou lugar: `ESQUINA COM AV BOA VIAGEM`.
+    /// Trecho que aponta para outro endereço ou lugar: `ESQUINA COM`.
     Referencia,
+    /// Referente de uma referência que não é via, lugar nem feição natural:
+    /// `CLUBE`, `CASA DE JOAO`. É uma categoria residual.
+    PontoReferencia,
     /// Nome atual ou antigo da via ou do lugar: `ANTIGA RUA B`.
     Denominacao,
     /// Localidade, bairro, distrito, vila ou zona: `PINA`, `ZONA RURAL`.
     Localidade,
+    /// Cabeça + nome de lugar rural: `POVOADO AGUA PRETA`, `SITIO MIRADOR`,
+    /// `ALDEIA X`. Especialização de `localidade`.
+    NucleoRural,
+    /// Ponto de interesse natural, onde quer que apareça: `RIO`, `CORREGO`, `LAGOA`,
+    /// `MORRO`, `SERRA`, `ILHA`.
+    RecursoNatural,
     /// CEP.
     Cep,
     /// Município.
     Municipio,
     /// Unidade federativa.
     Uf,
+    /// Código de cadastro do imóvel ou da unidade: `RI 16.282`, `MAT. 219.747`.
+    Cadastro,
+    /// Token solto sem valor: pontuação, separador, id de processo vazado, lat/lon.
+    Ruido,
     /// Conteúdo que não cabe em nenhum outro tipo — inclusive rótulo que ainda
     /// não tem variante própria.
     Outro,
@@ -120,7 +131,7 @@ impl TipoSegmento {
     /// let rotulos: Vec<&str> = TipoSegmento::TODOS.iter().map(|tipo| tipo.como_str()).collect();
     /// assert_eq!(rotulos[..3], ["logradouro", "logradouro_interno", "numero"]);
     /// ```
-    pub const TODOS: [TipoSegmento; 16] = [
+    pub const TODOS: [TipoSegmento; 20] = [
         TipoSegmento::Logradouro,
         TipoSegmento::LogradouroInterno,
         TipoSegmento::Numero,
@@ -128,14 +139,18 @@ impl TipoSegmento {
         TipoSegmento::Complemento,
         TipoSegmento::Empreendimento,
         TipoSegmento::Parcela,
-        TipoSegmento::DescricaoArea,
         TipoSegmento::QuilometragemVia,
         TipoSegmento::Referencia,
+        TipoSegmento::PontoReferencia,
         TipoSegmento::Denominacao,
         TipoSegmento::Localidade,
+        TipoSegmento::NucleoRural,
+        TipoSegmento::RecursoNatural,
         TipoSegmento::Cep,
         TipoSegmento::Municipio,
         TipoSegmento::Uf,
+        TipoSegmento::Cadastro,
+        TipoSegmento::Ruido,
         TipoSegmento::Outro,
     ];
 
@@ -155,14 +170,18 @@ impl TipoSegmento {
             TipoSegmento::Complemento => "complemento",
             TipoSegmento::Empreendimento => "empreendimento",
             TipoSegmento::Parcela => "parcela",
-            TipoSegmento::DescricaoArea => "descricao_area",
             TipoSegmento::QuilometragemVia => "quilometragem_via",
             TipoSegmento::Referencia => "referencia",
+            TipoSegmento::PontoReferencia => "ponto_referencia",
             TipoSegmento::Denominacao => "denominacao",
             TipoSegmento::Localidade => "localidade",
+            TipoSegmento::NucleoRural => "nucleo_rural",
+            TipoSegmento::RecursoNatural => "recurso_natural",
             TipoSegmento::Cep => "cep",
             TipoSegmento::Municipio => "municipio",
             TipoSegmento::Uf => "uf",
+            TipoSegmento::Cadastro => "cadastro",
+            TipoSegmento::Ruido => "ruido",
             TipoSegmento::Outro => "outros",
         }
     }
@@ -601,7 +620,7 @@ pub fn segmento_como_endereco(segmentado: &EnderecoSegmentado, padronizar: bool)
     let mut res = Endereco::default();
     for (i, seg) in segmentado.segmentos.iter().enumerate() {
         let atributo_opt = match seg.tipo {
-            TipoSegmento::Logradouro if res.logradouro.is_none() => {
+            TipoSegmento::Logradouro | TipoSegmento::Denominacao if res.logradouro.is_none() => {
                 Some(res.logradouro.get_or_insert_with(String::new))
             }
             TipoSegmento::Parcela
@@ -628,9 +647,25 @@ pub fn segmento_como_endereco(segmentado: &EnderecoSegmentado, padronizar: bool)
             TipoSegmento::Empreendimento if res.localidade.is_none() => {
                 Some(res.localidade.get_or_insert_with(String::new))
             }
-            TipoSegmento::Localidade => Some(res.localidade.get_or_insert_with(String::new)),
+            TipoSegmento::Localidade | TipoSegmento::NucleoRural => {
+                Some(res.localidade.get_or_insert_with(String::new))
+            }
             TipoSegmento::Cep => Some(res.cep.get_or_insert_with(String::new)),
-            _ => None,
+            // TODO: portar a política pós-CRF; até lá estes tipos são descartados.
+            // `logradouro` e `empreendimento` aparecem aqui só para fechar a
+            // exaustividade: quando o guard deles falha, o trecho é descartado.
+            TipoSegmento::Logradouro
+            | TipoSegmento::Empreendimento
+            | TipoSegmento::LogradouroInterno
+            | TipoSegmento::Referencia
+            | TipoSegmento::PontoReferencia
+            | TipoSegmento::Denominacao
+            | TipoSegmento::RecursoNatural
+            | TipoSegmento::Municipio
+            | TipoSegmento::Uf
+            | TipoSegmento::Cadastro
+            | TipoSegmento::Ruido
+            | TipoSegmento::Outro => None,
         };
 
         if let Some(atributo) = atributo_opt {
