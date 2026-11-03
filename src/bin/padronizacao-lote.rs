@@ -1,9 +1,11 @@
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
 use enderecobr_rs::padronizar_estados_para_sigla;
+use enderecobr_rs::separador_endereco::modelo::VAR_AMBIENTE_MODELO;
 use enderecobr_rs::separador_endereco::segmento_como_endereco;
 use enderecobr_rs::{
     padronizar_bairros, padronizar_cep_leniente, padronizar_complementos, padronizar_logradouros,
@@ -142,6 +144,10 @@ struct Args {
         value_parser = parsear
     )]
     campos: Vec<EspecificacaoCampo>,
+
+    /// Caminho do modelo CRF usado na segmentação de `-e/--endereco`.
+    #[arg(long, value_name = "ARQUIVO")]
+    modelo: Option<PathBuf>,
 }
 
 fn processar_campo(df: LazyFrame, campo: &EspecificacaoCampo, schema: &Arc<Schema>) -> LazyFrame {
@@ -291,6 +297,11 @@ fn limitar_threads(threads: Option<usize>) {
 fn main() {
     let args = Args::parse();
     limitar_threads(args.threads);
+
+    // O modelo é escolhido pela mesma variável que a biblioteca já consulta.
+    if let Some(modelo) = args.modelo {
+        std::env::set_var(VAR_AMBIENTE_MODELO, modelo);
+    }
 
     let inicio_execucao = Instant::now();
     let timing = args.timing;
