@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import zlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated
 
+import sklearn_crfsuite
 import typer
 from rich.table import Table
 from rich.text import Text
@@ -56,22 +57,17 @@ def explicar(
     """Disseca a segmentação de um endereço, etapa por etapa.
 
     Mostra, na ordem do pipeline real de inferência: tokenização, features do
-    CRF com os pesos aprendidos que sustentam a tag prevista de cada token
-    (com a probabilidade marginal), e a remontagem dos segmentos verbatim.
+    CRF com os pesos que sustentam a tag prevista de cada token (mais a tag
+    concorrente e a probabilidade marginal) e a remontagem dos segmentos
+    verbatim.
     """
     crf = modelo_crf.carregar_tagger(tagger)
     extrator = ExtratorFeature()
-    tokens_com_offset = tokenize_com_offsets(endereco)
-    tokens = [tok for tok, _ in tokens_com_offset]
-    x = extrator.tokens2features(tokens)
-    tags = crf.predict_single(x)
-    marginais = crf.predict_marginals_single(x)
-    segmentos = modelo_crf.montar_segmentos(endereco, tokens_com_offset, tags)
 
     _entrada(endereco)
-    _tokenizacao(tokens)
-    _previsao(tokens, x, tags, marginais, crf.state_features_ or {})
-    _remontagem(endereco, tokens_com_offset, tags, segmentos)
+    _tokenizacao(endereco)
+    _previsao(endereco, extrator, crf)
+    _remontagem(endereco, crf)
 
 
 def _entrada(endereco: str) -> None:
@@ -83,9 +79,10 @@ def _entrada(endereco: str) -> None:
     )
 
 
-def _tokenizacao(tokens: list[str]) -> None:
+def _tokenizacao(endereco: str) -> None:
+    tokens_com_offset = tokenize_com_offsets(endereco)
     console.rule("[bold]2. Tokenização[/bold]")
-    painel = Text(" │ ").join(Text(tok, style="bold") for tok in tokens)
+    painel = Text(" │ ").join(Text(tok, style="bold") for tok, _ in tokens_com_offset)
     console.print(painel)
     console.print(
         "[dim]Cada token é uma corrida de letras, uma corrida de números ou um "
@@ -95,49 +92,71 @@ def _tokenizacao(tokens: list[str]) -> None:
 
 
 def _previsao(
-    tokens: list[str],
-    x: list[dict[str, float]],
-    tags: list[str],
-    marginais: Sequence[Mapping[str, float]],
-    state_features: Mapping[tuple[str, str], float],
+    endereco: str, extrator: ExtratorFeature, crf: sklearn_crfsuite.CRF
 ) -> None:
+    tokens_com_offset = tokenize_com_offsets(endereco)
+    tokens = [tok for tok, _ in tokens_com_offset]
+    x = extrator.tokens2features(tokens)
+    tags = crf.predict_single(x)
+    marginais = crf.predict_marginals_single(x)
+    state_features = crf.state_features_ or {}
+
     console.rule("[bold]3. Features, pesos e previsão, token a token[/bold]")
     tabela = Table(box=None, padding=(0, 2, 0, 0))
     tabela.add_column("#", justify="right", style="dim")
     tabela.add_column("token", style="bold")
     tabela.add_column(
-        "features e pesos (p/ a tag prevista)", overflow="fold", max_width=72
+        "features e pesos (p/ a tag prevista)", overflow="fold", max_width=64
     )
-    tabela.add_column("tag prevista")
-    tabela.add_column("p", justify="right")
+    tabela.add_column("tag prevista (p)")
+    tabela.add_column("2ª (p)", justify="right")
 
     for i, (tok, tag) in enumerate(zip(tokens, tags, strict=True)):
         prob = marginais[i].get(tag, float("nan"))
+        rival, p_rival = _concorrente(marginais[i], tag)
+        prevista = _texto_tag(tag)
+        prevista.append(f" {prob:.3f}", style="dim")
         tabela.add_row(
             str(i),
             tok,
             features_com_pesos(x[i], tag, state_features),
-            _texto_tag(tag),
-            f"{prob:.3f}",
+            prevista,
+            Text(f"{rival} {p_rival:.3f}", style="dim"),
         )
     console.print(tabela)
     console.print(
-        "[dim]O CRF nem olha para as palavras: cada token vira essas features "
-        "(bias, posição, tamanho, vizinhos ±2...). O peso ao lado segue um mapa "
-        "de calor: verde puxa a favor da tag, vermelho empurra contra — quanto "
-        "mais forte a cor, maior o peso; um traço marca combinação que ficou "
-        "sem peso no treino (min_freq). A soma dessas contribuições, mais as "
-        "soma dessas contribuições, mais as transições entre tags, dá a "
-        "probabilidade ao lado.[/dim]"
+        "[dim]O CRF nem olha para as palavras: cada token vira essas features. O "
+        "peso segue um mapa de calor — verde soma a favor da tag prevista, "
+        "vermelho empurra contra, cor forte = peso grande; o traço marca "
+        "combinação sem peso no treino. O número ao lado da tag é a "
+        "probabilidade marginal dela, e a coluna 2ª é a rival mais próxima — "
+        "quanto mais empatadas, mais vale ler os pesos com atenção.[/dim]"
     )
+    _glossario()
 
 
-def _remontagem(
-    endereco: str,
-    tokens_com_offset: list[tuple[str, int]],
-    tags: list[str],
-    segmentos: list[dict[str, str]],
-) -> None:
+def _glossario() -> None:
+    tabela = Table(box=None, show_header=False, padding=(0, 1, 0, 0))
+    tabela.add_column(style="dim")
+    tabela.add_column(style="dim")
+    for exemplo, significado in [
+        ("bias, 2_pos", "sempre presente; _pos = faixa de posição do token (0–3)"),
+        ("0:RUA", "a própria palavra, normalizada e em maiúsculas"),
+        ("0:tam:6", "comprimento da palavra (máx. 10; zeros à esquerda ignorados)"),
+        ("-1:APTO, 2:CENTRO", "palavra do vizinho; a busca salta pontuação"),
+        ("0:is_digit/alpha/punct", "só um desses tipos por token"),
+        ("0:marcador_df / palmas", "vocabulário típico de Brasília / Palmas"),
+        ("0:sigla_estado", "UF (SP, RJ, …)"),
+        ("tem_pontuacao:2", "havia pontuação a caminho do vizinho 2"),
+        ("BOS, EOS", "primeiro / último token do endereço"),
+    ]:
+        tabela.add_row(exemplo, significado)
+    console.print()
+    console.print(tabela)
+
+
+def _remontagem(endereco: str, crf: sklearn_crfsuite.CRF) -> None:
+    tokens_com_offset, _, tags, _, segmentos = _prever(endereco, ExtratorFeature(), crf)
     console.rule("[bold]4. Remontagem dos segmentos[/bold]")
     if not segmentos:
         console.print("[yellow]nenhum segmento reconhecido[/yellow]")
@@ -151,6 +170,31 @@ def _remontagem(
     console.print(
         "[dim]Os valores voltam verbatim — o espaço entre tokens só é refeito "
         'se existia no texto bruto, então "S/N" e "310A" sobrevivem.[/dim]'
+    )
+
+
+def _prever(
+    endereco: str, extrator: ExtratorFeature, crf: sklearn_crfsuite.CRF
+) -> tuple[
+    list[tuple[str, int]],
+    list[dict[str, float]],
+    list[str],
+    list[dict[str, float]],
+    list[dict[str, str]],
+]:
+    tokens_com_offset = tokenize_com_offsets(endereco)
+    tokens = [tok for tok, _ in tokens_com_offset]
+    x = extrator.tokens2features(tokens)
+    tags = crf.predict_single(x)
+    marginais = crf.predict_marginals_single(x)
+    segmentos = modelo_crf.montar_segmentos(endereco, tokens_com_offset, tags)
+    return tokens_com_offset, x, tags, marginais, segmentos
+
+
+def _concorrente(marginal: Mapping[str, float], tag: str) -> tuple[str, float]:
+    return max(
+        (par for par in marginal.items() if par[0] != tag),
+        key=lambda par: par[1],
     )
 
 

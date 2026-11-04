@@ -16,6 +16,7 @@ data/anotado/dataset.sqlite   um endereço bruto por linha
 data/modelos/tagger.crf       ── crf treinar ── crf avaliar / crf inspecionar
         │
         ├── crf segmentar          endereço avulso pelo stdin
+        ├── crf explicar           dissec a segmentação de um endereço, etapa por etiqueta
         ├── crf diferencial        Python vs binário Rust (mesmo modelo)
         └── crf geocode comparar   geocode com o endereço bruto vs segmentado
 ```
@@ -29,9 +30,17 @@ crf etiquetar lote data/anotado/dataset.sqlite --uf RJ --origem siase -l 500
 crf treinar
 crf avaliar
 crf segmentar
+crf explicar "RUA DAS FLORES 123 APTO 45 - CENTRO"
 crf diferencial
 crf geocode comparar data/brutos/rais_test/ --estado uf --municipio municipio
+crf geocode comparar data/anotado/dataset.sqlite --estado uf --municipio municipio \
+    --endereco endereco --modelo data/modelos/tagger_v6.crf
 ```
+
+`crf geocode comparar` aceita parquet (arquivo, diretório ou glob) ou o dataset
+em sqlite (tabela `enderecos`, lida pelo scanner do DuckDB); `--modelo` aponta o
+tagger usado na segmentação e entra no nome das saídas, para trocar de modelo sem
+sobrescrever execuções anteriores.
 
 `make` expõe os mesmos comandos (`make test`, `make etiquetar`, ...).
 
@@ -65,7 +74,7 @@ Tudo em uma consulta (`anotacao/pendentes.py`).
 | `anotacao/populacao/` | uma base pública por arquivo (`Fonte` = SQL + mapeamento) |
 | `geocode/comparacao.py` | comparação bruto vs segmentado (relatórios) |
 | `segmentador_rust.py` | único adaptador do binário do `enderecobr_rs` |
-| `cli/` | cola do typer: `producao`, `modelo`, `geocode` |
+| `cli/` | cola do typer: `producao`, `modelo`, `geocode`, `explicar` |
 
 Nada fora de `config.py` monta caminho: `CRF_DATA_DIR` (padrão `./data`),
 `CNEFE_PATH` e `MUNICIPIOS_PATH` sobrescrevem os padrões. `data/` é ignorado
