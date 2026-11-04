@@ -4,9 +4,9 @@ use pyo3::prelude::*;
 
 /// Endereço com os campos já separados.
 ///
-/// Pode ser criado vazio (``Endereco()``), com os campos que você já tem, ou
-/// obtido a partir de um texto com :func:`estruturar_endereco`. Campos ausentes
-/// ficam como ``None``.
+/// Pode ser criado vazio (`Endereco()`), com os campos que você já tem, ou
+/// obtido a partir de um texto com `estruturar_endereco`. Campos ausentes
+/// ficam como `None`.
 ///
 /// Cria um endereço informando apenas os campos que existem.
 ///
@@ -22,20 +22,20 @@ use pyo3::prelude::*;
 ///     Bairro ou localidade.
 /// cep : str or None, optional
 ///     CEP, que pode vir em qualquer formato (a padronização é feita
-///     depois, por :meth:`padronizar`).
+///     depois, por `padronizar`).
 ///
 /// Attributes
 /// ----------
 /// logradouro : str or None
 ///     Nome do logradouro (rua, avenida etc.).
 /// numero : str or None
-///     Número do imóvel; ``S/N`` quando não houver.
+///     Número do imóvel; `S/N` quando não houver.
 /// complemento : str or None
 ///     Complemento do imóvel (apartamento, bloco, loja etc.).
 /// localidade : str or None
 ///     Bairro ou localidade.
 /// cep : str or None
-///     CEP no formato ``XXXXX-XXX``.
+///     CEP no formato `XXXXX-XXX`.
 ///
 /// Examples
 /// --------
@@ -126,8 +126,8 @@ impl Endereco {
 
     /// Junta os campos preenchidos em um único texto, separados por vírgula.
     ///
-    /// Campos ``None`` ou vazios são omitidos. É o mesmo texto devolvido por
-    /// ``str(endereco)``.
+    /// Campos `None` ou vazios são omitidos. É o mesmo texto devolvido por
+    /// `str(endereco)`.
     ///
     /// Returns
     /// -------
@@ -180,13 +180,13 @@ impl Endereco {
     /// Serializa o endereço em JSON.
     ///
     /// As chaves seguem a ordem dos campos e os campos ausentes saem como
-    /// ``null`` — o mesmo formato usado nos dumps de endereços estruturados.
+    /// `null` — o mesmo formato usado nos dumps de endereços estruturados.
     ///
     /// Returns
     /// -------
     /// str
-    ///     JSON com as chaves ``logradouro``, ``numero``, ``complemento``,
-    ///     ``localidade`` e ``cep``.
+    ///     JSON com as chaves `logradouro`, `numero`, `complemento`,
+    ///     `localidade` e `cep`.
     ///
     /// Examples
     /// --------

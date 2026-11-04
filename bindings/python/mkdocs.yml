@@ -37,6 +37,19 @@ plugins:
             # filters: public # Sponsors only!
             filters:
               - "!^_"
+              # Variantes de `TipoSegmento`: cada uma é instância do próprio
+              # enum, então o mkdocstrings repetiria a docstring da classe em
+              # cada uma. As descrições ficam na docstring do enum.
+              - "!^(Logradouro|LogradouroInterno|Numero|ModificadorNumero|\
+                 Complemento|Empreendimento|Parcela|QuilometragemVia|Referencia|\
+                 PontoReferencia|Denominacao|Localidade|NucleoRural|\
+                 RecursoNatural|Cep|Municipio|Uf|Cadastro|Ruido|Outro)$"
+              # Constantes do modelo: `str` vinda do Rust, então o mkdocstrings
+              # mostraria o docstring de `str`. Estão descritas no docstring do
+              # módulo, na seção Attributes.
+              - "!^(MODEL_DOWNLOAD_PATH|NOME_ARQUIVO_MODELO|\
+                 NOME_DIRETORIO_CACHE|VERSAO_MODELO|VAR_AMBIENTE_MODELO|\
+                 VAR_AMBIENTE_SEM_DOWNLOAD)$"
 
             # Show class inherited members.
             inherited_members: true

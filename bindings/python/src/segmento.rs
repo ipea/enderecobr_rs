@@ -4,9 +4,9 @@ use pyo3::prelude::*;
 
 /// Um trecho do endereço e o atributo a que ele corresponde.
 ///
-/// Em geral os objetos vêm prontos de :func:`segmentar_endereco`, mas dá para
+/// Em geral os objetos vêm prontos de `segmentar_endereco`, mas dá para
 /// montar um à mão — útil ao reidratar o resultado de
-/// :meth:`EnderecoSegmentado.como_json` ou ao testar
+/// `EnderecoSegmentado.como_json` ou ao testar
 /// código que só lê os segmentos.
 ///
 /// Parameters
@@ -44,30 +44,30 @@ pub struct SegmentoEndereco {
 ///
 /// As variantes são exatamente as mesmas do enum `TipoSegmento` do Rust, na
 /// mesma ordem, e cada uma se compara igual ao seu valor inteiro
-/// (``TipoSegmento.Cep == 14``, ``int(TipoSegmento.Cep) == 14``).
+/// (`TipoSegmento.Cep == 14`, `int(TipoSegmento.Cep) == 14`).
 ///
 /// Variantes, na ordem do enum:
 ///
-/// - [Logradouro][enderecobr.TipoSegmento.Logradouro]: Tipo de via + título + nome: `R ALCIDES CARNEIRO LEAL`, `ROD BR-116`.
-/// - [LogradouroInterno][enderecobr.TipoSegmento.LogradouroInterno]: Via ou área interna de um empreendimento, fora do arruamento oficial.
-/// - [Numero][enderecobr.TipoSegmento.Numero]: Numeração predial, inclusive quando ausente: `71`, `S/N`.
-/// - [ModificadorNumero][enderecobr.TipoSegmento.ModificadorNumero]: Sufixo ou marcador preso ao número: `A`, `504-B1`, `POSTE`.
-/// - [Complemento][enderecobr.TipoSegmento.Complemento]: Unidade interna do imóvel, tipo e valor juntos: `APTO 104`, `BL 4`.
-/// - [Empreendimento][enderecobr.TipoSegmento.Empreendimento]: Lugar nomeado: prédio, condomínio, conjunto, loteamento ou o próprio estabelecimento que ocupa o endereço: `ED MANAGUA`, `COND PALM VILLAGE`.
-/// - [Parcela][enderecobr.TipoSegmento.Parcela]: Identificador cadastral do terreno (uma `gleba` pode conter uma `quadra` que pode conter um `lote`): `QD 34 LOTE 17`.
-/// - [QuilometragemVia][enderecobr.TipoSegmento.QuilometragemVia]: Quilometragem em rodovia, onde o número é a posição ao longo da via: `KM 304`.
-/// - [Referencia][enderecobr.TipoSegmento.Referencia]: Trecho que aponta para outro endereço ou lugar: `ESQUINA COM AV BOA VIAGEM`.
-/// - [PontoReferencia][enderecobr.TipoSegmento.PontoReferencia]: Referente de uma referência que não é via, lugar nem feição natural: `CLUBE`, `CASA DE GRACIENE`.
-/// - [Denominacao][enderecobr.TipoSegmento.Denominacao]: Nome atual ou antigo da via ou do lugar: `ANTIGA RUA B`.
-/// - [Localidade][enderecobr.TipoSegmento.Localidade]: Localidade, bairro, distrito, vila ou zona: `PINA`, `ZONA RURAL`.
-/// - [NucleoRural][enderecobr.TipoSegmento.NucleoRural]: Cabeça + nome de lugar rural: `POVOADO AGUA PRETA`, `SITIO MIRADOR`, `ALDEIA X`. Especialização de `localidade`.
-/// - [RecursoNatural][enderecobr.TipoSegmento.RecursoNatural]: Feição natural nomeada, onde quer que apareça: `RIO`, `CORREGO`, `LAGOA`, `MORRO`, `SERRA`, `ILHA`.
-/// - [Cep][enderecobr.TipoSegmento.Cep]: Código de endereçamento postal.
-/// - [Municipio][enderecobr.TipoSegmento.Municipio]: Município.
-/// - [Uf][enderecobr.TipoSegmento.Uf]: Unidade federativa.
-/// - [Cadastro][enderecobr.TipoSegmento.Cadastro]: Código de cadastro do imóvel ou da unidade: `RI 16.282`, `MAT. 219.747`.
-/// - [Ruido][enderecobr.TipoSegmento.Ruido]: Token solto sem valor: pontuação, separador, id de processo vazado, lat/lon.
-/// - [Outro][enderecobr.TipoSegmento.Outro]: Conteúdo que não cabe em nenhum outro tipo — inclusive rótulo que ainda não tem variante própria.
+/// - `Logradouro`: Tipo de via + título + nome: `R ALCIDES CARNEIRO LEAL`, `ROD BR-116`.
+/// - `LogradouroInterno`: Via ou área interna de um empreendimento, fora do arruamento oficial.
+/// - `Numero`: Numeração predial, inclusive quando ausente: `71`, `S/N`.
+/// - `ModificadorNumero`: Sufixo ou marcador preso ao número: `A`, `504-B1`, `POSTE`.
+/// - `Complemento`: Unidade interna do imóvel, tipo e valor juntos: `APTO 104`, `BL 4`.
+/// - `Empreendimento`: Lugar nomeado: prédio, condomínio, conjunto, loteamento ou o próprio estabelecimento que ocupa o endereço: `ED MANAGUA`, `COND PALM VILLAGE`.
+/// - `Parcela`: Identificador cadastral do terreno (uma `gleba` pode conter uma `quadra` que pode conter um `lote`): `QD 34 LOTE 17`.
+/// - `QuilometragemVia`: Quilometragem em rodovia, onde o número é a posição ao longo da via: `KM 304`.
+/// - `Referencia`: Trecho que aponta para outro endereço ou lugar: `ESQUINA COM AV BOA VIAGEM`.
+/// - `PontoReferencia`: Referente de uma referência que não é via, lugar nem feição natural: `CLUBE`, `CASA DE GRACIENE`.
+/// - `Denominacao`: Nome atual ou antigo da via ou do lugar: `ANTIGA RUA B`.
+/// - `Localidade`: Localidade, bairro, distrito, vila ou zona: `PINA`, `ZONA RURAL`.
+/// - `NucleoRural`: Cabeça + nome de lugar rural: `POVOADO AGUA PRETA`, `SITIO MIRADOR`, `ALDEIA X`. Especialização de `localidade`.
+/// - `RecursoNatural`: Feição natural nomeada, onde quer que apareça: `RIO`, `CORREGO`, `LAGOA`, `MORRO`, `SERRA`, `ILHA`.
+/// - `Cep`: Código de endereçamento postal.
+/// - `Municipio`: Município.
+/// - `Uf`: Unidade federativa.
+/// - `Cadastro`: Código de cadastro do imóvel ou da unidade: `RI 16.282`, `MAT. 219.747`.
+/// - `Ruido`: Token solto sem valor: pontuação, separador, id de processo vazado, lat/lon.
+/// - `Outro`: Conteúdo que não cabe em nenhum outro tipo — inclusive rótulo que ainda não tem variante própria.
 ///
 /// Examples
 /// --------
@@ -244,15 +244,15 @@ impl EnderecoSegmentado {
 
     /// Serializa os segmentos em JSON.
     ///
-    /// Cada segmento vira ``{"valor": ..., "tipo": ...}``, com o tipo como
-    /// rótulo em minúsculas (``logradouro``, ``numero``, ``complemento`` etc.).
+    /// Cada segmento vira `{"valor": ..., "tipo": ...}`, com o tipo como
+    /// rótulo em minúsculas (`logradouro`, `numero`, `complemento` etc.).
     /// É o formato indicado para guardar o resultado da segmentação: é compacto
     /// e independente do texto original.
     ///
     /// Returns
     /// -------
     /// str
-    ///     JSON no formato ``{"segmentos": [...]}``.
+    ///     JSON no formato `{"segmentos": [...]}`.
     ///
     /// Examples
     /// --------

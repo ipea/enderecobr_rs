@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 
 /// Estrutura para padronização condicional de textos de endereços usando expressões regulares.
 ///
-/// Permite definir regras de substituição com condições de exclusão (``regex_ignorar``).
+/// Permite definir regras de substituição com condições de exclusão (`regex_ignorar`).
 /// Usa um conjunto de regex compilado para acelerar a detecção de padrões.
 ///
 /// Use `$1`, `$2`... para referenciar um grupo de captura na string de substituição.
@@ -84,8 +84,8 @@ impl Padronizador {
 
     /// Adiciona uma regra simples de substituição.
     ///
-    /// Toda ocorrência de ``regex`` será substituída por ``substituicao``.
-    /// É necessário chamar ``Padronizador.preparar`` após adicionar regras
+    /// Toda ocorrência de `regex` será substituída por `substituicao`.
+    /// É necessário chamar `Padronizador.preparar` após adicionar regras
     /// manualmente para que passem a valer.
     ///
     /// Parameters
@@ -93,7 +93,7 @@ impl Padronizador {
     /// regex : str
     ///     Expressão regular a ser substituída.
     /// substituicao : str
-    ///     Texto de substituição (use ``$1``, ``$2``... para grupos capturados).
+    ///     Texto de substituição (use `$1`, `$2`... para grupos capturados).
     ///
     /// Examples
     /// --------
@@ -108,8 +108,8 @@ impl Padronizador {
 
     /// Adiciona uma regra condicional de substituição (com regex de exclusão).
     ///
-    /// ``regex`` é substituída por ``substituicao`` somente se ``regex_ignorar``
-    /// não corresponder ao texto. É necessário chamar ``Padronizador.preparar``
+    /// `regex` é substituída por `substituicao` somente se `regex_ignorar`
+    /// não corresponder ao texto. É necessário chamar `Padronizador.preparar`
     /// após adicionar regras manualmente.
     ///
     /// Parameters
@@ -179,8 +179,8 @@ impl Padronizador {
 
     /// Recompila o conjunto de expressões regulares após adicionar regras manualmente.
     ///
-    /// Deve ser chamado após ``Padronizador.adicionar`` ou
-    /// ``Padronizador.adicionar_com_ignorar`` para que as novas regras
+    /// Deve ser chamado após `Padronizador.adicionar` ou
+    /// `Padronizador.adicionar_com_ignorar` para que as novas regras
     /// passem a ser aplicadas.
     ///
     /// Examples
@@ -240,7 +240,7 @@ impl Padronizador {
     /// Returns
     /// -------
     /// tuple of (list of str, list of str, list of (str or None))
-    ///     Vetores ``(regex, substituicao, ignorar)``.
+    ///     Vetores `(regex, substituicao, ignorar)`.
     ///
     /// Examples
     /// --------
@@ -364,10 +364,10 @@ pub fn obter_padronizador_tipos_logradouros() -> Padronizador {
     }
 }
 
-/// Obtém o padronizador utilizado internamente pela função :func:`padronizar_municipios`.
+/// Obtém o padronizador utilizado internamente pela função `padronizar_municipios`.
 ///
 /// Ele apenas gera a *chave de busca* (normaliza, tira acentos e pontuação):
-/// quem troca a chave pelo nome do município é :func:`padronizar_municipios`.
+/// quem troca a chave pelo nome do município é `padronizar_municipios`.
 /// Útil para reaproveitar exatamente as mesmas regras em pipelines próprios.
 ///
 /// Returns
@@ -387,9 +387,9 @@ pub fn obter_padronizador_municipios() -> Padronizador {
     }
 }
 
-/// Obtém o padronizador que faz a primeira etapa do :func:`metaphone`.
+/// Obtém o padronizador que faz a primeira etapa do `metaphone`.
 ///
-/// É a parte baseada em regex; o :func:`metaphone` ainda trata o ``ç`` e remove
+/// É a parte baseada em regex; o `metaphone` ainda trata o `ç` e remove
 /// caracteres repetidos depois dela. Útil para inspecionar ou estender as
 /// substituições fonéticas.
 ///
@@ -410,10 +410,10 @@ pub fn obter_padronizador_metaphone() -> Padronizador {
     }
 }
 
-/// Obtém o identificador de dados faltantes usado por :func:`is_dado_faltante`.
+/// Obtém o identificador de dados faltantes usado por `is_dado_faltante`.
 ///
 /// O identificador compara os padrões já normalizados: quem chama diretamente
-/// precisa normalizar antes (via ``Padronizador`` ou :func:`normalizar`).
+/// precisa normalizar antes (via `Padronizador` ou `normalizar`).
 ///
 /// Returns
 /// -------

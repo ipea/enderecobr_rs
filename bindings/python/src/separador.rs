@@ -12,13 +12,13 @@ use crate::segmento::EnderecoSegmentado;
 ///
 /// Diferente das funções de módulo, permite usar um arquivo de modelo próprio
 /// em vez do modelo padrão. A instância nasce **sem modelo**: o construtor não lê nem baixa
-/// nada do disco. Use o método estático :meth:`carregar` ou o método :meth:`carregar_modelo`
-/// antes de :meth:`segmentar`. Depois de carregado, o separador não falha mais
+/// nada do disco. Use o método estático `carregar` ou o método `carregar_modelo`
+/// antes de `segmentar`. Depois de carregado, o separador não falha mais
 /// ao segmentar.
 ///
-/// Para usar o modelo padrão, obtenha o caminho com :func:`obter_modelo` (resolve e
-/// baixa, se necessário) ou com :func:`obter_caminho_modelo` (apenas resolve) e
-/// passe o retorno para :meth:`carregar`.
+/// Para usar o modelo padrão, obtenha o caminho com `obter_modelo` (resolve e
+/// baixa, se necessário) ou com `obter_caminho_modelo` (apenas resolve) e
+/// passe o retorno para `carregar`.
 ///
 /// Examples
 /// --------
@@ -192,9 +192,9 @@ fn abrir_modelo(
 /// Resolve o caminho do modelo de padrão e garante que o arquivo exista,
 /// baixando-o na primeira chamada.
 ///
-/// Usa a mesma ordem de prioridade de :func:`obter_caminho_modelo` e só baixa o
+/// Usa a mesma ordem de prioridade de `obter_caminho_modelo` e só baixa o
 /// modelo quando o arquivo está ausente ou vazio. O download pode ser desativado
-/// com a variável de ambiente ``ENDERECOBR_MODELO_SEM_DOWNLOAD=1`` (útil em
+/// com a variável de ambiente `ENDERECOBR_MODELO_SEM_DOWNLOAD=1` (útil em
 /// CI).
 ///
 /// Parameters
@@ -206,7 +206,7 @@ fn abrir_modelo(
 /// Returns
 /// -------
 /// pathlib.Path
-///     Caminho do arquivo ``.crf``, já existente.
+///     Caminho do arquivo `.crf`, já existente.
 ///
 /// Raises
 /// ------
@@ -225,7 +225,7 @@ fn abrir_modelo(
 /// -----
 /// - Faz uma requisição HTTP (timeout de 60 s) apenas quando precisa baixar e
 ///   libera o GIL durante a operação.
-/// - O caminho devolvido pode ser passado direto para :meth:`SeparadorEndereco.carregar`.
+/// - O caminho devolvido pode ser passado direto para `SeparadorEndereco.carregar`.
 #[pyfunction]
 #[pyo3(signature = (path_modelo = None))]
 pub fn obter_modelo(py: Python<'_>, path_modelo: Option<PathBuf>) -> PyResult<PathBuf> {
@@ -238,13 +238,13 @@ pub fn obter_modelo(py: Python<'_>, path_modelo: Option<PathBuf>) -> PyResult<Pa
 ///
 /// Segue esta ordem de prioridade:
 ///
-/// 1. ``path_modelo``, quando informado e não vazio;
-/// 2. a variável de ambiente ``ENDERECOBR_MODELO``, quando definida e não vazia;
-/// 3. o diretório de cache do sistema operacional (``~/.cache/...`` no Linux,
-///    ``~/Library/Caches`` no macOS, ``%LOCALAPPDATA%`` no Windows), no caminho
-///    ``enderecobr_rs/<versão do modelo>/tagger.crf``.
+/// 1. `path_modelo`, quando informado e não vazio;
+/// 2. a variável de ambiente `ENDERECOBR_MODELO`, quando definida e não vazia;
+/// 3. o diretório de cache do sistema operacional (`~/.cache/...` no Linux,
+///    `~/Library/Caches` no macOS, `%LOCALAPPDATA%` no Windows), no caminho
+///    `enderecobr_rs/<versão do modelo>/tagger.crf`.
 ///
-/// Se o valor resolvido for um diretório (ou terminar em ``/``), o subdiretório
+/// Se o valor resolvido for um diretório (ou terminar em `/`), o subdiretório
 /// da versão do modelo é acrescentado; se for um arquivo, ele é usado como está.
 ///
 /// Parameters
@@ -261,7 +261,7 @@ pub fn obter_modelo(py: Python<'_>, path_modelo: Option<PathBuf>) -> PyResult<Pa
 /// Raises
 /// ------
 /// RuntimeError
-///     Se nem o argumento nem ``ENDERECOBR_MODELO`` forem informados e o
+///     Se nem o argumento nem `ENDERECOBR_MODELO` forem informados e o
 ///     diretório de cache do sistema operacional não estiver disponível.
 ///
 /// Examples
@@ -274,7 +274,7 @@ pub fn obter_modelo(py: Python<'_>, path_modelo: Option<PathBuf>) -> PyResult<Pa
 /// Notes
 /// -----
 /// - Não acessa o disco nem a rede: só calcula o caminho.
-/// - É útil para inspecionar qual arquivo :func:`obter_modelo` usaria, antes de
+/// - É útil para inspecionar qual arquivo `obter_modelo` usaria, antes de
 ///   baixar qualquer coisa.
 #[pyfunction]
 #[pyo3(signature = (path_modelo = None))]
@@ -287,10 +287,10 @@ pub fn obter_caminho_modelo(path_modelo: Option<PathBuf>) -> PyResult<PathBuf> {
 ///
 /// Usa o modelo resolvido por `ENDERECOBR_MODELO` ou o cache do sistema
 /// (baixando-o na primeira chamada, se necessário). Para usar um modelo próprio,
-/// prefira :class:`SeparadorEndereco`.
+/// prefira `SeparadorEndereco`.
 ///
-/// Para saber (ou controlar) qual arquivo é esse, veja :func:`obter_caminho_modelo`
-/// (resolve o caminho sem tocar no disco) e :func:`obter_modelo` (resolve e baixa).
+/// Para saber (ou controlar) qual arquivo é esse, veja `obter_caminho_modelo`
+/// (resolve o caminho sem tocar no disco) e `obter_modelo` (resolve e baixa).
 ///
 /// Parameters
 /// ----------
@@ -374,17 +374,17 @@ pub fn segmentar_enderecos(
         .collect())
 }
 
-/// Segmenta o endereço e devolve os campos já separados em um :class:`Endereco`.
+/// Segmenta o endereço e devolve os campos já separados em um `Endereco`.
 ///
 /// Atalho para segmentar e depois agrupar os trechos nos campos do endereço.
-/// Use :func:`segmentar_endereco` quando quiser ver os trechos e seus tipos.
+/// Use `segmentar_endereco` quando quiser ver os trechos e seus tipos.
 ///
 /// Parameters
 /// ----------
 /// endereco : str
 ///     Endereço bruto a ser estruturado.
 /// padronizar : bool, optional
-///     Se ``True`` (padrão), os campos resultantes passam pelas funções de
+///     Se `True` (padrão), os campos resultantes passam pelas funções de
 ///     padronização.
 ///
 /// Returns

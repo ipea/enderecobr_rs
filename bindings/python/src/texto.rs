@@ -589,8 +589,8 @@ pub fn is_dado_faltante(valor: &str) -> bool {
 
 /// Devolve string vazia quando o texto é um dado faltante; senão, o texto normalizado.
 ///
-/// É o passo seguinte a :func:`is_dado_faltante` quando o objetivo é limpar a
-/// coluna em vez de só detectar: dados faltantes viram ``''`` e o restante já
+/// É o passo seguinte a `is_dado_faltante` quando o objetivo é limpar a
+/// coluna em vez de só detectar: dados faltantes viram `''` e o restante já
 /// sai normalizado (maiúsculas, sem acentos, sem espaços sobrando).
 ///
 /// Parameters
@@ -601,7 +601,7 @@ pub fn is_dado_faltante(valor: &str) -> bool {
 /// Returns
 /// -------
 /// str
-///     ``''`` se o texto for dado faltante; o texto normalizado caso contrário.
+///     `''` se o texto for dado faltante; o texto normalizado caso contrário.
 ///
 /// Examples
 /// --------

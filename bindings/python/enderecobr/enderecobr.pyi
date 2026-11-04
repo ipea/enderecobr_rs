@@ -187,22 +187,17 @@ def segmentar_enderecos(enderecos: Iterable[str]) -> list[EnderecoSegmentado]: .
 
 def estruturar_endereco(endereco: str, padronizar: bool = True) -> Endereco: ...
 
-# Constantes do modelo padrão.
+# Constantes do modelo padrão. As descrições ficam em `__init__.py`, que é onde
+# elas conseguem chegar ao mkdocstrings.
 
 MODEL_DOWNLOAD_PATH: str
-"""URL de onde o modelo padrão é baixado."""
-
-VERSAO_MODELO: str
-"""Versão do modelo padrão. É o subdiretório usado no cache."""
-
-NOME_DIRETORIO_CACHE: str
-"""Nome do diretório da biblioteca dentro do cache do sistema."""
 
 NOME_ARQUIVO_MODELO: str
-"""Nome do arquivo do modelo dentro do diretório de cache."""
+
+NOME_DIRETORIO_CACHE: str
+
+VERSAO_MODELO: str
 
 VAR_AMBIENTE_MODELO: str
-"""Variável de ambiente que aponta para o arquivo ou diretório do modelo."""
 
 VAR_AMBIENTE_SEM_DOWNLOAD: str
-"""Variável de ambiente que desabilita o download do modelo (útil em CI)."""
