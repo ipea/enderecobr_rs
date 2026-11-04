@@ -23,6 +23,8 @@ def padronizar_municipios(valor: str) -> str: ...
 
 def is_dado_faltante(valor: str) -> bool: ...
 
+def zerar_dado_faltante(valor: str) -> str: ...
+
 def padronizar_estados_para_nome(valor: str) -> str: ...
 
 def padronizar_estados_para_codigo(valor: str) -> str: ...
@@ -82,6 +84,12 @@ def obter_padronizador_complementos() -> Padronizador: ...
 
 def obter_padronizador_tipos_logradouros() -> Padronizador: ...
 
+def obter_padronizador_municipios() -> Padronizador: ...
+
+def obter_padronizador_metaphone() -> Padronizador: ...
+
+def obter_identificador_dado_faltante() -> IdentificadorPadroes: ...
+
 def metaphone(valor: str) -> str: ...
 
 def padronizar_numeros_por_extenso(valor: str) -> str: ...
@@ -115,6 +123,9 @@ class TipoSegmento:
     Ruido: TipoSegmento
     Outro: TipoSegmento
 
+    @staticmethod
+    def todos() -> list[TipoSegmento]: ...
+
 class SegmentoEndereco:
 
     def __init__(self, valor: str, tipo: TipoSegmento) -> None: ...
@@ -125,6 +136,8 @@ class SegmentoEndereco:
 class EnderecoSegmentado:
 
     segmentos: list[SegmentoEndereco]
+
+    def como_json(self) -> str: ...
 
 class Endereco:
 
@@ -149,6 +162,8 @@ class Endereco:
 
     def endereco_padronizado(self) -> Endereco: ...
 
+    def como_json(self) -> str: ...
+
 class SeparadorEndereco:
 
     def __init__(self) -> None: ...
@@ -171,3 +186,23 @@ def segmentar_endereco(endereco: str) -> EnderecoSegmentado: ...
 def segmentar_enderecos(enderecos: Iterable[str]) -> list[EnderecoSegmentado]: ...
 
 def estruturar_endereco(endereco: str, padronizar: bool = True) -> Endereco: ...
+
+# Constantes do modelo padrão.
+
+MODEL_DOWNLOAD_PATH: str
+"""URL de onde o modelo padrão é baixado."""
+
+VERSAO_MODELO: str
+"""Versão do modelo padrão. É o subdiretório usado no cache."""
+
+NOME_DIRETORIO_CACHE: str
+"""Nome do diretório da biblioteca dentro do cache do sistema."""
+
+NOME_ARQUIVO_MODELO: str
+"""Nome do arquivo do modelo dentro do diretório de cache."""
+
+VAR_AMBIENTE_MODELO: str
+"""Variável de ambiente que aponta para o arquivo ou diretório do modelo."""
+
+VAR_AMBIENTE_SEM_DOWNLOAD: str
+"""Variável de ambiente que desabilita o download do modelo (útil em CI)."""

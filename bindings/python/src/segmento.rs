@@ -5,7 +5,8 @@ use pyo3::prelude::*;
 /// Um trecho do endereço e o atributo a que ele corresponde.
 ///
 /// Em geral os objetos vêm prontos de :func:`segmentar_endereco`, mas dá para
-/// montar um à mão — útil ao reidratar um ``segmento_como_json`` ou ao testar
+/// montar um à mão — útil ao reidratar o resultado de
+/// :meth:`EnderecoSegmentado.como_json` ou ao testar
 /// código que só lê os segmentos.
 ///
 /// Parameters
@@ -139,6 +140,31 @@ impl TipoSegmento {
     fn value(&self) -> i32 {
         *self as i32
     }
+
+    /// Todas as variantes, na ordem de declaração do enum.
+    ///
+    /// É o equivalente a iterar o enum no Rust: serve para montar tabelas de
+    /// rótulos, validar entrada ou varrer os tipos sem conhecê-los de antemão.
+    ///
+    /// Returns
+    /// -------
+    /// list of TipoSegmento
+    ///     As 20 variantes, na ordem em que o modelo as emite.
+    ///
+    /// Examples
+    /// --------
+    /// >>> len(TipoSegmento.todos())
+    /// 20
+    /// >>> TipoSegmento.todos()[0]
+    /// TipoSegmento.Logradouro
+    #[staticmethod]
+    fn todos() -> Vec<TipoSegmento> {
+        // Fonte única: a lista do Rust, convertida pelo mesmo `From` do resto.
+        enderecobr_rs::separador_endereco::TipoSegmento::TODOS
+            .into_iter()
+            .map(TipoSegmento::from)
+            .collect()
+    }
 }
 
 #[pymethods]
@@ -214,6 +240,27 @@ impl EnderecoSegmentado {
             .map(|segmento| format!("({:?}, {:?})", segmento.valor, segmento.tipo))
             .collect();
         format!("EnderecoSegmentado([{}])", segmentos.join(", "))
+    }
+
+    /// Serializa os segmentos em JSON.
+    ///
+    /// Cada segmento vira ``{"valor": ..., "tipo": ...}``, com o tipo como
+    /// rótulo em minúsculas (``logradouro``, ``numero``, ``complemento`` etc.).
+    /// É o formato indicado para guardar o resultado da segmentação: é compacto
+    /// e independente do texto original.
+    ///
+    /// Returns
+    /// -------
+    /// str
+    ///     JSON no formato ``{"segmentos": [...]}``.
+    ///
+    /// Examples
+    /// --------
+    /// >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')  # doctest: +SKIP
+    /// >>> seg.como_json()  # doctest: +SKIP
+    /// '{"segmentos":[{"valor":"av n sra copacabana","tipo":"logradouro"},{"valor":"123","tipo":"numero"}]}'
+    fn como_json(&self) -> String {
+        self.interno.como_json()
     }
 }
 

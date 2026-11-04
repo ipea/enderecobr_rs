@@ -363,3 +363,73 @@ pub fn obter_padronizador_tipos_logradouros() -> Padronizador {
         interno: enderecobr_rs::tipo_logradouro::criar_padronizador_tipo_logradouro(),
     }
 }
+
+/// Obtém o padronizador utilizado internamente pela função :func:`padronizar_municipios`.
+///
+/// Ele apenas gera a *chave de busca* (normaliza, tira acentos e pontuação):
+/// quem troca a chave pelo nome do município é :func:`padronizar_municipios`.
+/// Útil para reaproveitar exatamente as mesmas regras em pipelines próprios.
+///
+/// Returns
+/// -------
+/// Padronizador
+///     Padronizador de chaves de municípios, já preparado para uso.
+///
+/// Examples
+/// --------
+/// >>> pad = enderecobr.obter_padronizador_municipios()
+/// >>> pad.padronizar('  rio   de janeiro ')
+/// 'RIO DE JANEIRO'
+#[pyfunction]
+pub fn obter_padronizador_municipios() -> Padronizador {
+    Padronizador {
+        interno: enderecobr_rs::municipio::criar_padronizador(),
+    }
+}
+
+/// Obtém o padronizador que faz a primeira etapa do :func:`metaphone`.
+///
+/// É a parte baseada em regex; o :func:`metaphone` ainda trata o ``ç`` e remove
+/// caracteres repetidos depois dela. Útil para inspecionar ou estender as
+/// substituições fonéticas.
+///
+/// Returns
+/// -------
+/// Padronizador
+///     Padronizador fonético, já preparado para uso.
+///
+/// Examples
+/// --------
+/// >>> pad = enderecobr.obter_padronizador_metaphone()
+/// >>> pad.padronizar('Thiago')
+/// 'TIAGO'
+#[pyfunction]
+pub fn obter_padronizador_metaphone() -> Padronizador {
+    Padronizador {
+        interno: enderecobr_rs::metaphone::criar_padronizador_metaphone(),
+    }
+}
+
+/// Obtém o identificador de dados faltantes usado por :func:`is_dado_faltante`.
+///
+/// O identificador compara os padrões já normalizados: quem chama diretamente
+/// precisa normalizar antes (via ``Padronizador`` ou :func:`normalizar`).
+///
+/// Returns
+/// -------
+/// IdentificadorPadroes
+///     Identificador já preenchido com os padrões de dado faltante.
+///
+/// Examples
+/// --------
+/// >>> idp = enderecobr.obter_identificador_dado_faltante()
+/// >>> idp.identificar('SI')
+/// True
+/// >>> idp.identificar('RUA B')
+/// False
+#[pyfunction]
+pub fn obter_identificador_dado_faltante() -> IdentificadorPadroes {
+    IdentificadorPadroes {
+        interno: enderecobr_rs::dado_faltante::criar_identificador_dado_faltante(),
+    }
+}

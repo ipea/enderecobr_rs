@@ -31,9 +31,12 @@ plugins:
             unwrap_annotated: true
 
             # MEMBERS ----------------------------------------------------------------
-            # Only render pulic symbols.
+            # Only render public symbols: sem isso, `inherited_members` traz os
+            # dunders de `object` (`__eq__`, `__module__`, `__doc__`...) das
+            # classes inspecionadas da extensão em Rust.
             # filters: public # Sponsors only!
-            # Comment the option otherwise to get the default filters.
+            filters:
+              - "!^_"
 
             # Show class inherited members.
             inherited_members: true

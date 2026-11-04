@@ -42,8 +42,9 @@ pub mod enderecobr {
 
     #[pymodule_export]
     use crate::padronizador::{
-        obter_padronizador_bairros, obter_padronizador_complementos,
-        obter_padronizador_logradouros, obter_padronizador_numeros,
+        obter_identificador_dado_faltante, obter_padronizador_bairros,
+        obter_padronizador_complementos, obter_padronizador_logradouros,
+        obter_padronizador_metaphone, obter_padronizador_municipios, obter_padronizador_numeros,
         obter_padronizador_tipos_logradouros, IdentificadorPadroes, Padronizador,
     };
 
@@ -63,8 +64,34 @@ pub mod enderecobr {
         padronizar_estados_para_codigo, padronizar_estados_para_nome,
         padronizar_estados_para_sigla, padronizar_logradouros, padronizar_municipios,
         padronizar_numeros, padronizar_numeros_para_int, padronizar_numeros_para_string,
-        padronizar_tipo_logradouro,
+        padronizar_tipo_logradouro, zerar_dado_faltante,
     };
+
+    // Constantes do modelo: mesmo nome e valor da crate, para não depender de
+    // string literal espalhada no código de quem usa.
+
+    #[pymodule_export]
+    const MODEL_DOWNLOAD_PATH: &str =
+        enderecobr_rs::separador_endereco::modelo::MODEL_DOWNLOAD_PATH;
+
+    #[pymodule_export]
+    const VERSAO_MODELO: &str = enderecobr_rs::separador_endereco::modelo::VERSAO_MODELO;
+
+    #[pymodule_export]
+    const NOME_DIRETORIO_CACHE: &str =
+        enderecobr_rs::separador_endereco::modelo::NOME_DIRETORIO_CACHE;
+
+    #[pymodule_export]
+    const NOME_ARQUIVO_MODELO: &str =
+        enderecobr_rs::separador_endereco::modelo::NOME_ARQUIVO_MODELO;
+
+    #[pymodule_export]
+    const VAR_AMBIENTE_MODELO: &str =
+        enderecobr_rs::separador_endereco::modelo::VAR_AMBIENTE_MODELO;
+
+    #[pymodule_export]
+    const VAR_AMBIENTE_SEM_DOWNLOAD: &str =
+        enderecobr_rs::separador_endereco::modelo::VAR_AMBIENTE_SEM_DOWNLOAD;
 }
 
 #[cfg(test)]

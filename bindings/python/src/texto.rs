@@ -587,6 +587,36 @@ pub fn is_dado_faltante(valor: &str) -> bool {
     enderecobr_rs::is_dado_faltante(valor)
 }
 
+/// Devolve string vazia quando o texto é um dado faltante; senão, o texto normalizado.
+///
+/// É o passo seguinte a :func:`is_dado_faltante` quando o objetivo é limpar a
+/// coluna em vez de só detectar: dados faltantes viram ``''`` e o restante já
+/// sai normalizado (maiúsculas, sem acentos, sem espaços sobrando).
+///
+/// Parameters
+/// ----------
+/// valor : str
+///     Texto a ser verificado e, se não for faltante, normalizado.
+///
+/// Returns
+/// -------
+/// str
+///     ``''`` se o texto for dado faltante; o texto normalizado caso contrário.
+///
+/// Examples
+/// --------
+/// >>> enderecobr.zerar_dado_faltante('  si ')
+/// ''
+/// >>> enderecobr.zerar_dado_faltante('SEM INFORMAÇÃO')
+/// ''
+/// >>> enderecobr.zerar_dado_faltante('Rua Ação')
+/// 'RUA ACAO'
+#[pyfunction]
+pub fn zerar_dado_faltante(valor: &str) -> String {
+    // `Cow` já vem normalizado: só materializa a string.
+    enderecobr_rs::dado_faltante::zerar_dado_faltante(valor).into_owned()
+}
+
 /// Gera um código fonético (Metaphone-BR adaptado) para nomes em português.
 ///
 /// Aplica transformações fonéticas a um nome visando representar sua pronúncia
