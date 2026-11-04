@@ -77,12 +77,8 @@ pub struct SeparadorEndereco {
 pub enum TipoSegmento {
     /// Tipo de via + título + nome: `R ALCIDES CARNEIRO LEAL`, `ROD BR-116`.
     Logradouro,
-    /// Via ou área interna de um empreendimento, fora do arruamento oficial.
-    LogradouroInterno,
     /// Numeração predial, inclusive quando ausente: `71`, `S/N`.
     Numero,
-    /// Sufixo ou marcador preso ao número: `A`, `504-B1`, `POSTE`.
-    ModificadorNumero,
     /// Unidade interna do imóvel, tipo e valor juntos: `APTO 104`, `BL 4`.
     Complemento,
     /// Lugar nomeado: prédio, condomínio, conjunto, loteamento ou o próprio
@@ -129,13 +125,11 @@ impl TipoSegmento {
     /// use enderecobr_rs::separador_endereco::TipoSegmento;
     ///
     /// let rotulos: Vec<&str> = TipoSegmento::TODOS.iter().map(|tipo| tipo.como_str()).collect();
-    /// assert_eq!(rotulos[..3], ["logradouro", "logradouro_interno", "numero"]);
+    /// assert_eq!(rotulos[..3], ["logradouro", "numero", "complemento"]);
     /// ```
-    pub const TODOS: [TipoSegmento; 20] = [
+    pub const TODOS: [TipoSegmento; 18] = [
         TipoSegmento::Logradouro,
-        TipoSegmento::LogradouroInterno,
         TipoSegmento::Numero,
-        TipoSegmento::ModificadorNumero,
         TipoSegmento::Complemento,
         TipoSegmento::Empreendimento,
         TipoSegmento::Parcela,
@@ -164,9 +158,7 @@ impl TipoSegmento {
     pub const fn como_str(self) -> &'static str {
         match self {
             TipoSegmento::Logradouro => "logradouro",
-            TipoSegmento::LogradouroInterno => "logradouro_interno",
             TipoSegmento::Numero => "numero",
-            TipoSegmento::ModificadorNumero => "modificador_numero",
             TipoSegmento::Complemento => "complemento",
             TipoSegmento::Empreendimento => "empreendimento",
             TipoSegmento::Parcela => "parcela",
@@ -193,7 +185,7 @@ impl std::fmt::Display for TipoSegmento {
     /// ```
     /// use enderecobr_rs::separador_endereco::TipoSegmento;
     ///
-    /// assert_eq!(TipoSegmento::ModificadorNumero.to_string(), "modificador_numero");
+    /// assert_eq!(TipoSegmento::Referencia.to_string(), "referencia");
     /// ```
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.como_str())
@@ -210,7 +202,7 @@ impl From<&str> for TipoSegmento {
     /// ```
     /// use enderecobr_rs::separador_endereco::TipoSegmento;
     ///
-    /// assert_eq!(TipoSegmento::from("MODIFICADOR_NUMERO"), TipoSegmento::ModificadorNumero);
+    /// assert_eq!(TipoSegmento::from("PONTO_REFERENCIA"), TipoSegmento::PontoReferencia);
     /// assert_eq!(TipoSegmento::from("Localidade"), TipoSegmento::Localidade);
     /// ```
     fn from(rotulo: &str) -> Self {
@@ -690,8 +682,8 @@ mod testes_tipo_segmento {
     fn converte_rotulo_do_modelo_em_variante() {
         assert_eq!(TipoSegmento::from("LOGRADOURO"), TipoSegmento::Logradouro);
         assert_eq!(
-            TipoSegmento::from("modificador_numero"),
-            TipoSegmento::ModificadorNumero
+            TipoSegmento::from("ponto_referencia"),
+            TipoSegmento::PontoReferencia
         );
         // Rótulo desconhecido não derruba a segmentação.
         assert_eq!(TipoSegmento::from("NOVO_ROTULO"), TipoSegmento::Outro);
@@ -707,10 +699,7 @@ mod testes_tipo_segmento {
     #[test]
     fn display_escreve_o_rotulo() {
         assert_eq!(TipoSegmento::Cep.to_string(), "cep");
-        assert_eq!(
-            TipoSegmento::ModificadorNumero.to_string(),
-            "modificador_numero"
-        );
+        assert_eq!(TipoSegmento::Denominacao.to_string(), "denominacao");
         assert_eq!(format!("{}", TipoSegmento::Uf), "uf");
     }
 
@@ -916,8 +905,6 @@ mod tests {
         let segmentado = criar_segmentado(vec![
             criar_segmento("av atlantica", TipoSegmento::Logradouro),
             criar_segmento("123", TipoSegmento::Numero),
-            // Modificador acompanha o número.
-            criar_segmento("bloco b", TipoSegmento::ModificadorNumero),
             criar_segmento("apto 301", TipoSegmento::Complemento),
         ]);
 
@@ -925,7 +912,7 @@ mod tests {
             segmentado.como_endereco(false),
             Endereco {
                 logradouro: Some("av atlantica".to_string()),
-                numero: Some("123 bloco b".to_string()),
+                numero: Some("123".to_string()),
                 complemento: Some("apto 301".to_string()),
                 ..Default::default()
             }

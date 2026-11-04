@@ -44,14 +44,12 @@ pub struct SegmentoEndereco {
 ///
 /// As variantes são exatamente as mesmas do enum `TipoSegmento` do Rust, na
 /// mesma ordem, e cada uma se compara igual ao seu valor inteiro
-/// (`TipoSegmento.Cep == 14`, `int(TipoSegmento.Cep) == 14`).
+/// (`TipoSegmento.Cep == 12`, `int(TipoSegmento.Cep) == 12`).
 ///
 /// Variantes, na ordem do enum:
 ///
 /// - `Logradouro`: Tipo de via + título + nome: `R ALCIDES CARNEIRO LEAL`, `ROD BR-116`.
-/// - `LogradouroInterno`: Via ou área interna de um empreendimento, fora do arruamento oficial.
 /// - `Numero`: Numeração predial, inclusive quando ausente: `71`, `S/N`.
-/// - `ModificadorNumero`: Sufixo ou marcador preso ao número: `A`, `504-B1`, `POSTE`.
 /// - `Complemento`: Unidade interna do imóvel, tipo e valor juntos: `APTO 104`, `BL 4`.
 /// - `Empreendimento`: Lugar nomeado: prédio, condomínio, conjunto, loteamento ou o próprio estabelecimento que ocupa o endereço: `ED MANAGUA`, `COND PALM VILLAGE`.
 /// - `Parcela`: Identificador cadastral do terreno (uma `gleba` pode conter uma `quadra` que pode conter um `lote`): `QD 34 LOTE 17`.
@@ -79,9 +77,7 @@ pub struct SegmentoEndereco {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TipoSegmento {
     Logradouro,
-    LogradouroInterno,
     Numero,
-    ModificadorNumero,
     Complemento,
     Empreendimento,
     Parcela,
@@ -103,11 +99,9 @@ pub enum TipoSegmento {
 impl TipoSegmento {
     /// Nome de cada variante, na ordem de declaração. É o `name` que o Python vê,
     /// equivalente ao de um `enum.IntEnum`.
-    pub(crate) const NOMES: [&str; 20] = [
+    pub(crate) const NOMES: [&str; 18] = [
         "Logradouro",
-        "LogradouroInterno",
         "Numero",
-        "ModificadorNumero",
         "Complemento",
         "Empreendimento",
         "Parcela",
@@ -149,12 +143,12 @@ impl TipoSegmento {
     /// Returns
     /// -------
     /// list of TipoSegmento
-    ///     As 20 variantes, na ordem em que o modelo as emite.
+    ///     As 18 variantes, na ordem em que o modelo as emite.
     ///
     /// Examples
     /// --------
     /// >>> len(TipoSegmento.todos())
-    /// 20
+    /// 18
     /// >>> TipoSegmento.todos()[0]
     /// TipoSegmento.Logradouro
     #[staticmethod]
@@ -269,9 +263,7 @@ impl From<enderecobr_rs::separador_endereco::TipoSegmento> for TipoSegmento {
         use enderecobr_rs::separador_endereco::TipoSegmento as Rs;
         match interno {
             Rs::Logradouro => TipoSegmento::Logradouro,
-            Rs::LogradouroInterno => TipoSegmento::LogradouroInterno,
             Rs::Numero => TipoSegmento::Numero,
-            Rs::ModificadorNumero => TipoSegmento::ModificadorNumero,
             Rs::Complemento => TipoSegmento::Complemento,
             Rs::Empreendimento => TipoSegmento::Empreendimento,
             Rs::Parcela => TipoSegmento::Parcela,
@@ -297,9 +289,7 @@ impl From<TipoSegmento> for enderecobr_rs::separador_endereco::TipoSegmento {
         use enderecobr_rs::separador_endereco::TipoSegmento as Rs;
         match espelho {
             TipoSegmento::Logradouro => Rs::Logradouro,
-            TipoSegmento::LogradouroInterno => Rs::LogradouroInterno,
             TipoSegmento::Numero => Rs::Numero,
-            TipoSegmento::ModificadorNumero => Rs::ModificadorNumero,
             TipoSegmento::Complemento => Rs::Complemento,
             TipoSegmento::Empreendimento => Rs::Empreendimento,
             TipoSegmento::Parcela => Rs::Parcela,

@@ -103,9 +103,7 @@ def romano_para_inteiro(valor: str) -> int: ...
 class TipoSegmento:
 
     Logradouro: TipoSegmento
-    LogradouroInterno: TipoSegmento
     Numero: TipoSegmento
-    ModificadorNumero: TipoSegmento
     Complemento: TipoSegmento
     Empreendimento: TipoSegmento
     Parcela: TipoSegmento
