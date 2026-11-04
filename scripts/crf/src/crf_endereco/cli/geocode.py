@@ -19,7 +19,8 @@ app = typer.Typer(no_args_is_help=True, add_completion=False)
 @app.command(name="comparar")
 def comparar(
     base: Annotated[
-        Path, typer.Argument(help="parquet (ou diretorio/glob) de entrada")
+        Path,
+        typer.Argument(help="parquet (ou diretorio/glob) de entrada, ou sqlite com a tabela enderecos"),
     ],
     binario: Annotated[Path, typer.Option(help="caminho do binario padronizacao-lote")],
     estado: Annotated[str, typer.Option(help="coluna do estado (UF ou nome)")],
@@ -44,6 +45,12 @@ def comparar(
     chave: Annotated[
         str | None, typer.Option(help="coluna de identificacao preservada nas saidas")
     ] = None,
+    modelo: Annotated[
+        Path | None,
+        typer.Option(
+            help="tagger CRF a usar na segmentacao (padrao: o que o binario resolver)"
+        ),
+    ] = None,
     limite: Annotated[
         int, typer.Option(help="processa apenas os N primeiros registros (0 = todos)")
     ] = 0,
@@ -67,10 +74,13 @@ def comparar(
 
     if not base.exists():
         raise typer.BadParameter(f"base nao encontrada: {base}")
-    entrada = comparacao.resolver_entrada(base)
     pasta_saida = (saida or base.parent).resolve()
     pasta_saida.mkdir(parents=True, exist_ok=True)
     raiz = base.stem if base.is_file() else base.name
+    # o modelo entra no nome das saidas: trocar de tagger nao sobrescreve a
+    # segmentacao nem as geocodificacoes de outra execucao
+    if modelo is not None:
+        raiz = f"{raiz}_{modelo.stem}"
     segmentado = pasta_saida / f"{raiz}_segmentado.parquet"
     destinos = {
         "bruto": pasta_saida / f"{raiz}_bruto.parquet",
@@ -78,6 +88,7 @@ def comparar(
     }
 
     con = duckdb.connect()
+    comparacao.preparar_base(con, base)
     campos: dict[str, str | None] = {
         "estado": estado,
         "municipio": municipio,
@@ -87,9 +98,10 @@ def comparar(
         "cep": cep,
         "localidade": localidade,
     }
-    comparacao.validar_campos(comparacao.ler_colunas(con, entrada), campos, chave)
+    comparacao.validar_campos(con.table(comparacao.TABELA_BASE).columns, campos, chave)
 
-    avisar(f"base: {entrada}\nsaida: {pasta_saida}\nsegmentador: {binario}")
+    avisar(f"base: {base}\nsaida: {pasta_saida}\nsegmentador: {binario}")
+    avisar(f"modelo: {modelo or 'o do binario (ENDERECOBR_MODELO)'}")
     avisar(
         "campos: " + ", ".join(f"{k}={v}" for k, v in campos.items() if v is not None)
     )
@@ -103,7 +115,7 @@ def comparar(
     try:
         with comparacao.cronometrar("estagio", silencioso):
             comparacao.montar_estagio(
-                con, entrada, estagio, campos, endereco, chave, limite
+                con, estagio, campos, endereco, chave, limite
             )
 
         if reusar and segmentado.exists():
@@ -117,6 +129,7 @@ def comparar(
                     n_cores,
                     chave is not None,
                     silencioso,
+                    modelo=modelo,
                 )
 
         entradas = comparacao.montar_entradas(

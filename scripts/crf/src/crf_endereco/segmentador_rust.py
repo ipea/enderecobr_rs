@@ -78,19 +78,28 @@ def segmentar_lote(
     n_cores: int,
     manter_chave: bool,
     silencioso: bool = False,
+    modelo: Path | None = None,
 ) -> None:
-    """Segmenta um parquet de trabalho com o `padronizacao-lote`."""
+    """Segmenta um parquet de trabalho com o `padronizacao-lote`.
+
+    `modelo` vai para o binario via `ENDERECOBR_MODELO`; sem ele, o binario usa
+    o modelo padrao do pacote.
+    """
     if not binario.is_file():
         raise typer.BadParameter(
             f"binario nao encontrado: {binario}\n"
             + "compile com: cargo build --release --bin padronizacao-lote"
         )
+    if modelo is not None and not modelo.is_file():
+        raise typer.BadParameter(f"modelo nao encontrado: {modelo}")
     # `-m` e variadico: precisa ser a ultima opcao da linha de comando
     comando = [str(binario), str(estagio), "-o", str(destino), "-e", "endereco"]
     comando += ["-m", "id"]
     if manter_chave:
         comando += ["chave"]
     ambiente = dict(os.environ)
+    if modelo is not None:
+        ambiente["ENDERECOBR_MODELO"] = str(modelo.resolve())
     if n_cores > 0:
         ambiente["POLARS_MAX_THREADS"] = str(n_cores)
         ambiente["RAYON_NUM_THREADS"] = str(n_cores)
