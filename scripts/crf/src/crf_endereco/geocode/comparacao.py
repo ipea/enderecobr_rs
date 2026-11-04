@@ -36,6 +36,10 @@ COLUNAS_RESERVADAS = {"id", "endereco", *CAMPOS_ENDERECO}
 
 PADRAO_IDENTIFICADOR = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+# a view com a base de entrada, qualquer que seja o formato dela
+TABELA_BASE = "base_entrada"
+SUFIXOS_SQLITE = frozenset({".sqlite", ".sqlite3", ".db"})
+
 # precisao do geocodebr, da mais para a menos precisa
 ORDEM_PRECISAO = (
     "numero",
@@ -149,7 +153,30 @@ def resolver_entrada(base: Path) -> str:
     return str(base / "*.parquet") if base.is_dir() else str(base)
 
 
+def eh_sqlite(base: Path) -> bool:
+    """Diz se a base e um sqlite com a tabela `enderecos` em vez de parquet."""
+    return base.suffix.lower() in SUFIXOS_SQLITE
+
+
+def preparar_base(con: duckdb.DuckDBPyConnection, base: Path) -> None:
+    """Publica a base como view `base_entrada`, seja parquet, diretorio/glob ou sqlite.
+
+    No sqlite a tabela `enderecos` e lida pelo scanner do DuckDB, que so precisa
+    de rede na primeira vez, para instalar a extensao.
+    """
+    if not eh_sqlite(base):
+        con.register(TABELA_BASE, con.read_parquet(resolver_entrada(base)))
+        return
+    caminho = str(base.resolve()).replace("'", "''")
+    try:
+        con.execute(f"attach '{caminho}' as sqlite_base (type sqlite, read_only)")
+    except duckdb.Error as erro:
+        raise typer.BadParameter(f"falha ao abrir {base} como sqlite: {erro}") from erro
+    con.register(TABELA_BASE, con.sql("select * from sqlite_base.enderecos"))
+
+
 def ler_colunas(con: duckdb.DuckDBPyConnection, caminho: str) -> list[str]:
+    """Colunas de um parquet de trabalho."""
     return con.read_parquet(caminho).columns
 
 
@@ -168,7 +195,6 @@ def validar_campos(
 
 def montar_estagio(
     con: duckdb.DuckDBPyConnection,
-    entrada: str,
     destino: Path,
     campos: dict[str, str | None],
     endereco: str | None,
@@ -197,7 +223,7 @@ def montar_estagio(
         raise typer.BadParameter("nenhuma coluna de texto para segmentar")
     selecao.append(f"nullif(trim(concat_ws(' ', {', '.join(partes)})), '') as endereco")
 
-    relacao = con.read_parquet(entrada)
+    relacao = con.table(TABELA_BASE)
     if limite > 0:
         relacao = relacao.limit(limite)
     relacao.project(", ".join(selecao)).write_parquet(str(destino), compression="zstd")

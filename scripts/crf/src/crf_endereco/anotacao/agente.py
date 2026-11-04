@@ -225,12 +225,26 @@ def _chamadas(message: dict[str, Any]) -> list[Chamada]:
     return chamadas
 
 
+def _segmentos(argumentos: dict[str, Any]) -> list[Segmento]:
+    """Normaliza `segmentos` quando o backend manda a lista como string JSON."""
+    bruto = argumentos.get("segmentos") or []
+    if isinstance(bruto, str):
+        try:
+            bruto = json.loads(bruto)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(bruto, list):
+        return []
+    return [
+        Segmento(valor=str(seg.get("valor", "")), tipo=str(seg.get("tipo", "")))
+        for seg in bruto
+        if isinstance(seg, dict)
+    ]
+
+
 def _resposta_final(chamada: Chamada) -> Resposta:
     """Converte a chamada `responder` na resposta final estruturada."""
-    segmentos = [
-        Segmento(valor=str(seg.get("valor", "")), tipo=str(seg.get("tipo", "")))
-        for seg in chamada.argumentos.get("segmentos", [])
-    ]
+    segmentos = _segmentos(chamada.argumentos)
     return Resposta(
         segmentos=segmentos, comentario=chamada.argumentos.get("comentario")
     )

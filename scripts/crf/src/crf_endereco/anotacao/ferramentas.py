@@ -18,7 +18,6 @@ from crf_endereco.anotacao.cliente_http import (
 from crf_endereco.anotacao.ontologia import TIPOS_SEGMENTO
 from crf_endereco.config import Config
 
-
 # Primeira palavra aceita em `sql_query`: a ferramenta executa SQL escrito pela
 # LLM, então só leitura passa. Sem isso o modelo poderia escrever arquivos
 # (`COPY ... TO`), instalar extensões ou anexar outro banco.
@@ -239,6 +238,8 @@ conteúdo: {resultado.get("content", "")}
         timer.start()
         try:
             consulta = self.conexao.execute(consulta_sql)
+            if consulta.description is None:
+                return "The query returned no result set. Use SELECT."
             colunas = [str(col[0]) for col in consulta.description]
             resultado = consulta.fetchall()
         except duckdb.Error as e:
