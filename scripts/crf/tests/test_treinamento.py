@@ -1,4 +1,5 @@
 from crf_endereco.features import tokenize
+from crf_endereco.modelo.crf import matriz_confusao
 from crf_endereco.rotulos import mergear
 
 
@@ -38,3 +39,20 @@ def test_mergear_endereco_sem_segmento_fica_todo_em_o():
     _, labels = mergear("Rua das Flores 123", [], tokenize)
 
     assert labels == ["O", "O", "O", "O"]
+
+
+def test_matriz_confusao_conta_pares_e_coloca_o_primeiro():
+    rotulos, matriz = matriz_confusao(
+        [["B_LOGRADOURO", "O", "B_NUMERO"]],
+        [["B_LOGRADOURO", "O", "O"]],
+    )
+
+    assert rotulos == ["O", "B_LOGRADOURO", "B_NUMERO"]
+    assert matriz == [[1, 0, 0], [0, 1, 0], [1, 0, 0]]
+
+
+def test_matriz_confusao_inclui_rotulo_so_previsto():
+    rotulos, matriz = matriz_confusao([["O"]], [["B_CEP"]])
+
+    assert rotulos == ["O", "B_CEP"]
+    assert matriz == [[0, 1], [0, 0]]

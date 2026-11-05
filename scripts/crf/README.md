@@ -44,6 +44,20 @@ sobrescrever execuções anteriores.
 
 `make` expõe os mesmos comandos (`make test`, `make etiquetar`, ...).
 
+## Como o lote é filtrado pelo CRF
+
+Os dois filtros rodam o CRF em **todos** os pendentes do recorte (não só em
+`--limite`) e só então sorteiam o lote, porque o sorteio é que escolhe `--limite`.
+
+- `--apenas-tipos logradouro,numero` usa o binário do `enderecobr_rs`: mesmo
+  modelo, mesma segmentação do que é publicado.
+- `--incertos 0.6` usa o modelo Python (`--tagger`), porque as probabilidades
+  marginais não existem na saída do binário. Fica no lote o endereço cujo token
+  **menos** confiável tem probabilidade abaixo do limiar — quanto menor o limiar,
+  mais raro (e mais grave) o caso.
+
+Com os dois juntos, vale a interseção.
+
 ## Como o lote é sorteado
 
 `crf etiquetar lote` não pega "os N primeiros": `pendentes()` sorteia com
@@ -61,7 +75,7 @@ Tudo em uma consulta (`anotacao/pendentes.py`).
 | `registro.py` | o registro a etiquetar e a normalização dos campos das bases |
 | `dataset.py` | único acesso ao SQLite anotado (gravar, ler, exemplos do modelo) |
 | `ui.py` | console e barra de progresso |
-| `features/` | normalização, tokenização e features do CRF (paridade com o Rust) |
+| `features/` | normalização, tokenização e features do CRF (paridade com o Rust, exceto o léxico de municípios) |
 | `rotulos.py` | segmentos verbatim → rótulos BIO |
 | `modelo/crf.py` | dados de treino, treino, tuning, tagger e inferência |
 | `modelo/relatorio.py` | métricas e relatório de avaliação |
@@ -69,7 +83,7 @@ Tudo em uma consulta (`anotacao/pendentes.py`).
 | `anotacao/ferramentas.py` | tools expostas à LLM (CNEFE, busca web, fetch) |
 | `anotacao/cliente_http.py` | HTTP com retry e backoff |
 | `anotacao/pendentes.py` | recorte e sorteio do lote |
-| `anotacao/filtro_crf.py` | filtro por tipos que o CRF prevê (`--apenas-tipos`) |
+| `anotacao/filtro_crf.py` | filtros pelas previsões do CRF (`--apenas-tipos`, `--incertos`) |
 | `anotacao/lote.py` | execução em paralelo e gravação do lote |
 | `anotacao/populacao/` | uma base pública por arquivo (`Fonte` = SQL + mapeamento) |
 | `geocode/comparacao.py` | comparação bruto vs segmentado (relatórios) |
