@@ -14,12 +14,16 @@ from rich.console import Console
 from rich.pretty import pprint
 
 from crf_endereco.anotacao.agente import criar_agente, fechar_agente, segmentar
-from crf_endereco.anotacao.filtro_crf import prever_tipos, validar_tipos
+from crf_endereco.anotacao.filtro_crf import (
+    prever_incertos,
+    prever_tipos,
+    validar_tipos,
+)
 from crf_endereco.anotacao.lote import Opcoes, dividir_filtros, executar_lote
 from crf_endereco.anotacao.pendentes import Filtros, pendentes
 from crf_endereco.anotacao.populacao import carregar_fonte
 from crf_endereco.anotacao.populacao.amostragem import amostrar_diverso
-from crf_endereco.config import carregar_config
+from crf_endereco.config import CAMINHO_TAGGER, carregar_config
 from crf_endereco.dataset import (
     abrir_banco,
     contar_registros,
@@ -180,6 +184,27 @@ def lote(
             ),
         ),
     ] = None,
+    incertos: Annotated[
+        float | None,
+        typer.Option(
+            "--incertos",
+            min=0.0,
+            max=1.0,
+            help=(
+                "Processa só endereços em que o CRF está em dúvida: algum token com "
+                "probabilidade prevista abaixo deste limiar (0–1). Usa as "
+                "probabilidades marginais do modelo Python (--tagger), então roda o "
+                "CRF em todos os pendentes (não só em --limite) antes de etiquetar."
+            ),
+        ),
+    ] = None,
+    tagger: Annotated[
+        Path,
+        typer.Option(
+            "--tagger",
+            help="Modelo usado em --incertos (padrão: o tagger treinado).",
+        ),
+    ] = CAMINHO_TAGGER,
     modelo_crf: Annotated[
         Path | None,
         typer.Option(
@@ -231,20 +256,35 @@ def lote(
 
     conn = abrir_banco(banco)
     try:
-        if tipos:
+        if tipos or incertos is not None:
             candidatos = pendentes(conn, filtros)
-            console.print(
-                f"[dim]Segmentando {len(candidatos)} pendente(s) para filtrar "
-                f"por {', '.join(sorted(tipos))}...[/dim]"
-            )
-            aprovados = prever_tipos(
-                candidatos, tipos, modelo=modelo_crf, binario=binario_crf
-            )
+            aprovados = frozenset(linha.id for linha in candidatos)
+            if tipos:
+                console.print(
+                    f"[dim]Segmentando {len(candidatos)} pendente(s) para filtrar "
+                    f"por {', '.join(sorted(tipos))}...[/dim]"
+                )
+                por_tipo = prever_tipos(
+                    candidatos, tipos, modelo=modelo_crf, binario=binario_crf
+                )
+                aprovados &= por_tipo
+                console.print(
+                    f"[dim]Filtro por tipo: {len(por_tipo)} de {len(candidatos)} "
+                    "endereço(s) com ao menos um tipo previsto.[/dim]"
+                )
+            if incertos is not None:
+                console.print(
+                    f"[dim]Prevendo {len(candidatos)} pendente(s) para filtrar por "
+                    f"incerteza abaixo de {incertos:.2f}...[/dim]"
+                )
+                por_incerteza = prever_incertos(candidatos, incertos, tagger=tagger)
+                aprovados &= por_incerteza
+                console.print(
+                    f"[dim]Filtro por incerteza: {len(por_incerteza)} de "
+                    f"{len(candidatos)} endereço(s) com algum token abaixo de "
+                    f"{incertos:.2f}.[/dim]"
+                )
             filtros = replace(filtros, ids=aprovados)
-            console.print(
-                f"[dim]Filtro do CRF: {len(aprovados)} de {len(candidatos)} "
-                "endereço(s) com ao menos um tipo previsto.[/dim]"
-            )
 
         linhas = pendentes(conn, filtros, limite if balancear else None)
         if not linhas:

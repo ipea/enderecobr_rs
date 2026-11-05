@@ -1,15 +1,20 @@
-"""Filtro dos pendentes pelas categorias que o CRF preve."""
+"""Filtros dos pendentes pelas previsoes e probabilidades do CRF."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
+import sklearn_crfsuite
 import typer
 
 from crf_endereco.anotacao.ontologia import TIPOS_SEGMENTO
 from crf_endereco.anotacao.pendentes import Pendente
+from crf_endereco.config import CAMINHO_TAGGER
+from crf_endereco.features import ExtratorFeature, tokenize
+from crf_endereco.modelo.crf import carregar_tagger
 from crf_endereco.rotulos import mapa_tipo_segmento
 from crf_endereco.segmentador_rust import rodar_segmentacao
 from crf_endereco.ui import progresso
@@ -72,6 +77,72 @@ def filtrar_ids_por_tipos(
                 selecionados.add(identificador)
                 break
     return selecionados
+
+
+def confianca_minima(
+    tags: Sequence[str], marginais: Sequence[Mapping[str, float]]
+) -> float:
+    """Menor probabilidade marginal entre as tags previstas, uma por token."""
+    if not tags:
+        return 1.0
+    return min(
+        marginal.get(tag, 1.0)
+        for tag, marginal in zip(tags, marginais, strict=True)
+    )
+
+
+def confianca_do_endereco(
+    crf: sklearn_crfsuite.CRF, extrator: ExtratorFeature, endereco: str
+) -> float:
+    """Menor probabilidade marginal entre as tags previstas para os tokens.
+
+    1.0 quando o endereco nao tem token: sem token nao ha tag em que o modelo
+    possa estar em duvida.
+    """
+    x = extrator.tokens2features(tokenize(endereco))
+    if not x:
+        return 1.0
+    return confianca_minima(
+        cast(list[str], crf.predict_single(x)),
+        cast(list[dict[str, float]], crf.predict_marginals_single(x)),
+    )
+
+
+def filtrar_ids_por_incerteza(
+    confiancas: Sequence[float], ids: Sequence[int], limiar: float
+) -> set[int]:
+    """Ids cuja menor confianca por token fica abaixo de `limiar`."""
+    selecionados: set[int] = set()
+    for identificador, confianca in zip(ids, confiancas, strict=True):
+        if confianca < limiar:
+            selecionados.add(identificador)
+    return selecionados
+
+
+def prever_incertos(
+    linhas: Sequence[Pendente],
+    limiar: float,
+    *,
+    tagger: Path = CAMINHO_TAGGER,
+) -> frozenset[int]:
+    """Roda o CRF nos pendentes e devolve os que tem algum token inseguro.
+
+    As probabilidades marginais so existem no modelo Python - o binario Rust
+    devolve apenas a segmentacao -, entao aqui o modelo e o `--tagger`.
+    """
+    crf = carregar_tagger(tagger)
+    extrator = ExtratorFeature()
+    confiancas: list[float] = []
+    with progresso() as barra:
+        tarefa = barra.add_task("Medindo a confiança do CRF", total=len(linhas))
+        for linha in linhas:
+            confiancas.append(confianca_do_endereco(crf, extrator, linha.endereco))
+            barra.advance(tarefa)
+    return frozenset(
+        filtrar_ids_por_incerteza(
+            confiancas, [linha.id for linha in linhas], limiar
+        )
+    )
 
 
 def prever_tipos(

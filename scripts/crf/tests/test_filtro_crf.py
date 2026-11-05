@@ -6,6 +6,8 @@ import pytest
 from typer import BadParameter
 
 from crf_endereco.anotacao.filtro_crf import (
+    confianca_minima,
+    filtrar_ids_por_incerteza,
     filtrar_ids_por_tipos,
     validar_tipos,
 )
@@ -81,6 +83,40 @@ def test_filtrar_ids_por_tipos_exige_mesmo_numero_de_linhas():
         _ = filtrar_ids_por_tipos(
             [segmentacao("referencia")], [1, 2], frozenset({"referencia"})
         )
+
+
+# --- confianca_minima ------------------------------------------------------
+
+
+def test_confianca_minima_pega_o_token_mais_inseguro():
+    marginais = [
+        {"O": 0.02, "B_LOGRADOURO": 0.98},
+        {"B_NUMERO": 0.55, "O": 0.45},
+    ]
+
+    assert confianca_minima(["B_LOGRADOURO", "B_NUMERO"], marginais) == 0.55
+
+
+def test_confianca_minima_sem_token_nao_esta_em_duvida():
+    assert confianca_minima([], []) == 1.0
+
+
+# --- filtrar_ids_por_incerteza ---------------------------------------------
+
+
+def test_incerteza_marca_quem_tem_token_abaixo_do_limiar():
+    confiancas = [0.95, 0.40, 0.61]
+
+    assert filtrar_ids_por_incerteza(confiancas, [1, 2, 3], 0.6) == {2}
+
+
+def test_incerteza_empate_no_limiar_nao_marca():
+    assert filtrar_ids_por_incerteza([0.6], [1], 0.6) == set()
+
+
+def test_incerteza_exige_mesmo_numero_de_confiancas():
+    with pytest.raises(ValueError):
+        _ = filtrar_ids_por_incerteza([0.2], [1, 2], 0.6)
 
 
 # --- validar_tipos_filtro --------------------------------------------------
