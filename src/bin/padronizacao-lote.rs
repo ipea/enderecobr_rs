@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use enderecobr_rs::padronizar_estados_para_sigla;
+use enderecobr_rs::separador_endereco::estruturar_segmentos;
 use enderecobr_rs::separador_endereco::modelo::VAR_AMBIENTE_MODELO;
-use enderecobr_rs::separador_endereco::segmento_como_endereco;
 use enderecobr_rs::{
     padronizar_bairros, padronizar_cep_leniente, padronizar_complementos, padronizar_logradouros,
     padronizar_municipios, padronizar_numeros, padronizar_tipo_logradouro,
@@ -207,13 +207,13 @@ fn campo_endereco_processado() -> Field {
 /// tempo gasto na segmentação.
 fn segmentar_padronizado(texto: &str, timing: bool) -> Endereco {
     let Some(inicio) = timing.then(Instant::now) else {
-        return segmento_como_endereco(&segmentar_endereco(texto), true);
+        return estruturar_segmentos(&segmentar_endereco(texto), true);
     };
 
     let segmentado = segmentar_endereco(texto);
     TEMPO_SEGMENTACAO_NS.fetch_add(inicio.elapsed().as_nanos() as u64, Ordering::Relaxed);
     NUM_ENDERECOS.fetch_add(1, Ordering::Relaxed);
-    segmento_como_endereco(&segmentado, true)
+    estruturar_segmentos(&segmentado, true)
 }
 
 fn expandir_endereco(col: Column, timing: bool) -> PolarsResult<Column> {

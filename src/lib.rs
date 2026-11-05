@@ -355,7 +355,7 @@ pub use separador_endereco::tentar_estruturar_endereco;
 pub use separador_endereco::tentar_segmentar_endereco;
 pub use separador_endereco::tentar_segmentar_enderecos;
 
-use crate::separador_endereco::segmento_como_endereco;
+pub use separador_endereco::estruturar_segmentos;
 
 /// Função utilitária utilizada nas ferramentas de CLI para selecionar um padronizador facilmente
 /// via uma string descritiva.
@@ -378,10 +378,10 @@ pub fn obter_padronizador_por_tipo(tipo: &str) -> Result<fn(&str) -> String, &st
         "segmentacao" => Ok(|val| segmentar_endereco(val).como_json()),
 
         "estruturacao" => {
-            Ok(|val| segmento_como_endereco(&segmentar_endereco(val), true).como_json())
+            Ok(|val| estruturar_segmentos(&segmentar_endereco(val), true).como_json())
         }
 
-        "formatacao" => Ok(|val| segmento_como_endereco(&segmentar_endereco(val), true).formatar()),
+        "formatacao" => Ok(|val| estruturar_segmentos(&segmentar_endereco(val), true).formatar()),
 
         _ => Err("Nenhum padronizador encontrado"),
     }

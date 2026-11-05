@@ -1,28 +1,48 @@
 //!
-//!# Funcionamento do Estruturador de Endereços
+//!# Funcionamento Resumido do Estruturador de Endereços
+//!
+//!Este módulo transforma uma linha de endereço em texto livre (como chega de um
+//!cadastro qualquer) em um [`Endereco`] com campos separados. O pipeline tem
+//!quatro etapas, cada uma detalhada em uma seção abaixo:
+//!
+//!1. **Tokenização**: o texto é quebrado em unidades atômicas (`tokens`);
+//!2. **Rotulagem**: um modelo probabilístico atribui a cada token um rótulo
+//!   que indica o tipo de informação e o papel no trecho;
+//!3. **Agrupamento**: tokens rotulados em sequência viram trechos tipados
+//!   ([`SegmentoEndereco`]);
+//!4. **Estruturação**: os trechos são mapeados para os campos de um [`Endereco`]
+//!   (`estruturacao`), com padronização opcional.
+//!
+//![`segmentar_endereco`] executa as três primeiras etapas e devolve os trechos;
+//![`estruturar_endereco`] roda o pipeline completo e devolve o endereço pronto.
+//!Ambas usam o modelo distribuído com o pacote, cuja obtenção (busca local,
+//!download e cache) fica em [`modelo`]; [`SeparadorEndereco`] permite segmentar
+//!com um arquivo de modelo próprio.
+//!
+//!O fluxo de uma chamada:
 //!
 //!```text
 //!     ┌────────────────────────────────────────────────────────────────┐
 //!     │ SQN 404 Bloco A APT 309, Asa Norte                             │
 //!     └────────────────────────────────┬───────────────────────────────┘
-//!                                      │ tokenização + rotulagem BIO
+//!                                      │ tokenização + rotulagem
 //!                                      ▼
 //!     ┌───────┬───────┬───────┬───────┬───────┬───────┬──┬──────┬──────┐
 //!     │  SQN  │  404  │ Bloco │   A   │  APT  │  309  │, │ Asa  │Norte │
 //!     ├───────┼───────┼───────┼───────┼───────┼───────┼──┼──────┼──────┤
-//!     │ B-LOGR│ I-LOGR│ I-LOGR│ I-LOGR│ B-COMP│ I-COMP│O │B-LOC │I-LOC │
+//!     │ B_LOGR│ I_LOGR│ I_LOGR│ I_LOGR│ B_COMP│ I_COMP│O │B_LOC │I_LOC │
 //!     └───────┴───────┴───────┴───────┴───────┴───────┴──┴──────┴──────┘
 //!                                      │ agrupamento dos trechos
 //!                                      ▼
 //!     ┌─────────────────┐   ┌─────────────┐   ┌────────────┐
-//!     │ SQN 407 Bloco A │   │ APT 309     │   │ Asa Norte  │
+//!     │ SQN 404 Bloco A │   │ APT 309     │   │ Asa Norte  │
 //!     ├─────────────────┤   ├─────────────┤   ├────────────┤
 //!     │ logradouro      │   │ complemento │   │ localidade │
 //!     └─────────────────┘   └─────────────┘   └────────────┘
 //!                                      │  estruturação + padronização
 //!                                      ▼
 //!     ┌────────────────────────────────────────┐
-//!     │  Logradouro:   SQN 407 BLOCO A         │
+//!     │  Logradouro:   SQN 404 BLOCO A         │
 //!     │  Número:       —                       │
 //!     │  Complemento:  APARTAMENTO 309         │
 //!     │  Localidade:   ASA NORTE               │
@@ -30,9 +50,61 @@
 //!     └────────────────────────────────────────┘
 //!```
 //!
-//!`B-` inicia um trecho, `I-` continua o trecho anterior e `O` marca o token que não pertence
-//!a nenhum campo (descartado). O modelo cuida apenas da segmentação; cada campo resultante
+//!## Tokenização
+//!A tokenização é o processo de quebrar um texto em unidades atômicas (os *tokens*) que
+//!servem de entrada para o modelo. Neste projeto, optou-se por uma abordagem mais
+//!simplista: um token é uma sequência de letras, uma sequência de números ou um único
+//!caractere de pontuação/símbolo.
+//!`"Rua das Flores 123,,apt101"` vira `["Rua", "das", "Flores", "123", ",", ",", "apt", "101"]`.
+//!
+//!A tokenização também devolve a posição de cada token no texto original, usada depois
+//!para decidir se a junção de dois tokens leva espaço ou se eles vinham grudados.
+//!
+//!## Rotulagem dos tokens
+//!Com os tokens prontos, um processo de classificação é executado sobre eles: um modelo
+//!probabilístico atribui um rótulo a cada token, indicando ao mesmo tempo o tipo de
+//!informação que ele contém e o papel dele dentro do trecho (se ele está iniciando ou continuando o trecho).
+//!
+//!### Rotulagem BIO
+//!No esquema BIO, o prefixo do rótulo diz o papel do token no trecho e o sufixo diz o
+//!tipo de informação. O modelo emite três formatos de rótulo:
+//!
+//!- `B_<tipo>`: inicia um trecho do tipo (ex.: `B_logradouro`);
+//!- `I_<tipo>`: continua o trecho anterior, desde que seja do mesmo tipo;
+//!- `O`: token que não pertence a nenhum campo (descartado).
+//!
+//!### Classes usadas
+//!As classes de tipo são as variantes de [`TipoSegmento`], documentadas no próprio enum.
+//!
+//!Essas classes foram definidas desta forma pois torna as classes mais bem definidas e
+//!permite o reuso do modelo no futuro em outras situações, simplesmente aprimorando
+//!a etapa de estruturação para a situação específica do usuário, e sem depender de uma
+//!nova coleta de dados.
+//!
+//!### Conditional Random Fields - CRF
+//!Este é o modelo probabilístico utilizado atualmente. São modelos lineares que levam em conta a ordem das etiquetas: o rótulo de um dado token
+//!depende dos rótulos de seus vizinhos, diferente de um classificador comum que rotularia
+//!cada token isoladamente. Isso captura dependências locais, por exemplo, quando "309" vem depois de "APT", quase certamente estamos falando de uma continuação do complemento. O modelo é treinado fora desta
+//!biblioteca com o crfsuite e distribuído como um arquivo `.crf`.
+//!
+//!## Agrupamento de trechos
+//!Os tokens rotulados são reunidos em trechos ([`SegmentoEndereco`]): `B_<tipo>` abre
+//!um novo trecho e `I_<tipo>` é anexado ao último, desde que o tipo bata — `I` de tipo
+//!diferente ou sem trecho anterior é descartado, e `O` é ignorado. A posição original
+//!de cada token decide a junção: com espaço antes no texto original, os valores são
+//!unidos com espaço (`"APT 309"`); grudados, continuam grudados (`"504-B1"`).
+//!
+//!## Estruturação em endereço
+//!Os trechos são distribuídos nos campos de um [`Endereco`] por heurísticas em
+//!`estruturacao` (vide [`estruturar_segmentos`]): cada tipo de trecho tem campos
+//!preferidos e o mapeamento pode olhar os trechos vizinhos. Como essas regras mudam
+//!frequentemente, a referência exata é o próprio código, não esta documentação.
+//!
+//!O modelo cuida apenas da segmentação; com `padronizar = true`, cada campo resultante
 //!passa depois pelo padronizador do seu tipo, baseado em expressões regulares.
+//!
+//!A obtenção do arquivo do modelo (busca, download e cache) fica em [`modelo`].
+mod estruturacao;
 pub mod features;
 pub mod modelo;
 
@@ -42,11 +114,10 @@ use crfsuite::{Attribute, Model, Tagger};
 
 use serde::Serialize;
 
+pub use crate::separador_endereco::estruturacao::estruturar_segmentos;
 pub use crate::separador_endereco::modelo::{obter_caminho_modelo, obter_modelo};
-use crate::{
-    endereco::{padronizar_in_place, Endereco},
-    separador_endereco::features::ExtratorFeature,
-};
+
+use crate::{endereco::Endereco, separador_endereco::features::ExtratorFeature};
 
 /// Separador de endereços: divide um texto livre em partes (logradouro,
 /// número, complemento, CEP etc.) com o auxílio de um modelo probabilístico.
@@ -492,7 +563,7 @@ impl EnderecoSegmentado {
     /// Junta os segmentos em um [`Endereco`], padronizando os campos quando
     /// `padronizar` for verdadeiro. Vide [`segmento_como_endereco`].
     pub fn como_endereco(&self, padronizar: bool) -> Endereco {
-        segmento_como_endereco(self, padronizar)
+        estruturar_segmentos(self, padronizar)
     }
 }
 
@@ -541,7 +612,7 @@ pub fn estruturar_endereco(endereco: &str, padronizar: bool) -> Endereco {
 /// entrar em panic quando o modelo não está disponível.
 pub fn tentar_estruturar_endereco(endereco: &str, padronizar: bool) -> Result<Endereco, String> {
     tentar_segmentar_endereco(endereco)
-        .map(|segmentado| segmento_como_endereco(&segmentado, padronizar))
+        .map(|segmentado| estruturar_segmentos(&segmentado, padronizar))
 }
 
 /// Serializa os segmentos encontrados em JSON. Usando internamente no CLI.
@@ -566,112 +637,6 @@ pub fn tentar_estruturar_endereco(endereco: &str, padronizar: bool) -> Result<En
 /// ```
 pub fn segmento_como_json(segmentado: &EnderecoSegmentado) -> String {
     serde_json::to_string(segmentado).unwrap_or_else(|_| "[]".to_string())
-}
-
-/// Agrupa os segmentos nos campos de um [`Endereco`].
-///
-/// Trechos sem campo próprio são encaixados conforme o contexto: `parcela`
-/// logo após um logradouro continua no logradouro; `parcela`,
-/// `quilometragem_via` e `complemento` vão para o complemento; e
-/// `modificador_numero` acompanha o número. Os demais tipos
-/// (`empreendimento`, `referencia`, `denominacao`) são descartados.
-///
-/// ```
-/// use enderecobr_rs::separador_endereco::{
-///     segmento_como_endereco, EnderecoSegmentado, SegmentoEndereco, TipoSegmento
-/// };
-/// use enderecobr_rs::endereco::Endereco;
-///
-/// let segmentado = EnderecoSegmentado {
-///     segmentos: vec![
-///         SegmentoEndereco {
-///             valor: "av atlantica".to_string(),
-///             tipo: TipoSegmento::Logradouro,
-///         },
-///         SegmentoEndereco {
-///             valor: "123".to_string(),
-///             tipo: TipoSegmento::Numero,
-///         },
-///         SegmentoEndereco {
-///             valor: "apt 203".to_string(),
-///             tipo: TipoSegmento::Complemento,
-///         },
-///     ],
-/// };
-///
-/// let resultado_esperado = Endereco {
-///     logradouro: Some("AVENIDA ATLANTICA".to_string()),
-///     numero: Some("123".to_string()),
-///     complemento: Some("APARTAMENTO 203".to_string()),
-///     ..Default::default()
-/// };
-///
-/// assert_eq!(segmento_como_endereco(&segmentado, true), resultado_esperado);
-/// ```
-pub fn segmento_como_endereco(segmentado: &EnderecoSegmentado, padronizar: bool) -> Endereco {
-    let mut res = Endereco::default();
-    for (i, seg) in segmentado.segmentos.iter().enumerate() {
-        let atributo_opt = match seg.tipo {
-            TipoSegmento::Logradouro | TipoSegmento::Denominacao if res.logradouro.is_none() => {
-                Some(res.logradouro.get_or_insert_with(String::new))
-            }
-            TipoSegmento::Parcela
-                if i > 0
-                    && segmentado
-                        .segmentos
-                        .get(i - 1)
-                        .filter(|anterior| anterior.tipo == TipoSegmento::Logradouro)
-                        .is_some() =>
-            {
-                Some(res.logradouro.get_or_insert_with(String::new))
-            }
-            // `numero` e `modificador_numero` também alimentam o número.
-            TipoSegmento::Numero | TipoSegmento::ModificadorNumero => {
-                Some(res.numero.get_or_insert_with(String::new))
-            }
-            TipoSegmento::QuilometragemVia if res.numero.is_none() => {
-                Some(res.numero.get_or_insert_with(String::new))
-            }
-            // Sem contexto de número, estes tipos caem no complemento.
-            TipoSegmento::Parcela | TipoSegmento::QuilometragemVia | TipoSegmento::Complemento => {
-                Some(res.complemento.get_or_insert_with(String::new))
-            }
-            TipoSegmento::Empreendimento if res.localidade.is_none() => {
-                Some(res.localidade.get_or_insert_with(String::new))
-            }
-            TipoSegmento::Localidade | TipoSegmento::NucleoRural => {
-                Some(res.localidade.get_or_insert_with(String::new))
-            }
-            TipoSegmento::Cep => Some(res.cep.get_or_insert_with(String::new)),
-            // TODO: portar a política pós-CRF; até lá estes tipos são descartados.
-            // `logradouro` e `empreendimento` aparecem aqui só para fechar a
-            // exaustividade: quando o guard deles falha, o trecho é descartado.
-            TipoSegmento::Logradouro
-            | TipoSegmento::Empreendimento
-            | TipoSegmento::LogradouroInterno
-            | TipoSegmento::Referencia
-            | TipoSegmento::PontoReferencia
-            | TipoSegmento::Denominacao
-            | TipoSegmento::RecursoNatural
-            | TipoSegmento::Municipio
-            | TipoSegmento::Uf
-            | TipoSegmento::Cadastro
-            | TipoSegmento::Ruido
-            | TipoSegmento::Outro => None,
-        };
-
-        if let Some(atributo) = atributo_opt {
-            if !atributo.is_empty() {
-                atributo.push(' ');
-            }
-            atributo.push_str(seg.valor.as_str());
-        }
-    }
-    if padronizar {
-        padronizar_in_place(&mut res);
-    }
-
-    res
 }
 
 #[cfg(test)]
@@ -789,114 +754,6 @@ mod tests {
         assert_eq!(
             EnderecoSegmentado::default().como_json(),
             r#"{"segmentos":[]}"#
-        );
-    }
-
-    #[test]
-    fn segmento_como_endereco_agrupa_campos_padroes() {
-        let segmentado = criar_segmentado(vec![
-            criar_segmento("av atlantica", TipoSegmento::Logradouro),
-            criar_segmento("123", TipoSegmento::Numero),
-            criar_segmento("apt 203", TipoSegmento::Complemento),
-            criar_segmento("copacabana", TipoSegmento::Localidade),
-            criar_segmento("22000-000", TipoSegmento::Cep),
-        ]);
-
-        assert_eq!(
-            segmento_como_endereco(&segmentado, true),
-            Endereco {
-                logradouro: Some("AVENIDA ATLANTICA".to_string()),
-                numero: Some("123".to_string()),
-                complemento: Some("APARTAMENTO 203".to_string()),
-                localidade: Some("COPACABANA".to_string()),
-                cep: Some("22000-000".to_string()),
-            }
-        );
-    }
-
-    #[test]
-    fn segmento_como_endereco_descarta_tipos_sem_campo() {
-        let segmentado = criar_segmentado(vec![
-            criar_segmento("r x", TipoSegmento::Logradouro),
-            // Segundo logradouro é ignorado: o campo já foi preenchido.
-            criar_segmento("r y", TipoSegmento::Logradouro),
-            criar_segmento("edifton bar", TipoSegmento::Empreendimento),
-            criar_segmento("esquina com r b", TipoSegmento::Referencia),
-            criar_segmento("antiga r c", TipoSegmento::Denominacao),
-            criar_segmento("rio de janeiro", TipoSegmento::Municipio),
-            criar_segmento("rj", TipoSegmento::Uf),
-            criar_segmento("vale qualquer coisa", TipoSegmento::Outro),
-        ]);
-
-        assert_eq!(
-            segmento_como_endereco(&segmentado, false),
-            Endereco {
-                logradouro: Some("r x".to_string()),
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn segmento_como_endereco_junta_parcela_ao_logradouro() {
-        let segmentado = criar_segmentado(vec![
-            criar_segmento("r x", TipoSegmento::Logradouro),
-            criar_segmento("qd 5 lote 7", TipoSegmento::Parcela),
-        ]);
-
-        assert_eq!(
-            segmento_como_endereco(&segmentado, false),
-            Endereco {
-                logradouro: Some("r x qd 5 lote 7".to_string()),
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn segmento_como_endereco_manda_parcela_sem_contexto_para_complemento() {
-        let segmentado = criar_segmentado(vec![criar_segmento("qd 5", TipoSegmento::Parcela)]);
-
-        assert_eq!(
-            segmento_como_endereco(&segmentado, false),
-            Endereco {
-                complemento: Some("qd 5".to_string()),
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn segmento_como_endereco_direciona_quilometragem() {
-        // Sem número, a quilometragem vira o número.
-        let sem_numero = criar_segmentado(vec![criar_segmento(
-            "km 304",
-            TipoSegmento::QuilometragemVia,
-        )]);
-
-        assert_eq!(
-            segmento_como_endereco(&sem_numero, false),
-            Endereco {
-                numero: Some("km 304".to_string()),
-                ..Default::default()
-            }
-        );
-
-        // Com número, a quilometragem cai no complemento.
-        let com_numero = criar_segmentado(vec![
-            criar_segmento("r x", TipoSegmento::Logradouro),
-            criar_segmento("123", TipoSegmento::Numero),
-            criar_segmento("km 304", TipoSegmento::QuilometragemVia),
-        ]);
-
-        assert_eq!(
-            segmento_como_endereco(&com_numero, false),
-            Endereco {
-                logradouro: Some("r x".to_string()),
-                numero: Some("123".to_string()),
-                complemento: Some("km 304".to_string()),
-                ..Default::default()
-            }
         );
     }
 
