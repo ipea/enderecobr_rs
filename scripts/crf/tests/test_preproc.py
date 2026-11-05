@@ -280,3 +280,78 @@ def test_tokens2features_sem_duplicatas():
     feats = tokens2features(["Rua", ",", "das", "Flores", "123"])
     for item in feats:
         assert len(item) == len(set(item))
+
+
+# ----------------------------
+# feature de municipio
+# ----------------------------
+def test_municipio_marca_nome_de_varios_tokens():
+    feats = tokens2features(["Rua", "Sao", "Paulo", "100"])
+    assert "0:municipio_B" in feats[1]
+    assert "0:municipio_I" in feats[2]
+    assert "municipio" not in "".join(feats[0])
+    assert "municipio" not in "".join(feats[3])
+
+
+def test_municipio_marca_nome_de_um_token():
+    feats = tokens2features(["Rua", "Campinas", "Centro"])
+    assert "0:municipio_B" in feats[1]
+    assert "0:municipio_I" not in feats[1]
+    # "CENTRO" nao e municipio: a feature nao pode disparar para qualquer palavra
+    assert "municipio" not in "".join(feats[2])
+
+
+def test_municipio_casa_nome_com_pontuacao_e_acento():
+    toks = tokenize("Olho d'Água do Borges")
+    assert toks == ["Olho", "d", "'", "Água", "do", "Borges"]
+    feats = tokens2features(toks)
+    assert "0:municipio_B" in feats[0]
+    assert "0:municipio_I" in feats[1]
+    assert "municipio" not in "".join(feats[2])
+    assert "0:municipio_I" in feats[3]
+    assert "0:municipio_I" in feats[4]
+    assert "0:municipio_I" in feats[5]
+
+
+def test_municipio_prefere_o_nome_mais_longo():
+    # "PASSA QUATRO" tambem e municipio, mas o nome da rua e o composto
+    feats = tokens2features(tokenize("Santa Rita do Passa Quatro"))
+    assert "0:municipio_B" in feats[0]
+    assert all("0:municipio_I" in f for f in feats[1:])
+
+
+def test_municipio_exige_nome_completo():
+    feats = tokens2features(["Rua", "Sao", "100"])
+    assert "municipio" not in "".join(feats[1])
+
+
+# ----------------------------
+# feature de nucleo rural
+# ----------------------------
+def test_nucleo_marca_cabeca_com_nome():
+    feats = tokens2features(tokenize("Povoado Agua Preta, 65"))
+    assert "0:nucleo_B" in feats[0]
+
+
+def test_nucleo_marca_nome_composto():
+    feats = tokens2features(tokenize("Nucleo Rural Boa Esperanca"))
+    assert "0:nucleo_B" in feats[0]
+    assert "0:nucleo_I" in feats[1]
+    assert "nucleo" not in "".join(feats[2])
+
+
+def test_nucleo_exige_nome_alfabetico():
+    # "CHACARA 51" e parcela e um cabeca solta e ruido: os dois nao marcam
+    for sent in (["Chacara", "51"], ["Povoado"], ["Povoado", "."]):
+        feats = tokens2features(sent)
+        assert all("nucleo" not in "".join(f) for f in feats)
+
+
+def test_nucleo_aceita_abreviacao():
+    assert "0:nucleo_B" in tokens2features(tokenize("Faz Santa Rita"))[0]
+    assert "0:nucleo_B" in tokens2features(tokenize("Sit Mirador"))[0]
+
+
+def test_nucleo_nao_marca_tipo_de_via():
+    feats = tokens2features(tokenize("Linha Colombo, 200"))
+    assert all("nucleo" not in "".join(f) for f in feats)

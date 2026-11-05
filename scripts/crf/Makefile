@@ -1,7 +1,8 @@
-.PHONY: test popular etiquetar treinar tunar avaliar segmentar diferencial geocode otimizar instalar
+.PHONY: test popular etiquetar treinar tunar avaliar segmentar explicar diferencial geocode otimizar instalar
 
 DIR_DADOS = ./data
-N ?= 60000
+N ?= 5000
+ADDR ?= RUA DAS FLORES 123 APTO 45 - CENTRO
 
 include .env
 export
@@ -25,6 +26,9 @@ avaliar: treinar
 
 segmentar:
 	uv run crf segmentar
+
+explicar:
+	uv run crf explicar "$(ADDR)"
 
 diferencial:
 	uv run crf diferencial

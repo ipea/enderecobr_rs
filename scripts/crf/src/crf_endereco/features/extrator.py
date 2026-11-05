@@ -1,7 +1,12 @@
 """Features por token usadas pelo CRF."""
 
 from collections.abc import Iterable
+from pathlib import Path
 
+from crf_endereco.config import MUNICIPIOS
+from crf_endereco.features.municipios import Trie, construir_trie, marcar_municipios
+from crf_endereco.features.nucleos import construir_trie as construir_trie_nucleos
+from crf_endereco.features.nucleos import marcar_nucleos
 from crf_endereco.features.texto import (
     MARCADORES_CONHECIDOS_DF,
     MARCADORES_CONHECIDOS_PALMAS,
@@ -13,8 +18,14 @@ from crf_endereco.features.texto import (
 
 
 class ExtratorFeature:
-    def __init__(self, distancias_vizinhaca: Iterable[int] = (-2, -1, 1, 2)) -> None:
+    def __init__(
+        self,
+        distancias_vizinhaca: Iterable[int] = (-2, -1, 1, 2),
+        municipios: Path = MUNICIPIOS,
+    ) -> None:
         self.distancias_vizinhaca: Iterable[int] = distancias_vizinhaca
+        self.trie_municipios: Trie = construir_trie(municipios)
+        self.trie_nucleos: Trie = construir_trie_nucleos()
 
     def sent2features(self, text: str) -> list[dict[str, float]]:
         toks = tokenize(text)
@@ -22,10 +33,17 @@ class ExtratorFeature:
 
     # uso direto quando já tokenizado
     def tokens2features(self, toks: list[str]) -> list[dict[str, float]]:
-        return [
-            dict.fromkeys(self._features_posicao(toks, i), 1.0)
-            for i in range(len(toks))
-        ]
+        marcas = marcar_municipios(toks, self.trie_municipios)
+        marcas_nucleo = marcar_nucleos(toks, self.trie_nucleos)
+        features: list[dict[str, float]] = []
+        for i, marca in enumerate(marcas):
+            nomes = self._features_posicao(toks, i)
+            if marca is not None:
+                nomes.append(f"0:{marca}")
+            if marcas_nucleo[i] is not None:
+                nomes.append(f"0:{marcas_nucleo[i]}")
+            features.append(dict.fromkeys(nomes, 1.0))
+        return features
 
     def _features_posicao(self, sent: list[str], i: int) -> list[str]:
         """Gerador de features principal, baseado somente na posição do token solicitado e seus vizinhos."""
