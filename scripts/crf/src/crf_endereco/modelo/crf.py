@@ -5,22 +5,24 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
-from math import ceil
 from pathlib import Path
 
 import sklearn_crfsuite
 import typer
-from rich.table import Table
-from rich.text import Text
 from sklearn.metrics import make_scorer
 from sklearn.model_selection import GridSearchCV, ShuffleSplit, train_test_split
 from sklearn_crfsuite.metrics import flat_accuracy_score, flat_classification_report
 
 from crf_endereco.config import CAMINHO_DATASET, CAMINHO_TAGGER
 from crf_endereco.dataset import carregar_anotados, segmentos_de
-from crf_endereco.features import ExtratorFeature, tokenize, tokenize_com_offsets
+from crf_endereco.features import (
+    ExtratorFeature,
+    is_pontuacao,
+    tokenize,
+    tokenize_com_offsets,
+)
+from crf_endereco.modelo import relatorio
 from crf_endereco.rotulos import mergear
-from crf_endereco.ui import console
 
 # \`str.isspace()\` é mais amplo que o \`u8::is_ascii_whitespace\` usado pelo Rust
 # (inclui NBSP, por exemplo); o conjunto explícito mantém as duas
@@ -112,88 +114,70 @@ def _composicao(exemplos: Exemplos) -> Counter[tuple[str, str]]:
     return Counter((c[0], c[1]) for c in exemplos.categorias)
 
 
-# Tons de cinza do xterm (233 = escuro, 249 = claro): o fundo segue a
-# contagem, e o texto vira preto ou branco conforme a luminancia do tom para
-# sobreviver tanto a tema claro quanto a escuro.
-TONS_CONFUSAO = (233, 237, 240, 244, 248)
+def _sem_pontuacao(
+    toks: Sequence[str], labels: Sequence[str]
+) -> tuple[list[str], list[str]] | None:
+    """Exemplo sem a pontuação que pode sair sem emendar dois trechos.
 
-
-def matriz_confusao(
-    y_true: Sequence[Sequence[str]], y_pred: Sequence[Sequence[str]]
-) -> tuple[list[str], list[list[int]]]:
-    """Contagens token a token (real x previsto), com `O` na primeira posicao."""
-    rotulos = sorted(
-        {r for linha in y_true for r in linha} | {r for linha in y_pred for r in linha},
-        key=lambda r: (r != "O", r),
-    )
-    indice = {rotulo: i for i, rotulo in enumerate(rotulos)}
-    matriz = [[0] * len(rotulos) for _ in rotulos]
-    for true, pred in zip(y_true, y_pred, strict=False):
-        for t, p in zip(true, pred, strict=False):
-            matriz[indice[t]][indice[p]] += 1
-    return rotulos, matriz
-
-
-def _contagem(valor: int) -> str:
-    """Contagem em ate cinco caracteres, para a matriz caber na largura util."""
-    if valor < 1_000:
-        return str(valor)
-    if valor < 100_000:
-        return f"{valor / 1_000:.1f}k"
-    return f"{valor / 1_000:.0f}k"
-
-
-def _celula(valor: int, maximo: int, diagonal: bool) -> Text:
-    if valor == 0:
-        return Text("·", style="color(240)", justify="right")
-    nivel = min(len(TONS_CONFUSAO) - 1, len(TONS_CONFUSAO) * valor // maximo)
-    tom = TONS_CONFUSAO[nivel]
-    peso = "bold " if diagonal else ""
-    frente = "black" if tom >= 244 else "white"
-    return Text(
-        _contagem(valor), style=f"{peso}{frente} on color({tom})", justify="right"
-    )
-
-
-def imprimir_matriz_confusao(rotulos: list[str], matriz: list[list[int]]) -> None:
-    """Heatmap de contagens (real x previsto), em blocos que caibam no terminal.
-
-    As colunas sao numeradas para nao gastar largura com rotulos longos: a
-    linha de cada indice esta na primeira coluna, entao a celula (i, j) se le
-    direto pelos nomes das linhas.
+    Sai a pontuação de dentro de um trecho (`S/N`) e a que separa trechos de
+    tipos diferentes. Fica a que separa dois trechos do mesmo tipo
+    (`GLEBA 1, LOTE 2`): sem ela a emenda entre os dois viraria uma sequência de
+    rótulos ambígua.
     """
-    largura_terminal = console.width if console.is_terminal else 200
-    largura_rotulo = max(len(rotulo) for rotulo in rotulos) + 3
-    largura_celula = max(len(_contagem(n)) for linha in matriz for n in linha)
-    cabem = max(1, (largura_terminal - largura_rotulo) // (largura_celula + 2))
-    # Blocos equilibrados: duas colunas sobrando no ultimo bloco leem pior que
-    # blocos de tamanho parecido.
-    blocos = ceil(len(rotulos) / cabem)
-    por_bloco = ceil(len(rotulos) / blocos)
+    # Tipo do trecho imediatamente antes e depois de cada token.
+    antes: list[str | None] = []
+    tipo = None
+    for label in labels:
+        antes.append(tipo)
+        if label != "O":
+            tipo = label.partition("_")[2]
 
-    console.rule("[bold]Matriz de confusão (real × previsto, por token)[/bold]")
-    for inicio in range(0, len(rotulos), por_bloco):
-        colunas = range(inicio, min(inicio + por_bloco, len(rotulos)))
-        tabela = Table(box=None, pad_edge=False, padding=(0, 1, 0, 0))
-        tabela.add_column(f"{'real \\ prev':<{largura_rotulo}}", no_wrap=True)
-        for j in colunas:
-            tabela.add_column(
-                f"[dim]{j}[/dim]",
-                justify="right",
-                width=largura_celula,
-                no_wrap=True,
-            )
-        for i, rotulo in enumerate(rotulos):
-            maximo = max(matriz[i]) or 1
-            tabela.add_row(
-                Text(f"{i:>2} {rotulo}"),
-                *[_celula(matriz[i][j], maximo, i == j) for j in colunas],
-            )
-        console.print(tabela)
-    console.print(
-        "[dim]Cada linha soma todos os tokens com aquele rótulo real; o fundo "
-        + "acompanha a fração da linha (k = milhares) e a diagonal é o acerto.[/dim]"
-    )
+    depois: list[str | None] = [None] * len(labels)
+    tipo = None
+    for i in range(len(labels) - 1, -1, -1):
+        depois[i] = tipo
+        if labels[i] != "O":
+            tipo = labels[i].partition("_")[2]
+
+    toks_sem: list[str] = []
+    labels_sem: list[str] = []
+    for tok, label, tipo_antes, tipo_depois in zip(
+        toks, labels, antes, depois, strict=True
+    ):
+        fica = label == "O" and tipo_antes is not None and tipo_antes == tipo_depois
+        if is_pontuacao(tok) and not fica:
+            continue
+        toks_sem.append(tok)
+        labels_sem.append(label)
+
+    return None if toks_sem == list(toks) else (toks_sem, labels_sem)
+
+
+def aumentar(exemplos: Exemplos) -> Exemplos:
+    """Acrescenta a cada exemplo a versão sem pontuação dispensável.
+
+    O mesmo endereço chega com e sem pontuação no uso real; treinar com as duas
+    formas evita que o modelo use a pontuação como fronteira de trecho.
+    """
+    extrator = ExtratorFeature()
+    x = list(exemplos.x)
+    y = list(exemplos.y)
+    tokens = list(exemplos.tokens)
+    categorias = list(exemplos.categorias)
+
+    for toks, labels, categoria in zip(
+        exemplos.tokens, exemplos.y, exemplos.categorias, strict=True
+    ):
+        sem_pontuacao = _sem_pontuacao(toks, labels)
+        if sem_pontuacao is None:
+            continue
+        toks_sem, labels_sem = sem_pontuacao
+        x.append(extrator.tokens2features(toks_sem))
+        y.append(labels_sem)
+        tokens.append(toks_sem)
+        categorias.append(categoria)
+
+    return Exemplos(x=x, y=y, tokens=tokens, categorias=categorias)
 
 
 def treinar(
@@ -201,12 +185,19 @@ def treinar(
     saida: Path = CAMINHO_TAGGER,
     fracao_teste: float = 0.1,
     estratificar_por: str = "origem",
+    com_aumento: bool = False,
 ) -> None:
     """Treina o CRF e reporta a acuracia na fracao de teste."""
     exemplos = carregar_exemplos(dataset)
     treino, teste = dividir(
         exemplos, fracao_teste, estratificar_por=estratificar_por
     )
+    if com_aumento:
+        # Só o treino aumenta: a variante de um exemplo no teste vazaria a
+        # resposta dele para o modelo.
+        original = len(treino.y)
+        treino = aumentar(treino)
+        print(f"Aumento: {len(treino.y) - original} exemplos com pontuacao removida")
     print(
         f"Treino: {len(treino.y)} | teste: {len(teste.y)} "
         + f"(estratificado por {estratificar_por})"
@@ -234,11 +225,15 @@ def treinar(
 
     print(f"Acurácia: {flat_accuracy_score(teste.y, y_pred):.2f}")
     print(flat_classification_report(teste.y, y_pred, zero_division=0.0))
-    imprimir_matriz_confusao(*matriz_confusao(teste.y, y_pred))
+    relatorio.imprimir_erros_por_rotulo(teste.y, y_pred)
 
 
 def tunar() -> None:
-    """Busca de hiperparametros sobre o mesmo dataset, features e etiquetas."""
+    """Busca de hiperparametros sobre o mesmo dataset, features e etiquetas.
+
+    Sem aumento de dados: as variantes de um exemplo cairiam dos dois lados dos
+    folds da validacao cruzada.
+    """
     exemplos = carregar_exemplos()
     crf = sklearn_crfsuite.CRF(
         algorithm="lbfgs",

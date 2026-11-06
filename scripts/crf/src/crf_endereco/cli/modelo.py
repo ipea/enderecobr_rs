@@ -33,9 +33,15 @@ def treinar(
         float, typer.Option(help="fracao separada para teste")
     ] = 0.1,
     estratificar_por: OpcaoEstratificar = "origem",
+    com_aumento: Annotated[
+        bool, typer.Option("--com-aumento", help="treina tambem sem pontuacao")
+    ] = False,
 ) -> None:
     """Treina o CRF sobre o dataset anotado."""
-    modelo_crf.treinar(dataset, saida, fracao_teste, estratificar_por=estratificar_por)
+    modelo_crf.treinar(
+        dataset, saida, fracao_teste, estratificar_por=estratificar_por,
+        com_aumento=com_aumento,
+    )
 
 
 def tunar() -> None:

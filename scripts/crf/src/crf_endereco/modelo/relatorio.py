@@ -5,13 +5,16 @@ from __future__ import annotations
 import random
 from collections import Counter, defaultdict
 from collections.abc import Sequence
+from math import ceil
 from pathlib import Path
 from pprint import pprint
 
+from rich.table import Table
+from rich.text import Text
 from sklearn_crfsuite import metrics
 
 from crf_endereco.config import CAMINHO_TAGGER
-from crf_endereco.modelo.crf import carregar_tagger
+from crf_endereco.ui import console
 
 Features = list[list[dict[str, float]]]
 Rotulos = list[list[str]]
@@ -153,6 +156,121 @@ def pares_de_rotulos(y: Rotulos) -> list[tuple[str, ...]]:
     ]
 
 
+# Tons de cinza do xterm (233 = escuro, 249 = claro): o fundo segue a
+# contagem, e o texto vira preto ou branco conforme a luminância do tom para
+# sobreviver tanto a tema claro quanto a escuro.
+TONS_CONFUSAO = (233, 237, 240, 244, 248)
+
+
+def matriz_confusao(
+    y_true: Rotulos, y_pred: Rotulos
+) -> tuple[list[str], list[list[int]]]:
+    """Contagens token a token (real x previsto), com `O` na primeira posição."""
+    rotulos = sorted(
+        {r for linha in y_true for r in linha} | {r for linha in y_pred for r in linha},
+        key=lambda r: (r != "O", r),
+    )
+    indice = {rotulo: i for i, rotulo in enumerate(rotulos)}
+    matriz = [[0] * len(rotulos) for _ in rotulos]
+    for true, pred in zip(y_true, y_pred, strict=False):
+        for t, p in zip(true, pred, strict=False):
+            matriz[indice[t]][indice[p]] += 1
+    return rotulos, matriz
+
+
+def matriz_erros(
+    y_true: Rotulos, y_pred: Rotulos
+) -> tuple[list[str], list[list[int]]]:
+    """Contagens real x previsto sem a diagonal, só dos rótulos que erram.
+
+    Acerto não é erro de ninguém: a diagonal sai da matriz e o rótulo que nunca
+    aparece em nenhum erro, nem como real nem como previsto, fica de fora.
+    """
+    rotulos, matriz = matriz_confusao(y_true, y_pred)
+    tamanho = len(matriz)
+    erros_linha = [sum(linha) - linha[i] for i, linha in enumerate(matriz)]
+    erros_coluna = [
+        sum(matriz[i][j] for i in range(tamanho)) - matriz[j][j]
+        for j in range(tamanho)
+    ]
+    mantidos = [i for i in range(tamanho) if erros_linha[i] or erros_coluna[i]]
+    return (
+        [rotulos[i] for i in mantidos],
+        [[0 if i == j else matriz[i][j] for j in mantidos] for i in mantidos],
+    )
+
+
+def _largura_contagem(matriz: list[list[int]]) -> int:
+    """Largura da maior contagem da matriz, já abreviada."""
+    return max(len(_contagem(valor)) for linha in matriz for valor in linha)
+
+
+def _contagem(valor: int) -> str:
+    """Contagem em ate cinco caracteres, para a matriz caber na largura util."""
+    if valor < 1_000:
+        return str(valor)
+    if valor < 100_000:
+        return f"{valor / 1_000:.1f}k"
+    return f"{valor / 1_000:.0f}k"
+
+
+def _celula(valor: int, maximo: int) -> Text:
+    if valor == 0:
+        return Text("·", style="color(240)", justify="right")
+    nivel = min(len(TONS_CONFUSAO) - 1, len(TONS_CONFUSAO) * valor // maximo)
+    tom = TONS_CONFUSAO[nivel]
+    frente = "black" if tom >= 244 else "white"
+    return Text(_contagem(valor), style=f"{frente} on color({tom})", justify="right")
+
+
+def imprimir_erros_por_rotulo(y_true: Rotulos, y_pred: Rotulos) -> None:
+    """Heatmap dos erros (real x previsto), com as colunas em blocos.
+
+    As colunas são numeradas para não gastar largura com rótulos longos: a
+    linha de cada índice está na primeira coluna, então a célula (i, j) se lê
+    direto pelos nomes das linhas. O fundo acompanha a fração do maior erro de
+    cada linha e o total de erros da linha vem entre parênteses.
+    """
+    rotulos, matriz = matriz_erros(y_true, y_pred)
+    if not rotulos:
+        console.print("[green]Nenhum erro de rótulo.[/green]")
+        return
+
+    largura_terminal = console.width if console.is_terminal else 200
+    largura_rotulo = max(len(rotulo) for rotulo in rotulos) + 9
+    # A largura da célula também comporta o índice da coluna.
+    largura_celula = max(len(str(len(rotulos))), _largura_contagem(matriz))
+    # Blocos equilibrados: duas colunas sobrando no último bloco leem pior que
+    # blocos de tamanho parecido.
+    cabem = max(1, (largura_terminal - largura_rotulo) // (largura_celula + 2))
+    blocos = ceil(len(rotulos) / cabem)
+    por_bloco = ceil(len(rotulos) / blocos)
+
+    console.rule("[bold]Erros por rótulo (real × previsto)[/bold]")
+    for inicio in range(0, len(rotulos), por_bloco):
+        colunas = range(inicio, min(inicio + por_bloco, len(rotulos)))
+        tabela = Table(box=None, pad_edge=False, padding=(0, 1, 0, 0))
+        tabela.add_column(f"{'real \\ prev':<{largura_rotulo}}", no_wrap=True)
+        for j in colunas:
+            tabela.add_column(
+                f"[dim]{j}[/dim]", justify="right", width=largura_celula, no_wrap=True
+            )
+        for i, rotulo in enumerate(rotulos):
+            maximo = max(matriz[i]) or 1
+            tabela.add_row(
+                Text.assemble(
+                    (f"{i:>2} {rotulo} ", ""), (f"({sum(matriz[i])})", "dim")
+                ),
+                *[_celula(matriz[i][j], maximo) for j in colunas],
+            )
+        console.print(tabela)
+    console.print(
+        "[dim]A diagonal (acerto) fica fora: cada linha mostra só os erros "
+        + "daquele rótulo real, o fundo acompanha a fração do maior deles "
+        + "(k = milhares) e o total está entre parênteses.[/dim]"
+    )
+
+
 def avaliar(
     x: Features,
     y: Rotulos,
@@ -161,6 +279,10 @@ def avaliar(
     tagger: Path = CAMINHO_TAGGER,
 ) -> None:
     """Relatorio completo: token, classe, categoria e amostras de erro."""
+    # Import local: `crf.py` consome este módulo (heatmap de erros), então o
+    # import no topo fecharia o ciclo.
+    from crf_endereco.modelo.crf import carregar_tagger
+
     print("Executando modelo...")
     crf = carregar_tagger(tagger)
     # predict() devolve ndarray de rotulos; a conversao abaixo e so o
