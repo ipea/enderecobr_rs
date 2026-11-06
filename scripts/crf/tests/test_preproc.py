@@ -355,3 +355,18 @@ def test_nucleo_aceita_abreviacao():
 def test_nucleo_nao_marca_tipo_de_via():
     feats = tokens2features(tokenize("Linha Colombo, 200"))
     assert all("nucleo" not in "".join(f) for f in feats)
+
+
+def test_nucleo_aceita_nome_numeral_fora_de_parcela():
+    # "AGROVILA 2" e "AGROVILA 14" sao nucleo_rural; "CHACARA 51" e parcela
+    assert "0:nucleo_B" in tokens2features(tokenize("Agrovila 2"))[0]
+    assert all("nucleo" not in "".join(f) for f in tokens2features(tokenize("Chacara 51")))
+
+
+def test_nucleo_ignora_municipio_seguido_de_uf():
+    assert all("nucleo" not in "".join(f) for f in tokens2features(tokenize("Estancia SE")))
+
+
+def test_nucleo_nao_aceita_identificador_de_terra_como_nome():
+    for sent in (["Chacara", "Lote", "01"], ["Sitio", "S", "/", "N"]):
+        assert all("nucleo" not in "".join(f) for f in tokens2features(sent))
