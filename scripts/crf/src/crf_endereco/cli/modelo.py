@@ -20,9 +20,7 @@ OpcaoDataset = Annotated[Path, typer.Option(help="banco de anotacao")]
 OpcaoTagger = Annotated[Path, typer.Option(help="tagger treinado")]
 OpcaoEstratificar = Annotated[
     str,
-    typer.Option(
-        help="estratificacao do split: origem, origem_uf ou nenhum."
-    ),
+    typer.Option(help="estratificacao do split: origem, origem_uf ou nenhum."),
 ]
 
 
@@ -39,7 +37,10 @@ def treinar(
 ) -> None:
     """Treina o CRF sobre o dataset anotado."""
     modelo_crf.treinar(
-        dataset, saida, fracao_teste, estratificar_por=estratificar_por,
+        dataset,
+        saida,
+        fracao_teste,
+        estratificar_por=estratificar_por,
         com_aumento=com_aumento,
     )
 

@@ -51,7 +51,6 @@ FALLBACK_CORES = [
 
 
 def explicar(
-    endereco: Annotated[str, typer.Argument(help="endereço a dissecar")],
     tagger: OpcaoTagger = CAMINHO_TAGGER,
 ) -> None:
     """Disseca a segmentação de um endereço, etapa por etapa.
@@ -61,13 +60,23 @@ def explicar(
     concorrente e a probabilidade marginal) e a remontagem dos segmentos
     verbatim.
     """
+    import readline
+
     crf = modelo_crf.carregar_tagger(tagger)
     extrator = ExtratorFeature()
 
-    _entrada(endereco)
-    _tokenizacao(endereco)
-    _previsao(endereco, extrator, crf)
-    _remontagem(endereco, crf)
+    while True:
+        try:
+            endereco = input()
+            if not endereco:
+                continue
+
+            _entrada(endereco)
+            _tokenizacao(endereco)
+            _previsao(endereco, extrator, crf)
+            _remontagem(endereco, crf)
+        except EOFError:
+            break
 
 
 def _entrada(endereco: str) -> None:
