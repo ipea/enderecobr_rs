@@ -561,7 +561,7 @@ impl EnderecoSegmentado {
     }
 
     /// Junta os segmentos em um [`Endereco`], padronizando os campos quando
-    /// `padronizar` for verdadeiro. Vide [`segmento_como_endereco`].
+    /// `padronizar` for verdadeiro. Vide [`estruturar_segmentos`].
     pub fn como_endereco(&self, padronizar: bool) -> Endereco {
         estruturar_segmentos(self, padronizar)
     }
@@ -572,7 +572,7 @@ impl EnderecoSegmentado {
 /// `padronizar` indica se os campos resultantes devem passar pelas funções de
 /// padronização.
 ///
-/// Vide a documentação de [`segmentar_endereco`] e [`segmento_como_endereco`]
+/// Vide a documentação de [`segmentar_endereco`] e [`estruturar_segmentos`]
 /// para mais detalhes.
 ///
 /// # Panics

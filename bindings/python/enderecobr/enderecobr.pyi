@@ -3,6 +3,7 @@
 # por verificadores estáticos, IDEs e pelo mkdocstrings.
 
 from collections.abc import Iterable
+from enum import IntEnum
 from pathlib import Path
 
 def normalizar(valor: str) -> str: ...
@@ -100,26 +101,26 @@ def numero_por_extenso(n: int) -> str: ...
 
 def romano_para_inteiro(valor: str) -> int: ...
 
-class TipoSegmento:
+class TipoSegmento(IntEnum):
 
-    Logradouro: TipoSegmento
-    Numero: TipoSegmento
-    Complemento: TipoSegmento
-    Empreendimento: TipoSegmento
-    Parcela: TipoSegmento
-    QuilometragemVia: TipoSegmento
-    Referencia: TipoSegmento
-    PontoReferencia: TipoSegmento
-    Denominacao: TipoSegmento
-    Localidade: TipoSegmento
-    NucleoRural: TipoSegmento
-    RecursoNatural: TipoSegmento
-    Cep: TipoSegmento
-    Municipio: TipoSegmento
-    Uf: TipoSegmento
-    Cadastro: TipoSegmento
-    Ruido: TipoSegmento
-    Outro: TipoSegmento
+    Logradouro: int
+    Numero: int
+    Complemento: int
+    Empreendimento: int
+    Parcela: int
+    QuilometragemVia: int
+    Referencia: int
+    PontoReferencia: int
+    Denominacao: int
+    Localidade: int
+    NucleoRural: int
+    RecursoNatural: int
+    Cep: int
+    Municipio: int
+    Uf: int
+    Cadastro: int
+    Ruido: int
+    Outro: int
 
     @staticmethod
     def todos() -> list[TipoSegmento]: ...
@@ -136,6 +137,8 @@ class EnderecoSegmentado:
     segmentos: list[SegmentoEndereco]
 
     def como_json(self) -> str: ...
+
+    def como_endereco(self, padronizar: bool = True) -> Endereco: ...
 
 class Endereco:
 

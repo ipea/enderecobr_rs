@@ -2,6 +2,8 @@
 
 use pyo3::prelude::*;
 
+use crate::endereco::Endereco;
+
 /// Um trecho do endereço e o atributo a que ele corresponde.
 ///
 /// Em geral os objetos vêm prontos de `segmentar_endereco`, mas dá para
@@ -208,6 +210,16 @@ impl SegmentoEndereco {
 /// ----------
 /// segmentos : list of SegmentoEndereco
 ///     Segmentos na ordem em que aparecem no texto original.
+///
+/// Examples
+/// --------
+/// Separar primeiro e agrupar depois, inspecionando os trechos no meio:
+///
+/// >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')  # doctest: +SKIP
+/// >>> [(s.valor, s.tipo) for s in seg.segmentos]  # doctest: +SKIP
+/// [('av n sra copacabana', TipoSegmento.Logradouro), ('123', TipoSegmento.Numero)]
+/// >>> seg.como_endereco().logradouro  # doctest: +SKIP
+/// 'AVENIDA NOSSA SENHORA COPACABANA'
 #[pyclass(frozen, eq, skip_from_py_object, module = "enderecobr.enderecobr")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct EnderecoSegmentado {
@@ -255,6 +267,34 @@ impl EnderecoSegmentado {
     /// '{"segmentos":[{"valor":"av n sra copacabana","tipo":"logradouro"},{"valor":"123","tipo":"numero"}]}'
     fn como_json(&self) -> String {
         self.interno.como_json()
+    }
+
+    /// Agrupa os segmentos nos campos de um `Endereco`.
+    ///
+    /// É a segunda metade do que `estruturar_endereco` faz: cada trecho vai
+    /// para o campo que o seu tipo indica, na ordem em que aparece. Serve para
+    /// quem quer guardar os segmentos (ver `como_json`) e só depois montar o
+    /// endereço, ou para trocar um segmento antes de agrupar.
+    ///
+    /// Parameters
+    /// ----------
+    /// padronizar : bool, optional
+    ///     Se `True` (padrão), os campos resultantes passam pelas funções de
+    ///     padronização.
+    ///
+    /// Returns
+    /// -------
+    /// Endereco
+    ///     Endereço com os campos que os segmentos permitiram preencher.
+    ///
+    /// Examples
+    /// --------
+    /// >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')  # doctest: +SKIP
+    /// >>> seg.como_endereco(padronizar=False).logradouro  # doctest: +SKIP
+    /// 'av n sra copacabana'
+    #[pyo3(signature = (padronizar = true))]
+    fn como_endereco(&self, padronizar: bool) -> Endereco {
+        self.interno.como_endereco(padronizar).into()
     }
 }
 
