@@ -107,6 +107,7 @@
 mod estruturacao;
 pub mod features;
 pub mod modelo;
+pub mod vocabulario;
 
 use std::{cell::RefCell, path::PathBuf, sync::LazyLock};
 

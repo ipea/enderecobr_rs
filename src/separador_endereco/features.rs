@@ -6,7 +6,7 @@ use regex::Regex;
 use rustc_hash::FxHashSet;
 
 use self::TipoToken::{Alpha, Desconhecido, Digito, Pontuacao};
-use crate::{estado::ESTADOS, normalizar};
+use crate::{estado::ESTADOS, normalizar, separador_endereco::vocabulario::Vocabulario};
 
 /// Transforma o texto do endereço nas features que o modelo usa para
 /// decidir o tipo de cada trecho.
@@ -64,6 +64,148 @@ static MARCADORES_CONHECIDOS_PALMAS: LazyLock<FxHashSet<&'static str>> = LazyLoc
 static SIGLAS_ESTADOS: LazyLock<FxHashSet<&'static str>> =
     LazyLock::new(|| FxHashSet::from_iter(ESTADOS.iter().map(|e| e.sigla)));
 
+// ===== Vocabulários de nomes conhecidos =====
+
+/// Acima de tantos municípios usando o nome como localidade, o nome deixa de ser
+/// evidência de município: `BOA VISTA` (1492) é nome de bairro em qualquer
+/// lugar, `ANAPOLIS` (2) não. O limiar veio da curva de cobertura × falso-positivo
+/// no dataset anotado.
+const LIMIAR_AMBIGUIDADE: u32 = 5;
+
+/// Quantos municípios têm uma localidade com o nome de cada município
+/// (`cod_ibge,municipio,n_localidades`; 0 = nome que nunca é localidade).
+static MUNICIPIOS_AMBIGUIDADE: &str = include_str!("../data/municipios_ambiguidade.csv");
+
+/// Cabeças de núcleo rural. A lista veio do dataset anotado (pureza da etiqueta
+/// quando o token abre um nome) e do CNEFE (frequência nacional e quanto o nome
+/// também é usado como tipo de via). `LINHA`, `RAMAL`, `VILA`, `GLEBA`,
+/// `PARQUE`, `LOTEAMENTO` e `GRANJA` ficaram de fora: são mais tipo de via ou
+/// nome de município do que núcleo.
+const NUCLEOS_RURAIS: &[&str] = &[
+    "COMUNIDADE",
+    "POVOADO",
+    "FAZENDA",
+    "FAZ",
+    "SITIO",
+    "SIT",
+    "ALDEIA",
+    "COLONIA",
+    "CHACARA",
+    "ESTANCIA",
+    "ASSENTAMENTO",
+    "AGROVILA",
+    "LUGAREJO",
+    "VILAREJO",
+    "ACAMPAMENTO",
+    "NUCLEO RURAL",
+    "TERRA INDIGENA",
+];
+
+/// Vocabulários conhecidos, montados uma única vez.
+///
+/// Para criar um vocabulário novo, basta um par aqui e um valor em
+/// [`TipoVocabulario`]: os tokens dos termos casados passam a sair com as
+/// features `0:{prefixo}_B` e `0:{prefixo}_I`.
+static VOCABULARIOS: LazyLock<Vec<(TipoVocabulario, Vocabulario)>> =
+    LazyLock::new(montar_vocabularios);
+
+fn montar_vocabularios() -> Vec<(TipoVocabulario, Vocabulario)> {
+    let mut unicos: Vec<&str> = Vec::new();
+    let mut ambiguos: Vec<&str> = Vec::new();
+    for linha in MUNICIPIOS_AMBIGUIDADE.lines().skip(1) {
+        let mut colunas = linha.split(',');
+        let (Some(_codigo), Some(nome), Some(n_localidades)) =
+            (colunas.next(), colunas.next(), colunas.next())
+        else {
+            continue;
+        };
+        let ambiguo = n_localidades
+            .parse::<u32>()
+            .is_ok_and(|n| n > LIMIAR_AMBIGUIDADE);
+        if ambiguo {
+            ambiguos.push(nome);
+        } else {
+            unicos.push(nome);
+        }
+    }
+
+    vec![
+        (TipoVocabulario::MunicipioUnico, Vocabulario::novo(unicos)),
+        (
+            TipoVocabulario::MunicipioAmbiguo,
+            Vocabulario::novo(ambiguos),
+        ),
+        (
+            TipoVocabulario::NucleoRural,
+            Vocabulario::novo(NUCLEOS_RURAIS),
+        ),
+    ]
+}
+
+/// Vocabulário conhecido, que vira feature de léxico.
+#[derive(Clone, Copy)]
+enum TipoVocabulario {
+    /// Nome que praticamente só aparece como município.
+    MunicipioUnico,
+    /// Nome que também é nome de localidade em muitos municípios.
+    MunicipioAmbiguo,
+    /// Cabeça de núcleo rural: `POVOADO`, `SITIO`, `AGROVILA`.
+    NucleoRural,
+}
+
+impl TipoVocabulario {
+    /// Prefixo da feature, igual ao da implementação de referência em Python.
+    const fn prefixo(self) -> &'static str {
+        match self {
+            TipoVocabulario::MunicipioUnico => "municipio_unico",
+            TipoVocabulario::MunicipioAmbiguo => "municipio_ambiguo",
+            TipoVocabulario::NucleoRural => "nucleo",
+        }
+    }
+}
+
+/// Posição da palavra dentro do termo casado, no esquema BIO do modelo.
+#[derive(Clone, Copy)]
+enum Marca {
+    /// Abre o termo.
+    Inicio,
+    /// Continua um termo de várias palavras.
+    Continuacao,
+}
+
+impl Marca {
+    const fn sufixo(self) -> &'static str {
+        match self {
+            Marca::Inicio => "B",
+            Marca::Continuacao => "I",
+        }
+    }
+}
+
+/// Marca, por palavra, os termos conhecidos que ela compõe.
+///
+/// Fica por palavra e não por token porque o casamento ignora a pontuação:
+/// `OLHO`, `'`, `AGUA` são um termo de duas palavras.
+fn marcar_palavras(palavras: &[&str]) -> Vec<Vec<(TipoVocabulario, Marca)>> {
+    let mut marcas = vec![Vec::new(); palavras.len()];
+    for (tipo, vocabulario) in VOCABULARIOS.iter() {
+        for faixa in vocabulario.casar(palavras) {
+            let Some(marcas_das_palavras) = marcas.get_mut(faixa) else {
+                continue;
+            };
+            for (posicao, marcas_da_palavra) in marcas_das_palavras.iter_mut().enumerate() {
+                let marca = if posicao == 0 {
+                    Marca::Inicio
+                } else {
+                    Marca::Continuacao
+                };
+                marcas_da_palavra.push((*tipo, marca));
+            }
+        }
+    }
+    marcas
+}
+
 fn is_pontuacao(word: &str) -> bool {
     word.chars().next().is_some_and(|c| PONTUACAO.contains(c))
 }
@@ -90,49 +232,60 @@ impl ExtratorFeature {
 
     /// Devolve as features de cada token de uma lista já tokenizada.
     pub fn tokens2features(&self, toks: &[&str]) -> Vec<Vec<String>> {
-        let tok_info: Vec<TokenInfo> = toks.iter().map(|tok| self._token_info(tok)).collect();
-        (0..toks.len())
-            .map(|i| {
-                let mut feats: Vec<String> = Vec::with_capacity(32);
-                self._features_token(toks, &tok_info, i, &mut feats);
-                feats
-            })
+        self._features(toks)
+    }
+
+    /// Features de cada token, convertidas em atributos do CRF.
+    pub fn tokens2attributes(&self, tokens: &[&str]) -> Vec<Vec<Attribute>> {
+        self._features(tokens)
+            .into_iter()
+            .map(|feats| feats.into_iter().map(Attribute::from).collect())
             .collect()
     }
 
-    /// Features de um token, já deduplicadas, escritas em `feats`.
-    ///
-    /// `feats` é limpo com [`Vec::clear`], que preserva a capacidade alocada,
-    /// permitindo reutilizar o mesmo vetor entre tokens.
-    fn _features_token(
-        &self,
-        sent: &[&str],
-        tokens_info: &[TokenInfo],
-        i: usize,
-        feats: &mut Vec<String>,
-    ) {
-        feats.clear();
-        self._features_posicao(sent, tokens_info, i, feats);
-        feats.sort_unstable();
-        feats.dedup();
-    }
+    /// Features de todos os tokens, na ordem e já deduplicadas.
+    fn _features(&self, toks: &[&str]) -> Vec<Vec<String>> {
+        let tok_info: Vec<TokenInfo> = toks.iter().map(|tok| self._token_info(tok)).collect();
 
-    /// Features de um token, já deduplicadas, convertidas em atributos do CRF.
-    ///
-    /// Internamente reutiliza o mesmo scratch `Vec<String>` entre os tokens:
-    /// o vetor intermediário deixa de ser alocado uma vez por token.
-    pub fn tokens2attributes(&self, tokens: &[&str]) -> Vec<Vec<Attribute>> {
-        let tok_info: Vec<TokenInfo> = tokens.iter().map(|tok| self._token_info(tok)).collect();
-        let mut atributos: Vec<Vec<Attribute>> = Vec::with_capacity(tokens.len());
-        let mut feats: Vec<String> = Vec::with_capacity(32);
-        for i in 0..tokens.len() {
-            self._features_token(tokens, &tok_info, i, &mut feats);
-            // `Attribute::from(String)` move a String; `Attribute::new(&str, 1.0)`
-            // clonaria cada feature, dobrando as alocações por token. O `drain`
-            // esvazia o scratch preservando sua capacidade.
-            atributos.push(feats.drain(..).map(Attribute::from).collect());
+        // Palavras que podem casar com o vocabulário, junto do token de origem
+        // de cada uma: o casamento ignora a pontuação.
+        let mut palavras: Vec<&str> = Vec::new();
+        let mut tokens_das_palavras: Vec<usize> = Vec::new();
+        for (i, (tok, info)) in toks.iter().zip(&tok_info).enumerate() {
+            if tok.chars().all(char::is_alphanumeric) && !info.normalizado.is_empty() {
+                palavras.push(info.normalizado.as_ref());
+                tokens_das_palavras.push(i);
+            }
         }
-        atributos
+
+        let marcas = marcar_palavras(&palavras);
+
+        let mut feats: Vec<Vec<String>> = Vec::with_capacity(toks.len());
+        for i in 0..toks.len() {
+            let mut feats_token: Vec<String> = Vec::with_capacity(32);
+            self._features_posicao(toks, &tok_info, i, &mut feats_token);
+            feats.push(feats_token);
+        }
+
+        // As marcas são da palavra; a feature de léxico é do token que a contém,
+        // como as demais features de posição zero.
+        for (palavra, token) in tokens_das_palavras.iter().enumerate() {
+            let Some(feats_token) = feats.get_mut(*token) else {
+                continue;
+            };
+            let Some(marcas_da_palavra) = marcas.get(palavra) else {
+                continue;
+            };
+            for (tipo, marca) in marcas_da_palavra {
+                feats_token.push(format!("0:{}_{}", tipo.prefixo(), marca.sufixo()));
+            }
+        }
+
+        for feats_token in &mut feats {
+            feats_token.sort_unstable();
+            feats_token.dedup();
+        }
+        feats
     }
 
     fn _features_posicao(
@@ -539,6 +692,98 @@ mod tests {
             ordenado.sort_unstable();
             ordenado.dedup();
             assert_eq!(ordenado.len(), item.len());
+        }
+    }
+
+    /// Features de cada token do texto.
+    fn features(texto: &str) -> Vec<Vec<String>> {
+        ExtratorFeature::new(None).sent2features(texto)
+    }
+
+    /// Se o token tem alguma feature com o trecho dado.
+    fn tem(feats: &[Vec<String>], i: usize, trecho: &str) -> bool {
+        feats
+            .get(i)
+            .is_some_and(|feats_token| feats_token.iter().any(|feature| feature.contains(trecho)))
+    }
+
+    #[test]
+    fn municipio_marca_nome_de_varios_tokens() {
+        let feats = features("Rua Boa Vista, 100");
+        assert!(tem(&feats, 1, "0:municipio_ambiguo_B"));
+        assert!(tem(&feats, 2, "0:municipio_ambiguo_I"));
+        assert!(!tem(&feats, 0, "municipio"));
+        assert!(!tem(&feats, 3, "municipio"));
+    }
+
+    #[test]
+    fn municipio_inequivoco_nao_usa_feature_de_ambiguo() {
+        let feats = features("Anapolis");
+        assert!(tem(&feats, 0, "0:municipio_unico_B"));
+        assert!(!tem(&feats, 0, "municipio_ambiguo"));
+    }
+
+    #[test]
+    fn municipio_marca_nome_de_um_token() {
+        let feats = features("Rua Colombo, Centro");
+        assert!(tem(&feats, 1, "0:municipio_unico_B"));
+        assert!(!tem(&feats, 1, "0:municipio_unico_I"));
+        // `CENTRO` não é município: a feature não dispara para qualquer palavra.
+        assert!(!tem(&feats, 2, "municipio"));
+    }
+
+    #[test]
+    fn municipio_casa_nome_com_pontuacao_e_acento() {
+        let feats = features("Olho d'Água do Borges");
+        assert!(tem(&feats, 0, "0:municipio_unico_B"));
+        assert!(tem(&feats, 1, "0:municipio_unico_I"));
+        assert!(!tem(&feats, 2, "municipio"));
+        assert!(tem(&feats, 3, "0:municipio_unico_I"));
+        assert!(tem(&feats, 4, "0:municipio_unico_I"));
+        assert!(tem(&feats, 5, "0:municipio_unico_I"));
+    }
+
+    #[test]
+    fn municipio_prefere_o_nome_mais_longo() {
+        // `SANTA RITA` e `PASSA QUATRO` também são municípios, mas o nome do
+        // logradouro é o composto.
+        let feats = features("Santa Rita do Passa Quatro");
+        assert!(tem(&feats, 0, "0:municipio_unico_B"));
+        assert!(tem(&feats, 4, "0:municipio_unico_I"));
+    }
+
+    #[test]
+    fn municipio_exige_nome_completo() {
+        let feats = features("Rua Sao, 100");
+        assert!(!tem(&feats, 1, "municipio"));
+    }
+
+    #[test]
+    fn nucleo_marca_cabeca_com_nome() {
+        let feats = features("Povoado Agua Preta, 65");
+        assert!(tem(&feats, 0, "0:nucleo_B"));
+        assert!(!tem(&feats, 1, "nucleo"));
+    }
+
+    #[test]
+    fn nucleo_marca_nome_composto() {
+        let feats = features("Nucleo Rural Boa Esperanca");
+        assert!(tem(&feats, 0, "0:nucleo_B"));
+        assert!(tem(&feats, 1, "0:nucleo_I"));
+        assert!(!tem(&feats, 2, "nucleo"));
+    }
+
+    #[test]
+    fn nucleo_aceita_abreviacao() {
+        assert!(tem(&features("Faz Santa Rita"), 0, "0:nucleo_B"));
+        assert!(tem(&features("Sit Mirador"), 0, "0:nucleo_B"));
+    }
+
+    #[test]
+    fn nucleo_marca_a_cabeca_sem_julgar_o_que_vem_depois() {
+        // Quem decide se o termo é núcleo, parcela ou ruído é o modelo.
+        for texto in ["Chacara 51", "Povoado", "Povoado Sitio", "Estancia SE"] {
+            assert!(tem(&features(texto), 0, "0:nucleo_B"), "{texto}");
         }
     }
 }

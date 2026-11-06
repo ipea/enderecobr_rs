@@ -2,6 +2,7 @@ import pytest
 
 from crf_endereco.features import (
     ExtratorFeature,
+    Vocabulario,
     is_pontuacao,
     normalize,
     tokenize,
@@ -359,11 +360,11 @@ def test_nucleo_marca_nome_composto():
     assert "nucleo" not in "".join(feats[2])
 
 
-def test_nucleo_exige_nome_alfabetico():
-    # "CHACARA 51" e parcela e um cabeca solta e ruido: os dois nao marcam
+def test_nucleo_marca_a_cabeca_sem_julgar_o_que_vem_depois():
+    # Quem decide se o termo e nucleo, parcela ou ruido e o modelo.
     for sent in (["Chacara", "51"], ["Povoado"], ["Povoado", "."]):
         feats = tokens2features(sent)
-        assert all("nucleo" not in "".join(f) for f in feats)
+        assert "0:nucleo_B" in feats[0]
 
 
 def test_nucleo_aceita_abreviacao():
@@ -376,16 +377,29 @@ def test_nucleo_nao_marca_tipo_de_via():
     assert all("nucleo" not in "".join(f) for f in feats)
 
 
-def test_nucleo_aceita_nome_numeral_fora_de_parcela():
-    # "AGROVILA 2" e "AGROVILA 14" sao nucleo_rural; "CHACARA 51" e parcela
+def test_nucleo_aceita_nome_numeral():
     assert "0:nucleo_B" in tokens2features(tokenize("Agrovila 2"))[0]
-    assert all("nucleo" not in "".join(f) for f in tokens2features(tokenize("Chacara 51")))
+    assert "0:nucleo_B" in tokens2features(tokenize("Chacara 51"))[0]
 
 
-def test_nucleo_ignora_municipio_seguido_de_uf():
-    assert all("nucleo" not in "".join(f) for f in tokens2features(tokenize("Estancia SE")))
+# ----------------------------
+# vocabulario
+# ----------------------------
+def test_vocabulario_prefere_o_termo_mais_longo():
+    vocabulario = Vocabulario(["SANTA RITA", "SANTA RITA DO PASSA QUATRO"])
+    palavras = ["SANTA", "RITA", "DO", "PASSA", "QUATRO"]
+    assert vocabulario.casar(palavras) == [(0, 5)]
+    assert vocabulario.casar(["SANTA", "RITA"]) == [(0, 2)]
 
 
-def test_nucleo_nao_aceita_identificador_de_terra_como_nome():
-    for sent in (["Chacara", "Lote", "01"], ["Sitio", "S", "/", "N"]):
-        assert all("nucleo" not in "".join(f) for f in tokens2features(sent))
+def test_vocabulario_ignora_pontuacao_do_termo():
+    assert Vocabulario(["OLHO D'AGUA"]).casar(["OLHO", "D", "AGUA"]) == [(0, 3)]
+
+
+def test_vocabulario_casa_termos_seguidos():
+    vocabulario = Vocabulario(["PASSA QUATRO", "SANTA RITA"])
+    assert vocabulario.casar(["PASSA", "QUATRO", "SANTA", "RITA"]) == [(0, 2), (2, 4)]
+
+
+def test_vocabulario_nao_casa_termo_incompleto():
+    assert Vocabulario(["SANTA RITA"]).casar(["RUA", "SANTA"]) == []

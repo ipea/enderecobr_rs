@@ -903,6 +903,7 @@ dependencies = [
 name = "enderecobr_rs"
 version = "0.3.0"
 dependencies = [
+ "aho-corasick",
  "clap",
  "crfsuite",
  "criterion",

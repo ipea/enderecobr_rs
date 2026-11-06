@@ -6,15 +6,11 @@ from pathlib import Path
 from crf_endereco.config import AMBIGUIDADE_MUNICIPIOS, MUNICIPIOS
 from crf_endereco.features.municipios import (
     LIMIAR_AMBIGUIDADE,
-    Trie,
     carregar_ambiguidade,
     dividir_por_ambiguidade,
     ler_nomes,
-    marcar_nomes,
-    trie_de_nomes,
 )
-from crf_endereco.features.nucleos import construir_trie as construir_trie_nucleos
-from crf_endereco.features.nucleos import marcar_nucleos
+from crf_endereco.features.nucleos import NUCLEOS_RURAIS
 from crf_endereco.features.texto import (
     MARCADORES_CONHECIDOS_DF,
     MARCADORES_CONHECIDOS_PALMAS,
@@ -23,6 +19,33 @@ from crf_endereco.features.texto import (
     normalize,
     tokenize,
 )
+from crf_endereco.features.vocabulario import Vocabulario
+
+
+def criar_vocabularios(
+    municipios: Path = MUNICIPIOS,
+    ambiguidade: Path | dict[str, int] = AMBIGUIDADE_MUNICIPIOS,
+    limiar_ambiguidade: int = LIMIAR_AMBIGUIDADE,
+) -> list[tuple[str, Vocabulario]]:
+    """Vocabulários de nomes conhecidos, um por feature de léxico.
+
+    Para criar um vocabulário novo, basta acrescentar um par aqui: os tokens dos
+    termos casados passam a sair com as features `0:{prefixo}_B` e
+    `0:{prefixo}_I`.
+    """
+    mapa = (
+        ambiguidade
+        if isinstance(ambiguidade, dict)
+        else carregar_ambiguidade(ambiguidade)
+    )
+    unicos, ambiguos = dividir_por_ambiguidade(
+        ler_nomes(municipios), mapa, limiar_ambiguidade
+    )
+    return [
+        ("municipio_unico", Vocabulario(unicos)),
+        ("municipio_ambiguo", Vocabulario(ambiguos)),
+        ("nucleo", Vocabulario(NUCLEOS_RURAIS)),
+    ]
 
 
 class ExtratorFeature:
@@ -34,17 +57,9 @@ class ExtratorFeature:
         limiar_ambiguidade: int = LIMIAR_AMBIGUIDADE,
     ) -> None:
         self.distancias_vizinhaca: Iterable[int] = distancias_vizinhaca
-        mapa = (
-            ambiguidade
-            if isinstance(ambiguidade, dict)
-            else carregar_ambiguidade(ambiguidade)
+        self.vocabularios = criar_vocabularios(
+            municipios, ambiguidade, limiar_ambiguidade
         )
-        unicos, ambiguos = dividir_por_ambiguidade(
-            ler_nomes(municipios), mapa, limiar_ambiguidade
-        )
-        self.trie_municipios_unicos: Trie = trie_de_nomes(unicos)
-        self.trie_municipios_ambiguos: Trie = trie_de_nomes(ambiguos)
-        self.trie_nucleos: Trie = construir_trie_nucleos()
 
     def sent2features(self, text: str) -> list[dict[str, float]]:
         toks = tokenize(text)
@@ -52,24 +67,31 @@ class ExtratorFeature:
 
     # uso direto quando já tokenizado
     def tokens2features(self, toks: list[str]) -> list[dict[str, float]]:
-        marcas_unicas = marcar_nomes(
-            toks, self.trie_municipios_unicos, "municipio_unico"
-        )
-        marcas_ambiguas = marcar_nomes(
-            toks, self.trie_municipios_ambiguos, "municipio_ambiguo"
-        )
-        marcas_nucleo = marcar_nucleos(toks, self.trie_nucleos)
+        marcas = self._marcar(toks)
         features: list[dict[str, float]] = []
-        for i, marca in enumerate(marcas_unicas):
-            nomes = self._features_posicao(toks, i)
-            if marca is not None:
-                nomes.append(f"0:{marca}")
-            if marcas_ambiguas[i] is not None:
-                nomes.append(f"0:{marcas_ambiguas[i]}")
-            if marcas_nucleo[i] is not None:
-                nomes.append(f"0:{marcas_nucleo[i]}")
+        for i in range(len(toks)):
+            nomes = self._features_posicao(toks, i) + marcas[i]
             features.append(dict.fromkeys(nomes, 1.0))
         return features
+
+    def _marcar(self, toks: list[str]) -> list[list[str]]:
+        """Features de léxico de cada token."""
+        # Palavras que podem casar, com o token de origem de cada uma: o
+        # casamento ignora a pontuação.
+        palavras: list[str] = []
+        tokens: list[int] = []
+        for i, tok in enumerate(toks):
+            if tok.isalnum():
+                palavras.append(normalize(tok).upper())
+                tokens.append(i)
+
+        marcas: list[list[str]] = [[] for _ in toks]
+        for prefixo, vocabulario in self.vocabularios:
+            for inicio, fim in vocabulario.casar(palavras):
+                marcas[tokens[inicio]].append(f"0:{prefixo}_B")
+                for posicao in range(inicio + 1, fim):
+                    marcas[tokens[posicao]].append(f"0:{prefixo}_I")
+        return marcas
 
     def _features_posicao(self, sent: list[str], i: int) -> list[str]:
         """Gerador de features principal, baseado somente na posição do token solicitado e seus vizinhos."""
