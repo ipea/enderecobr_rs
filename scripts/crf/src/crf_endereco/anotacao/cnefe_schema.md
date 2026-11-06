@@ -56,6 +56,20 @@ cod_indicador_finalidade_const|INTEGER  cod_tipo_especi|INTEGER
 cod_ibge|BIGINT   municipio|VARCHAR   uf|VARCHAR
 ```
 
+### Table `municipio_ambiguidade`
+
+```text
+cod_ibge|BIGINT   municipio|VARCHAR   n_localidades|INTEGER
+```
+
+`n_localidades` is how many municípios have a locality with that name in the
+CNEFE. It says whether a name is good evidence of being a município:
+`ANAPOLIS` = 2 and `RIO DE JANEIRO` = 7 (almost surely a município), while
+`BOA VISTA` = 1492, `SANTA LUZIA` = 569 and `SAO PAULO` = 164 are also bairro
+names everywhere, so the name alone proves nothing for them and the address
+text has to show it. Query: `select * from municipio_ambiguidade where
+municipio = 'ANAPOLIS'`.
+
 ### Useful DuckDB functions
 
 ```text

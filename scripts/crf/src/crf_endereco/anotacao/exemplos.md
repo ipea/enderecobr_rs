@@ -129,6 +129,28 @@ annotation. Each block shows the raw address and, below it, `tipo` "valor".
 
 → `logradouro` "RUA T 2" · `parcela` "QD 02" · `numero` "07" · `localidade` "SANTA FE" · `cep` "77064-566" · `municipio` "Palmas" · `uf` "TO"
 
+### The head decides the type, not the slot
+
+`R JOSE CAMPOS HIDALGO IPACARAI 2772 CONJUNTO RESIDENCIAL DANUBIO CASA 03`
+
+→ `logradouro` "R JOSE CAMPOS HIDALGO" · `localidade` "IPACARAI" · `numero` "2772" · `empreendimento` "CONJUNTO RESIDENCIAL DANUBIO" · `complemento` "CASA 03"
+
+`R PAULO MAZZUCCHELLI 145 APTO 103 C/ VG, JARDIM OCEANICO`
+
+→ `logradouro` "R PAULO MAZZUCCHELLI" · `numero` "145" · `complemento` "APTO 103 C/ VG" · `localidade` "JARDIM OCEANICO"
+
+### Field label written in the text
+
+`GLB Gleba Monte Negro 08 - Município de Torixoréu s/n`
+
+→ `ruido` "GLB" · `parcela` "Gleba Monte Negro 08" · `municipio` "Município de Torixoréu" · `numero` "s/n"
+
+### Toponym followed by the state code
+
+`RUA ALTO DOS PESCADORES, S/N SAO PEDRO. 62430-000 Granja - CE.`
+
+→ `logradouro` "RUA ALTO DOS PESCADORES" · `numero` "S/N" · `localidade` "SAO PEDRO" · `cep` "62430-000" · `municipio` "Granja" · `uf` "CE"
+
 ## Edge cases
 
 ### Bare head, no name
@@ -172,6 +194,7 @@ annotation. Each block shows the raw address and, below it, `tipo` "valor".
 - `AO LADO DO N 33` does **not** put the number inside the reference: `referencia` "AO LADO DO" + `numero` "N 33".
 - `BL 09 APTO 102` is **not** two complements.
 - `100 A` is **not** `numero` "100" + `complemento` "A".
+- `LOTE 12 LOTE 13` (two lots of one address) is **not** merged into one `parcela`: same label, two referents. `QD 12 LT 4` (one land chain) is one.
 - `SITIO MIRADOR`, `FAZENDA SANTA RITA`, `RIO TOCANTINS` are **not** `logradouro` — they go to `nucleo_rural` / `recurso_natural`.
 - `RIO DE JANEIRO`, `RIO BRANCO` are `municipio`/`uf`, not `recurso_natural`.
 - `VILA HUMBERTO` is `localidade` (urban bairro), not `nucleo_rural`.
@@ -180,3 +203,12 @@ annotation. Each block shows the raw address and, below it, `tipo` "valor".
 - `Q.`, `L.`, `GLE.` are **not** `ruido`: they are the abbreviated `parcela` heads (`RUA SEM NOME, Q. - GLEBA A1, L. - BL 38`).
 - `Av: Hilton Souto Maior` / `Rua: José Lemes Bugre` are **not** `ruido:"Av:"` + name: the colon belongs to the way name, so each is one `logradouro`.
 - `PA 124` is `logradouro` (Pará state highway); `PA 44191` in a federal property in RJ is `cadastro`; `NR 03` after the number is `complemento`.
+- `CONJUNTO RESIDENCIAL DANUBIO` stays `empreendimento` even though `IPACARAI` (its bairro) is also in the address: the nature of the name decides, not the slot.
+- `JARDIM OCEANICO`, `PARQUE X`, `VILA HUMBERTO` are `localidade` — they name a bairro, so they do not go to `empreendimento`.
+- `GRANJA - CE` is `municipio`; `GRANJA SANTA RITA` is `nucleo_rural`.
+- `PA ARASSU` is `nucleo_rural` (settlement); `PA 124` is `logradouro`.
+- `MUNICIPIO DE TORIXOREU` is ONE `municipio`, not `ruido` "MUNICIPIO" + `municipio` "DE TORIXOREU".
+- `ESCOLA MUNICIPAL X`, `POSTO Y`, `MERCADO Z` are `empreendimento` (establishment occupying the address), not `complemento`/`outros`.
+- `POVOADO`, `RIO`, `RUA`, `FAZ` with no name after them are `ruido`; `POVOADO AGUA PRETA`, `RIO IMBOCUI` keep their class.
+- `A Terra Indígena Igarapé Capana` is `ruido` "A" + `nucleo_rural` "Terra Indígena Igarapé Capana" — the leading article is not part of the name.
+- `ENTRE SOARES CARNEIRO E MANOEL EVARISTO` puts `E` in `referencia` and both names in `ponto_referencia` (neither opens a way, a feature or a nucleus).

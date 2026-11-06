@@ -3,8 +3,16 @@
 from collections.abc import Iterable
 from pathlib import Path
 
-from crf_endereco.config import MUNICIPIOS
-from crf_endereco.features.municipios import Trie, construir_trie, marcar_municipios
+from crf_endereco.config import AMBIGUIDADE_MUNICIPIOS, MUNICIPIOS
+from crf_endereco.features.municipios import (
+    LIMIAR_AMBIGUIDADE,
+    Trie,
+    carregar_ambiguidade,
+    dividir_por_ambiguidade,
+    ler_nomes,
+    marcar_nomes,
+    trie_de_nomes,
+)
 from crf_endereco.features.nucleos import construir_trie as construir_trie_nucleos
 from crf_endereco.features.nucleos import marcar_nucleos
 from crf_endereco.features.texto import (
@@ -22,9 +30,20 @@ class ExtratorFeature:
         self,
         distancias_vizinhaca: Iterable[int] = (-2, -1, 1, 2),
         municipios: Path = MUNICIPIOS,
+        ambiguidade: Path | dict[str, int] = AMBIGUIDADE_MUNICIPIOS,
+        limiar_ambiguidade: int = LIMIAR_AMBIGUIDADE,
     ) -> None:
         self.distancias_vizinhaca: Iterable[int] = distancias_vizinhaca
-        self.trie_municipios: Trie = construir_trie(municipios)
+        mapa = (
+            ambiguidade
+            if isinstance(ambiguidade, dict)
+            else carregar_ambiguidade(ambiguidade)
+        )
+        unicos, ambiguos = dividir_por_ambiguidade(
+            ler_nomes(municipios), mapa, limiar_ambiguidade
+        )
+        self.trie_municipios_unicos: Trie = trie_de_nomes(unicos)
+        self.trie_municipios_ambiguos: Trie = trie_de_nomes(ambiguos)
         self.trie_nucleos: Trie = construir_trie_nucleos()
 
     def sent2features(self, text: str) -> list[dict[str, float]]:
@@ -33,13 +52,20 @@ class ExtratorFeature:
 
     # uso direto quando já tokenizado
     def tokens2features(self, toks: list[str]) -> list[dict[str, float]]:
-        marcas = marcar_municipios(toks, self.trie_municipios)
+        marcas_unicas = marcar_nomes(
+            toks, self.trie_municipios_unicos, "municipio_unico"
+        )
+        marcas_ambiguas = marcar_nomes(
+            toks, self.trie_municipios_ambiguos, "municipio_ambiguo"
+        )
         marcas_nucleo = marcar_nucleos(toks, self.trie_nucleos)
         features: list[dict[str, float]] = []
-        for i, marca in enumerate(marcas):
+        for i, marca in enumerate(marcas_unicas):
             nomes = self._features_posicao(toks, i)
             if marca is not None:
                 nomes.append(f"0:{marca}")
+            if marcas_ambiguas[i] is not None:
+                nomes.append(f"0:{marcas_ambiguas[i]}")
             if marcas_nucleo[i] is not None:
                 nomes.append(f"0:{marcas_nucleo[i]}")
             features.append(dict.fromkeys(nomes, 1.0))

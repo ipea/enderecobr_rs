@@ -150,6 +150,12 @@ class Ferramentas:
             self.conn.register(
                 "municipio", self.conn.read_csv(str(config.municipios))
             )
+            # Derivado do CNEFE: quantos municipios tem localidade com cada
+            # nome de municipio (`BOA VISTA` 1492 x `ANAPOLIS` 2).
+            self.conn.register(
+                "municipio_ambiguidade",
+                self.conn.read_csv(str(config.ambiguidade_municipios)),
+            )
 
     def fechar(self) -> None:
         if self.conn is not None:

@@ -285,18 +285,37 @@ def test_tokens2features_sem_duplicatas():
 # ----------------------------
 # feature de municipio
 # ----------------------------
+def feats_municipio(sent: list[str], ambiguidade: dict[str, int] | None = None):
+    extrator = ExtratorFeature(ambiguidade={} if ambiguidade is None else ambiguidade)
+    return extrator.tokens2features(sent)
+
+
 def test_municipio_marca_nome_de_varios_tokens():
-    feats = tokens2features(["Rua", "Sao", "Paulo", "100"])
-    assert "0:municipio_B" in feats[1]
-    assert "0:municipio_I" in feats[2]
+    feats = feats_municipio(["Rua", "Sao", "Paulo", "100"])
+    assert "0:municipio_unico_B" in feats[1]
+    assert "0:municipio_unico_I" in feats[2]
     assert "municipio" not in "".join(feats[0])
     assert "municipio" not in "".join(feats[3])
 
 
+def test_municipio_ambiguo_usa_feature_propria():
+    # Nome que e localidade em muitos municipios perde a forca de lexico
+    feats = feats_municipio(["Boa", "Vista"], {"BOA VISTA": 1492})
+    assert "0:municipio_ambiguo_B" in feats[0]
+    assert "0:municipio_ambiguo_I" in feats[1]
+    assert "municipio_unico" not in "".join(feats[0])
+
+
+def test_municipio_inequivoco_nao_usa_feature_de_ambiguo():
+    feats = feats_municipio(["Anapolis"], {"ANAPOLIS": 2})
+    assert "0:municipio_unico_B" in feats[0]
+    assert "municipio_ambiguo" not in "".join(feats[0])
+
+
 def test_municipio_marca_nome_de_um_token():
-    feats = tokens2features(["Rua", "Campinas", "Centro"])
-    assert "0:municipio_B" in feats[1]
-    assert "0:municipio_I" not in feats[1]
+    feats = feats_municipio(["Rua", "Campinas", "Centro"])
+    assert "0:municipio_unico_B" in feats[1]
+    assert "0:municipio_unico_I" not in feats[1]
     # "CENTRO" nao e municipio: a feature nao pode disparar para qualquer palavra
     assert "municipio" not in "".join(feats[2])
 
@@ -304,24 +323,24 @@ def test_municipio_marca_nome_de_um_token():
 def test_municipio_casa_nome_com_pontuacao_e_acento():
     toks = tokenize("Olho d'Água do Borges")
     assert toks == ["Olho", "d", "'", "Água", "do", "Borges"]
-    feats = tokens2features(toks)
-    assert "0:municipio_B" in feats[0]
-    assert "0:municipio_I" in feats[1]
+    feats = feats_municipio(toks)
+    assert "0:municipio_unico_B" in feats[0]
+    assert "0:municipio_unico_I" in feats[1]
     assert "municipio" not in "".join(feats[2])
-    assert "0:municipio_I" in feats[3]
-    assert "0:municipio_I" in feats[4]
-    assert "0:municipio_I" in feats[5]
+    assert "0:municipio_unico_I" in feats[3]
+    assert "0:municipio_unico_I" in feats[4]
+    assert "0:municipio_unico_I" in feats[5]
 
 
 def test_municipio_prefere_o_nome_mais_longo():
     # "PASSA QUATRO" tambem e municipio, mas o nome da rua e o composto
-    feats = tokens2features(tokenize("Santa Rita do Passa Quatro"))
-    assert "0:municipio_B" in feats[0]
-    assert all("0:municipio_I" in f for f in feats[1:])
+    feats = feats_municipio(tokenize("Santa Rita do Passa Quatro"))
+    assert "0:municipio_unico_B" in feats[0]
+    assert all(any("_I" in marca for marca in f) for f in feats[1:])
 
 
 def test_municipio_exige_nome_completo():
-    feats = tokens2features(["Rua", "Sao", "100"])
+    feats = feats_municipio(["Rua", "Sao", "100"])
     assert "municipio" not in "".join(feats[1])
 
 

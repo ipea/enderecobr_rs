@@ -23,6 +23,13 @@ CAMINHO_CNEFE = Path(
 MUNICIPIOS = Path(
     os.environ.get("MUNICIPIOS_PATH") or DIR_REPO / "src" / "data" / "municipios.csv"
 )
+# Derivado do CNEFE por `scripts/gerar_ambiguidade_municipios.py`: quantos
+# municipios tem uma localidade com cada nome. Sem o arquivo o lexico trata todo
+# nome como inequivoco.
+AMBIGUIDADE_MUNICIPIOS = Path(
+    os.environ.get("MUNICIPIOS_AMBIGUIDADE_PATH")
+    or DIR_REPO / "src" / "data" / "municipios_ambiguidade.csv"
+)
 
 
 @dataclass(frozen=True)
@@ -34,6 +41,7 @@ class Config:
     api_model: str
     cnefe: Path = field(default=CAMINHO_CNEFE)
     municipios: Path = field(default=MUNICIPIOS)
+    ambiguidade_municipios: Path = field(default=AMBIGUIDADE_MUNICIPIOS)
     searx_url: str | None = None
     timeout_sql: float = 15.0
     # `strict: true` no schema das ferramentas e opcional: alguns backends
