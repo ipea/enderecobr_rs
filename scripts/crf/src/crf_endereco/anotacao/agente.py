@@ -131,6 +131,8 @@ def segmentar(
     ]
     erros_consecutivos = 0
 
+    console.print(f"\nEndereço: {endereco}\n", style="blue")
+
     for i in range(n_iter):
         console.rule(f"Iteração {i + 1}/{n_iter}")
 

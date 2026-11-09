@@ -53,7 +53,9 @@ rodam uma única passada em **todos** os pendentes já recortados por
 sorteado.
 
 - `--busca "asa norte"` mantém os endereços que contêm o trecho (LIKE
-  `'%trecho%'`, ignorando caixa e acentos; `%` e `_` são literais).
+  `'%trecho%'`, ignorando caixa e acentos; `%` e `_` são literais). Repita a
+  opção para unir vários trechos em OU (`--busca "asa norte" --busca "asa sul"`),
+  sem dividir por vírgula.
 - `--apenas-tipos logradouro,numero` mantém quem o CRF prevê com ao menos um
   desses tipos.
 - `--incertos 0.6` mantém o endereço cujo token **menos** confiável fica abaixo

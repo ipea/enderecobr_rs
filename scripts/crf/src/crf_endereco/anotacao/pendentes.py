@@ -31,8 +31,8 @@ class Filtros:
     ufs: Sequence[str] = ()
     origens: Sequence[str] = ()
     municipios: Sequence[str] = ()
-    # Trecho do endereco (busca ignorando caixa e acentos); vazio desliga.
-    busca: str | None = None
+    # Trechos do endereco (ignorando caixa e acentos); casa qualquer um deles.
+    busca: Sequence[str] | None = None
     # Ids aprovados pelo filtro do CRF; `None` desliga o filtro.
     ids: frozenset[int] | None = None
 
@@ -43,7 +43,6 @@ class Filtros:
             itens = [item.strip() for item in valores or () if item.strip()]
             return json.dumps(itens) if itens else None
 
-        busca = (self.busca or "").strip()
         return {
             "lote": self.lote,
             "incluir_erros": self.incluir_erros,
@@ -51,7 +50,9 @@ class Filtros:
             "ufs": lista(self.ufs),
             "origens": lista(self.origens),
             "municipios": lista(self.municipios),
-            "busca": padrao_busca(busca) if busca else None,
+            "busca": lista(
+                [padrao_busca(item) for item in self.busca or () if item.strip()]
+            ),
             "ids": json.dumps(sorted(self.ids)) if self.ids is not None else None,
         }
 
@@ -62,7 +63,7 @@ def sem_acento(texto: str) -> str:
 
 
 def padrao_busca(busca: str) -> str:
-    """Padrao `LIKE` do trecho, com `%` e `_` tratados como literais."""
+    """Padrao `LIKE` de um trecho, com `%` e `_` tratados como literais."""
     # Espacos repetidos ou nas pontas nao fazem parte do trecho buscado.
     trecho = " ".join(sem_acento(busca).split())
     escapado = trecho.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -105,7 +106,13 @@ pend AS (
             )
           )
       AND (:lote IS NULL OR lote = :lote)
-      AND (:busca IS NULL OR sem_acento(endereco) LIKE :busca ESCAPE '\\')
+      AND (
+            :busca IS NULL
+            OR EXISTS (
+                SELECT 1 FROM json_each(:busca)
+                WHERE sem_acento(endereco) LIKE value ESCAPE '\\'
+            )
+          )
       AND (
             :ufs IS NULL
             OR upper(coalesce(uf, '')) IN (SELECT upper(value) FROM json_each(:ufs))

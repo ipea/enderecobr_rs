@@ -212,12 +212,12 @@ def lote(
         ),
     ] = None,
     busca: Annotated[
-        str | None,
+        list[str] | None,
         typer.Option(
             "--busca",
             help=(
-                "Processa só endereços que contêm este trecho (LIKE '%trecho%', "
-                "ignorando caixa e acentos)."
+                "Processa só endereços que contêm algum destes trechos (LIKE "
+                "'%trecho%', ignorando caixa e acentos; repita para unir em OU)."
             ),
         ),
     ] = None,

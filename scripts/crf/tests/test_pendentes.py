@@ -113,9 +113,30 @@ def test_recorte_por_busca_ignora_caixa_e_acento():
     )
     conn.commit()
 
-    assert {linha.id for linha in pendentes(conn, Filtros(busca="asa  norte"))} == {1}
-    assert {linha.id for linha in pendentes(conn, Filtros(busca="brasilia"))} == {2}
-    assert pendentes(conn, Filtros(busca="campinas")) == []
+    assert {linha.id for linha in pendentes(conn, Filtros(busca=["asa  norte"]))} == {1}
+    assert {linha.id for linha in pendentes(conn, Filtros(busca=["brasilia"]))} == {2}
+    assert pendentes(conn, Filtros(busca=["campinas"])) == []
+
+
+def test_recorte_por_busca_uniao_de_trechos():
+    conn, _ = banco_com([("A", "DF", 3)])
+    _ = conn.execute(
+        "UPDATE enderecos SET endereco = ? WHERE id = 1", ("SQN 210 ASA NORTE",)
+    )
+    _ = conn.execute(
+        "UPDATE enderecos SET endereco = ? WHERE id = 2", ("AV BRASÍLIA 45",)
+    )
+    _ = conn.execute(
+        "UPDATE enderecos SET endereco = ? WHERE id = 3", ("RUA CAMPINAS 7",)
+    )
+    conn.commit()
+
+    assert {
+        linha.id for linha in pendentes(conn, Filtros(busca=["asa norte", "brasilia"]))
+    } == {1, 2}
+    assert {linha.id for linha in pendentes(conn, Filtros(busca=["asa norte", "xx"]))} == {
+        1
+    }
 
 
 def test_recorte_por_busca_trata_curinga_como_literal():
@@ -124,7 +145,7 @@ def test_recorte_por_busca_trata_curinga_como_literal():
     _ = conn.execute("UPDATE enderecos SET endereco = ? WHERE id = 2", ("RUA 100",))
     conn.commit()
 
-    assert {linha.id for linha in pendentes(conn, Filtros(busca="100%"))} == {1}
+    assert {linha.id for linha in pendentes(conn, Filtros(busca=["100%"]))} == {1}
 
 
 def test_filtro_de_ids_limita_a_selecao():
