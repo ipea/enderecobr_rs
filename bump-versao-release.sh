@@ -34,3 +34,19 @@ git commit -m "chore: release v$VERSION"
 # Cria a tag para a release
 # PS: Esse comando dá erro quando a tag já existe. Remova ela com `git tag -d v0.x.x`
 git tag "v$VERSION"
+
+cat <<EOF
+
+Versão $VERSION commitada e tagueada localmente.
+
+Para terminar de subir:
+  git push origin HEAD
+  git push origin "v$VERSION"
+
+O push da tag dispara: publish-cargo (crates.io), maturin (PyPI), GH Release,
+atualizar-snapshot e trigger-readthedocs.
+
+Depois confira:
+  gh release view "v$VERSION"   # release criada pelo workflow
+  gh run list --limit 6         # resultado de cada workflow
+EOF
