@@ -47,9 +47,8 @@ class Config:
     # `strict: true` no schema das ferramentas e opcional: alguns backends
     # (`deepseek-v4.1-flash`, por exemplo) respondem HTTP 500 com ele.
     tools_estritas: bool = False
-    # Liga a ferramenta `sql_query` (CNEFE). Desligada por padrao: consultar a
-    # base fazia o modelo herdar a convencao de rotulo de cada municipio
-    # (VILA virava `logradouro` so quando havia consulta).
+    # Liga a tool `sql_query` (CNEFE) e a secao CNEFE do prompt; sem ela o
+    # `cnefe.parquet` nem e aberto. Desligue com `--no-com-cnefe`.
     com_cnefe: bool = True
 
     @property

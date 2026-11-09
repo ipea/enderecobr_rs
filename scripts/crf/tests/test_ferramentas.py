@@ -21,6 +21,15 @@ def test_validar_consulta_aceita_leitura():
         "",
     ],
 )
-def test_validar_consulta_recusa_escrita_e_multiplas(sql):
+def test_validar_consulta_recusa_escrita_e_multiplas(sql: str):
+    with pytest.raises(ValueError):
+        _ = validar_consulta(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    ["SELECT * FROM read_csv('/etc/passwd')", "SELECT * FROM glob('/**')"],
+)
+def test_validar_consulta_recusa_leitura_de_arquivo(sql: str):
     with pytest.raises(ValueError):
         _ = validar_consulta(sql)

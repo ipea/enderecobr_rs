@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from collections.abc import Mapping
 from typing import Any
@@ -23,6 +24,10 @@ from crf_endereco.config import Config
 # (`COPY ... TO`), instalar extensões ou anexar outro banco.
 CONSULTAS_PERMITIDAS = frozenset({"select", "with", "describe", "summarize", "explain"})
 
+# Funcoes que leem do disco ou da rede: o SQL da LLM so pode tocar as tabelas
+# registradas (`cnefe`, `municipio`, `municipio_ambiguidade`).
+PADRAO_LEITURA_ARQUIVO = re.compile(r"\b(read_\w+|glob|\w*_scan)\b", re.IGNORECASE)
+
 
 def validar_consulta(sql: str) -> str:
     """Devolve a consulta normalizada ou levanta `ValueError` se não for leitura."""
@@ -37,6 +42,10 @@ def validar_consulta(sql: str) -> str:
             "apenas consultas de leitura ("
             + ", ".join(sorted(CONSULTAS_PERMITIDAS))
             + ")"
+        )
+    if PADRAO_LEITURA_ARQUIVO.search(limpo):
+        raise ValueError(
+            "a consulta nao pode ler arquivos; use as tabelas `cnefe` e `municipio`"
         )
     return limpo
 
@@ -223,8 +232,8 @@ conteúdo: {resultado.get("content", "")}
 
         E o objetivo da ferramenta: a LLM consulta a base livremente. O sandbox
         e o DuckDB local (efemero, por thread, so com as duas tabelas
-        registradas) mais o `interrupt()` do watchdog — nao ha escrita nem
-        usuario no caminho.
+        registradas) mais o `interrupt()` do watchdog — sem escrita, sem usuario
+        e sem leitura de arquivo (`validar_consulta`) no caminho.
         """
         if self.conn is None:
             return "The SQL tool is disabled in this run; answer without it."
@@ -244,7 +253,9 @@ conteúdo: {resultado.get("content", "")}
         timer.start()
         try:
             consulta = self.conexao.execute(consulta_sql)
-            if consulta.description is None:
+            # O stub do DuckDB tipa `description` como sempre presente, mas uma
+            # instrucao sem result set devolve `None` em runtime.
+            if consulta.description is None:  # pyright: ignore[reportUnnecessaryComparison]
                 return "The query returned no result set. Use SELECT."
             colunas = [str(col[0]) for col in consulta.description]
             resultado = consulta.fetchall()

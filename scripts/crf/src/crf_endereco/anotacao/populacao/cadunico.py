@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import random
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from crf_endereco.anotacao.populacao.populador import (
     Fonte,
+    montar_endereco,
     parametros_municipios,
     rng_registro,
 )
@@ -108,17 +108,6 @@ def normalizar_numero(valor: Any) -> str:
     return sem_zeros(valor)
 
 
-def montar_endereco(campos: dict[str, str], rnd: random.Random) -> str:
-    """Junta os campos segmentados numa linha bruta (sem empreendimento: e um domicilio)."""
-    formato = rnd.choices(
-        [arranjo for arranjo, _ in ARRANJOS],
-        weights=[peso for _, peso in ARRANJOS],
-    )[0].split()
-    separador = rnd.choice(SEPARADORES)
-    valores = [campos[campo] for campo in formato if campos.get(campo)]
-    return separador.join(valores)
-
-
 def registrar(linha: Sequence[Any], arquivo: Path, _aba: str | None) -> Registro:
     (
         tip,
@@ -153,7 +142,7 @@ def registrar(linha: Sequence[Any], arquivo: Path, _aba: str | None) -> Registro
     # garante a mesma juncao para endereco igual.
     rnd = rng_registro("|".join(valor for valor in campos.values() if valor))
     return registro(
-        endereco=montar_endereco(campos, rnd),
+        endereco=montar_endereco(campos, ARRANJOS, rnd),
         extras=montar_extras(
             texto(municipio),
             texto(uf),

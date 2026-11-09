@@ -161,8 +161,3 @@ def pendentes(
         )
         for linha in linhas
     ]
-
-
-def contar(conn: sqlite3.Connection, filtros: Filtros) -> int:
-    """Quantos pendentes o recorte tem (sem sortear)."""
-    return len(pendentes(conn, filtros))

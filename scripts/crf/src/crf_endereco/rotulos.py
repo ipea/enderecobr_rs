@@ -22,16 +22,13 @@ def mergear(
     for segmento in segmentos:
         texto_segmento = segmento.get("valor", "")
         tipo_segmento = segmento.get("tipo", "")
+        rotulo = mapa_tipo_segmento.get(tipo_segmento, tipo_segmento)
         for i, tok in enumerate(tokenizer(texto_segmento)):
-            if tipo_segmento in mapa_tipo_segmento:
-                tipo_segmento = mapa_tipo_segmento[tipo_segmento]
-
-            if tipo_segmento is None:
+            if rotulo is None:
                 toks_segmentos.append((tok, "O"))
-            elif i == 0:
-                toks_segmentos.append((tok, f"B_{tipo_segmento.upper()}"))
             else:
-                toks_segmentos.append((tok, f"I_{tipo_segmento.upper()}"))
+                prefixo = "B" if i == 0 else "I"
+                toks_segmentos.append((tok, f"{prefixo}_{rotulo.upper()}"))
 
     toks_endereco = tokenizer(endereco)
     toks_labels: list[str] = []

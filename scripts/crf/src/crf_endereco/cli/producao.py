@@ -75,7 +75,8 @@ def avulso(
         bool,
         typer.Option(
             "--com-cnefe",
-            help="Liga a ferramenta de SQL sobre o CNEFE (desligada por padrão).",
+            help="Liga a ferramenta de SQL sobre o CNEFE (ligada por padrão; "
+            "use --no-com-cnefe para desligar).",
         ),
     ] = True,
 ) -> None:
@@ -163,7 +164,8 @@ def lote(
         bool,
         typer.Option(
             "--com-cnefe",
-            help="Liga a ferramenta de SQL sobre o CNEFE (desligada por padrão).",
+            help="Liga a ferramenta de SQL sobre o CNEFE (ligada por padrão; "
+            "use --no-com-cnefe para desligar).",
         ),
     ] = True,
     balancear: Annotated[

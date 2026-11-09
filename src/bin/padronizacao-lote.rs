@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -15,9 +16,9 @@ use enderecobr_rs::{
 use itertools::Itertools;
 use polars::prelude::{
     col, sync_on_close::SyncOnCloseType, Column, DataFrame, DataType, Field, FileWriteFormat,
-    IntoColumn, LazyFrame, ParquetCompression, ParquetWriteOptions, PlRefPath, PolarsResult,
-    ScanArgsParquet, Schema, SinkDestination, SinkTarget, StatisticsOptions, StringChunked,
-    UnifiedSinkArgs,
+    IntoColumn, LazyFrame, ParquetCompression, ParquetWriteOptions, PlRefPath, PolarsError,
+    PolarsResult, ScanArgsParquet, Schema, SinkDestination, SinkTarget, StatisticsOptions,
+    StringChunked, UnifiedSinkArgs,
 };
 
 #[derive(Debug, Clone)]
@@ -54,15 +55,15 @@ fn identificar_campo(tipo_campo: &str) -> Result<TipoCampo, String> {
 }
 
 fn parsear(s: &str) -> Result<EspecificacaoCampo, String> {
-    let parts: Vec<_> = s.split(':').collect();
-    if parts.len() != 3 {
+    let partes: Vec<_> = s.split(':').collect();
+    let [tipo, origem, destino] = partes.as_slice() else {
         return Err("Formato esperado: tipo:src:dst".into());
-    }
+    };
 
     Ok(EspecificacaoCampo {
-        tipo: identificar_campo(parts[0]).unwrap(),
-        origem: parts[1].to_string(),
-        destino: parts[2].to_string(),
+        tipo: identificar_campo(tipo)?,
+        origem: (*origem).to_string(),
+        destino: (*destino).to_string(),
     })
 }
 
@@ -168,11 +169,7 @@ fn processar_campo(df: LazyFrame, campo: &EspecificacaoCampo, schema: &Arc<Schem
             .cast(DataType::String)
             .map(
                 move |coluna: Column| {
-                    let iterador = coluna
-                        .str()
-                        .unwrap()
-                        .iter()
-                        .map(|opt| opt.map(padronizador));
+                    let iterador = coluna.str()?.iter().map(|opt| opt.map(padronizador));
                     let nova_coluna = StringChunked::from_iter(iterador).into_column();
                     Ok(nova_coluna)
                 },
@@ -218,8 +215,7 @@ fn segmentar_padronizado(texto: &str, timing: bool) -> Endereco {
 
 fn expandir_endereco(col: Column, timing: bool) -> PolarsResult<Column> {
     let enderecos: Vec<Option<Endereco>> = col
-        .str()
-        .unwrap()
+        .str()?
         .iter()
         .map(|opt| opt.map(|texto| segmentar_padronizado(texto, timing)))
         .collect();
@@ -247,23 +243,32 @@ fn expandir_endereco(col: Column, timing: bool) -> PolarsResult<Column> {
     Ok(df.into_struct("endereco_processado".into()).into_column())
 }
 
-fn segmentar_endereco_df(df: LazyFrame, campo_endereco: &str, timing: bool) -> LazyFrame {
+fn segmentar_endereco_df(
+    df: LazyFrame,
+    campo_endereco: &str,
+    timing: bool,
+) -> PolarsResult<LazyFrame> {
     // df.select([col(campo_endereco)])
-    df.with_column(
-        col(campo_endereco)
-            .map(
-                move |coluna: Column| expandir_endereco(coluna, timing),
-                |_, _| Ok(campo_endereco_processado()),
-            )
-            .alias("endereco_processado"),
-    )
-    .with_columns(
-        CAMPOS_ENDERECO
-            .iter()
-            .map(|&nome| col("endereco_processado").struct_().field_by_name(nome))
-            .collect::<Vec<_>>(),
-    )
-    .drop(col("endereco_processado").into_selector().unwrap())
+    Ok(df
+        .with_column(
+            col(campo_endereco)
+                .map(
+                    move |coluna: Column| expandir_endereco(coluna, timing),
+                    |_, _| Ok(campo_endereco_processado()),
+                )
+                .alias("endereco_processado"),
+        )
+        .with_columns(
+            CAMPOS_ENDERECO
+                .iter()
+                .map(|&nome| col("endereco_processado").struct_().field_by_name(nome))
+                .collect::<Vec<_>>(),
+        )
+        .drop(
+            col("endereco_processado")
+                .into_selector()
+                .ok_or_else(|| PolarsError::ColumnNotFound("endereco_processado".into()))?,
+        ))
 }
 
 fn imprimir_timing(duracao_total: Duration) {
@@ -294,12 +299,22 @@ fn limitar_threads(threads: Option<usize>) {
     std::env::set_var("RAYON_NUM_THREADS", threads.to_string());
 }
 
-fn main() {
-    let args = Args::parse();
+fn main() -> ExitCode {
+    match executar(Args::parse()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(erro) => {
+            eprintln!("{erro}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Processa o arquivo; a falha vira mensagem no stderr e exit code 1.
+fn executar(args: Args) -> Result<(), String> {
     limitar_threads(args.threads);
 
     // O modelo é escolhido pela mesma variável que a biblioteca já consulta.
-    if let Some(modelo) = args.modelo {
+    if let Some(modelo) = &args.modelo {
         std::env::set_var(VAR_AMBIENTE_MODELO, modelo);
     }
 
@@ -317,24 +332,25 @@ fn main() {
             ..Default::default()
         },
     )
-    .unwrap()
+    .map_err(|erro| format!("não foi possível ler {}: {erro}", args.arquivo_entrada))?
     .with_streaming(true);
 
     if let Some(limite) = args.limite {
         df = df.limit(limite);
     }
 
-    let schema = df.collect_schema().unwrap();
+    let schema = df
+        .collect_schema()
+        .map_err(|erro| format!("não foi possível ler o schema: {erro}"))?;
+
     for campo in &args.campos {
         df = processar_campo(df, campo, &schema);
-
-        args.campos
-            .iter()
-            .for_each(|c| colunas_finais.push(c.destino.to_string()));
     }
+    colunas_finais.extend(args.campos.iter().map(|c| c.destino.to_string()));
 
     if let Some(campo_endereco) = args.endereco {
-        df = segmentar_endereco_df(df, &campo_endereco, timing);
+        df = segmentar_endereco_df(df, &campo_endereco, timing)
+            .map_err(|erro| format!("não foi possível segmentar os endereços: {erro}"))?;
 
         CAMPOS_ENDERECO
             .iter()
@@ -379,19 +395,19 @@ fn main() {
                 ..Default::default()
             },
         )
-        .unwrap()
+        .map_err(|erro| format!("não foi possível escrever {}: {erro}", args.arquivo_saida))?
         .collect_with_engine(polars::prelude::Engine::Streaming);
 
-    match resultado {
-        Ok(_) => {
-            println!(
-                "Arquivo \"{}\" foi processado com sucesso e salvo em \"{}\".",
-                args.arquivo_entrada, args.arquivo_saida
-            );
-            if timing {
-                imprimir_timing(inicio_execucao.elapsed());
-            }
-        }
-        Err(err) => println!("{}", err),
+    resultado
+        .map_err(|erro| format!("não foi possível escrever {}: {erro}", args.arquivo_saida))?;
+
+    println!(
+        "Arquivo \"{}\" foi processado com sucesso e salvo em \"{}\".",
+        args.arquivo_entrada, args.arquivo_saida
+    );
+    if timing {
+        imprimir_timing(inicio_execucao.elapsed());
     }
+
+    Ok(())
 }

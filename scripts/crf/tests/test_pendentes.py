@@ -2,7 +2,7 @@ import json
 import sqlite3
 from collections import Counter
 
-from crf_endereco.anotacao.pendentes import Filtros, contar, pendentes
+from crf_endereco.anotacao.pendentes import Filtros, pendentes
 from crf_endereco.dataset import criar_banco
 
 Celula = tuple[str, str]
@@ -68,7 +68,6 @@ def com_erro(conn: sqlite3.Connection, ids: set[int]) -> None:
 def test_sem_limite_pega_todos_os_pendentes():
     conn, _ = banco_com([("A", "SP", 4), ("B", "MG", 6)])
     assert len(pendentes(conn, Filtros())) == 10
-    assert contar(conn, Filtros()) == 10
 
 
 def test_limite_corta_o_lote():

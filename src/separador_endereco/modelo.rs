@@ -61,9 +61,7 @@ pub fn obter_modelo(path_modelo: Option<&Path>) -> Result<PathBuf, String> {
         return Ok(caminho);
     }
 
-    if !variavel_ambiente_ativa(VAR_AMBIENTE_SEM_DOWNLOAD) {
-        baixar_modelo(&caminho)?;
-    }
+    baixar_modelo(&caminho)?;
     Ok(caminho)
 }
 
@@ -131,7 +129,7 @@ fn baixar_modelo(destino: &Path) -> Result<(), String> {
     if res.is_err() {
         fs::remove_file(&temporario).map_err(|erro| {
             format!(
-                "Não foi remover o arquito temporário {}: {erro}",
+                "Não foi possível remover o arquivo temporário {}: {erro}",
                 temporario.display()
             )
         })?;

@@ -1,7 +1,7 @@
 [project]
 name = "crf_endereco"
 version = "0.1.0"
-description = "Add your description here"
+description = "Anotacao e treino do CRF que segmenta enderecos no enderecobr_rs."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -28,6 +28,29 @@ crf = "crf_endereco.cli:app"
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
+
+[tool.basedpyright]
+typeCheckingMode = "recommended"
+# Os dados vem de fora (SQLite, DuckDB, JSON da LLM, sklearn) e chegam como
+# `Any` por construcao: abaixo, so as regras que nascem dessa fronteira. O
+# resto do modo (imports, comparacoes impossiveis, simbolos) continua ligado.
+reportAny = false
+reportExplicitAny = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnknownParameterType = false
+reportMissingTypeStubs = false
+reportUnannotatedClassAttribute = false
+reportImplicitStringConcatenation = false
+reportUnusedCallResult = false
+reportImplicitOverride = false
+reportCallInDefaultInitializer = false
+reportPrivateUsage = false
+reportPrivateLocalImportUsage = false
+# `relatorio.avaliar` importa `carregar_tagger` dentro da funcao de proposito:
+# no topo, o ciclo com `crf.py` fecharia.
+reportImportCycles = false
 
 [tool.uv]
 package = true

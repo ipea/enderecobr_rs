@@ -79,6 +79,34 @@ def rng_registro(origem_id: str) -> random.Random:
     return random.Random(origem_id)
 
 
+SEPARADORES: tuple[str, ...] = (", ", " ")
+
+
+def montar_endereco(
+    campos: dict[str, str],
+    arranjos: Sequence[tuple[str, float]],
+    rnd: random.Random,
+    *,
+    extra: str = "",
+    probabilidade_extra: float = 0.0,
+) -> str:
+    """Junta os campos segmentados numa linha bruta.
+
+    Sorteia um arranjo (a ordem dos campos, por peso) e um separador, descarta os
+    vazios e, quando sorteado abaixo de `probabilidade_extra`, insere `extra`
+    (o nome do estabelecimento, por exemplo) numa posicao aleatoria.
+    """
+    formato = rnd.choices(
+        [arranjo for arranjo, _ in arranjos],
+        weights=[peso for _, peso in arranjos],
+    )[0]
+    separador = rnd.choice(SEPARADORES)
+    valores = [campos[campo] for campo in formato.split() if campos.get(campo)]
+    if extra and rnd.random() < probabilidade_extra:
+        valores.insert(rnd.randint(0, len(valores)), extra)
+    return separador.join(valores)
+
+
 def ultimo_campo(endereco: str) -> str:
     """Ultimo campo do endereco (apos a ultima virgula) - candidato a bairro.
 

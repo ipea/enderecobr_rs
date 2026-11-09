@@ -11,9 +11,6 @@ from crf_endereco.anotacao.populacao.cadunico import (
     normalizar_localidade,
     normalizar_numero,
 )
-from crf_endereco.anotacao.populacao.cadunico import (
-    montar_endereco as montar_endereco_cadunico,
-)
 from crf_endereco.anotacao.populacao.cafir import FONTE as FONTE_CAFIR
 from crf_endereco.anotacao.populacao.censo_escolar import FONTE as FONTE_CENSO_ESCOLAR
 from crf_endereco.anotacao.populacao.cneas import FONTE as FONTE_CNEAS
@@ -50,7 +47,6 @@ __all__ = [
     "Fonte",
     "carregar_fonte",
     "formatar_cep",
-    "montar_endereco_cadunico",
     "normalizar_localidade",
     "normalizar_numero",
 ]

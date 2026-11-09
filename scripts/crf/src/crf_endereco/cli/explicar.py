@@ -73,7 +73,11 @@ def explicar(
     concorrente e a probabilidade marginal), a remontagem dos segmentos
     verbatim e a estruturação deles nos campos do endereço.
     """
+    # O `readline` nao tem uso direto: ele e importado pelo efeito de dar
+    # historico e setas ao `input()` (ligado por padrao, reafirmado aqui).
     import readline
+
+    readline.set_auto_history(True)
 
     crf = modelo_crf.carregar_tagger(tagger)
     extrator = ExtratorFeature()

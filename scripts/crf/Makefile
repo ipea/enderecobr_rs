@@ -4,7 +4,7 @@ DIR_DADOS = ./data
 N ?= 5000
 ADDR ?= RUA DAS FLORES 123 APTO 45 - CENTRO
 
-include .env
+-include .env
 export
 
 ### Pipeline

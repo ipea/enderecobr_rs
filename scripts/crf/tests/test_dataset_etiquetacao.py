@@ -3,13 +3,14 @@ import random
 import pytest
 
 from crf_endereco.anotacao.populacao import (
-    FONTE_CADUNICO,
     FONTES,
     formatar_cep,
-    montar_endereco_cadunico,
     normalizar_localidade,
     normalizar_numero,
 )
+from crf_endereco.anotacao.populacao.cadunico import ARRANJOS
+from crf_endereco.anotacao.populacao.cadunico import FONTE as FONTE_CADUNICO
+from crf_endereco.anotacao.populacao.populador import montar_endereco
 
 
 @pytest.mark.parametrize(
@@ -93,8 +94,8 @@ def test_montar_endereco_cadunico_unico_por_semente() -> None:
         "localidade": "MARE NOVA HOLANDA",
     }
     # Mesma semente (mesmo endereço) => mesma junção, de forma reprodutível.
-    assert montar_endereco_cadunico(campos, random.Random("k")) == (
-        montar_endereco_cadunico(campos, random.Random("k"))
+    assert montar_endereco(campos, ARRANJOS, random.Random("k")) == (
+        montar_endereco(campos, ARRANJOS, random.Random("k"))
     )
 
 
@@ -107,7 +108,7 @@ def test_montar_endereco_cadunico_omite_campos_vazios() -> None:
         "referencia": "",
         "localidade": "MARE COMUNIDADE VILA DO PINHEIRO",
     }
-    endereco = montar_endereco_cadunico(campos, random.Random("k"))
+    endereco = montar_endereco(campos, ARRANJOS, random.Random("k"))
     assert "RUA DO MEIO" in endereco
     assert "MARE COMUNIDADE VILA DO PINHEIRO" in endereco
     assert "  " not in endereco

@@ -24,9 +24,9 @@ from crf_endereco.features import (
 from crf_endereco.modelo import relatorio
 from crf_endereco.rotulos import mergear
 
-# \`str.isspace()\` é mais amplo que o \`u8::is_ascii_whitespace\` usado pelo Rust
-# (inclui NBSP, por exemplo); o conjunto explícito mantém as duas
-# implementações equivalentes.
+# `str.isspace()` e mais amplo que o `u8::is_ascii_whitespace` usado pelo Rust
+# (inclui NBSP, por exemplo); o conjunto explicito mantem as duas
+# implementacoes equivalentes.
 ESPACOS_ASCII = frozenset(" \t\n\x0c\r")
 
 # Como separar treino e teste. Estrategia `origem`: garante que toda origem

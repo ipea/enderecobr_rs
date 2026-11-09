@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-import random
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from crf_endereco.anotacao.populacao.populador import Fonte, rng_registro
+from crf_endereco.anotacao.populacao.populador import (
+    Fonte,
+    montar_endereco,
+    rng_registro,
+)
 from crf_endereco.registro import Registro, montar_extras, registro, texto
 
 TIPO = "cneas"
@@ -27,9 +30,6 @@ ARRANJOS: tuple[tuple[str, float], ...] = (
     ("municipio uf logradouro numero complemento", 0.5),
 )
 
-SEPARADORES: tuple[str, ...] = (", ", " ")
-
-# Probabilidade de injetar o nome da entidade no texto (candidato a empreendimento).
 PROB_NOME: float = 0.35
 
 # Uma linha por entidade (o snapshot mais recente, `anomes` maximo).
@@ -56,26 +56,6 @@ CONSULTA = """
       AND cneas_entidade_endereco_logradouro_s IS NOT NULL
       AND trim(cneas_entidade_endereco_logradouro_s) <> ''
 """
-
-
-def montar_endereco(campos: dict[str, str], nome: str, rnd: random.Random) -> str:
-    """Junta os campos segmentados numa linha bruta.
-
-    Sorteia um arranjo de campo (por peso) e um separador, descarta os campos
-    vazios e, com `PROB_NOME`, injeta `nome` numa posicao aleatoria entre os
-    campos (candidato a `empreendimento`). Os valores vao verbatim: a LLM
-    corrige a segmentacao.
-    """
-    formato = rnd.choices(
-        [arranjo for arranjo, _ in ARRANJOS],
-        weights=[peso for _, peso in ARRANJOS],
-    )[0].split()
-    separador = rnd.choice(SEPARADORES)
-
-    valores = [campos[campo] for campo in formato if campos.get(campo)]
-    if nome and rnd.random() < PROB_NOME:
-        valores.insert(rnd.randint(0, len(valores)), nome)
-    return separador.join(valores)
 
 
 def registrar(linha: Sequence[Any], arquivo: Path, _aba: str | None) -> Registro:
@@ -105,7 +85,11 @@ def registrar(linha: Sequence[Any], arquivo: Path, _aba: str | None) -> Registro
     }
     rnd = rng_registro(texto(cod_entidade) or nome or campos["logradouro"])
     return registro(
-        endereco=montar_endereco(campos, nome, rnd),
+        # Com `PROB_NOME`, o nome da entidade entra como candidato a
+        # `empreendimento`; os valores vao verbatim (a LLM corrige a segmentacao).
+        endereco=montar_endereco(
+            campos, ARRANJOS, rnd, extra=nome, probabilidade_extra=PROB_NOME
+        ),
         extras=montar_extras(
             None,
             None,
