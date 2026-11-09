@@ -2,7 +2,10 @@ from crf_endereco.cli.explicar import (
     _concorrente,
     _estilo_peso,
     _estilo_tipo,
+    _formatar,
     _texto_tag,
+    campos_preferidos,
+    estruturar_segmentos,
     features_com_pesos,
 )
 
@@ -44,3 +47,66 @@ def test_texto_tag_estilo_b_io_e_o():
     assert str(_texto_tag("O").style) == "dim"
     assert "bold" in str(_texto_tag("B_LOGRADOURO").style)
     assert "bold" not in str(_texto_tag("I_LOGRADOURO").style)
+
+
+def test_campos_preferidos_seguem_a_politica_do_rust():
+    assert campos_preferidos("logradouro", None) == (["logradouro"], False)
+    assert campos_preferidos("numero", "numero") == (["numero", "complemento"], False)
+    assert campos_preferidos("parcela", "logradouro") == (["logradouro"], True)
+    assert campos_preferidos("parcela", "numero") == (
+        ["logradouro", "complemento"],
+        True,
+    )
+    assert campos_preferidos("nucleo_rural", None) == (
+        ["logradouro", "localidade"],
+        False,
+    )
+    assert campos_preferidos("complemento", "numero") == (["complemento"], True)
+    assert campos_preferidos("localidade", None) == (["localidade"], False)
+    assert campos_preferidos("referencia", None) == ([], False)
+
+
+def test_estruturar_segmentos_concatena_parcela_no_logradouro():
+    segmentos = [
+        {"tipo": "logradouro", "valor": "r x"},
+        {"tipo": "numero", "valor": "123"},
+        {"tipo": "parcela", "valor": "qd 5"},
+        {"tipo": "logradouro", "valor": "r y"},
+        {"tipo": "cep", "valor": "22000-000"},
+    ]
+
+    campos = estruturar_segmentos(segmentos)
+
+    assert campos == {
+        "logradouro": "r x qd 5",
+        "numero": "123",
+        "complemento": None,
+        "localidade": None,
+        "cep": "22000-000",
+    }
+
+
+def test_estruturar_segmentos_concatena_complementos():
+    segmentos = [
+        {"tipo": "logradouro", "valor": "r x"},
+        {"tipo": "numero", "valor": "123"},
+        {"tipo": "complemento", "valor": "apto 45"},
+        {"tipo": "complemento", "valor": "bloco b"},
+    ]
+
+    assert estruturar_segmentos(segmentos)["complemento"] == "apto 45 bloco b"
+
+
+def test_formatar_junta_os_campos_na_ordem_do_endereco():
+    assert (
+        _formatar(
+            {
+                "logradouro": "RUA X",
+                "numero": None,
+                "complemento": None,
+                "localidade": "ASA NORTE",
+                "cep": "22000-000",
+            }
+        )
+        == "RUA X, ASA NORTE, 22000-000"
+    )

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import zlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Annotated
 
+import enderecobr
 import sklearn_crfsuite
 import typer
 from rich.table import Table
@@ -37,6 +38,18 @@ CORES_TIPO = {
     "uf": "color(135)",
 }
 
+# Campos do `Endereco`, na ordem em que `formatar` junta.
+CAMPOS = ("logradouro", "numero", "complemento", "localidade", "cep")
+
+# Função de padronização de cada campo (`padronizar_in_place` no Rust).
+PADRONIZADORES = {
+    "logradouro": enderecobr.padronizar_logradouros,
+    "numero": enderecobr.padronizar_numeros,
+    "complemento": enderecobr.padronizar_complementos,
+    "localidade": enderecobr.padronizar_bairros,
+    "cep": enderecobr.padronizar_cep_leniente,
+}
+
 # Tipos novos, se surgirem, caem em uma cor estável derivada do nome.
 FALLBACK_CORES = [
     "color(75)",
@@ -57,8 +70,8 @@ def explicar(
 
     Mostra, na ordem do pipeline real de inferência: tokenização, features do
     CRF com os pesos que sustentam a tag prevista de cada token (mais a tag
-    concorrente e a probabilidade marginal) e a remontagem dos segmentos
-    verbatim.
+    concorrente e a probabilidade marginal), a remontagem dos segmentos
+    verbatim e a estruturação deles nos campos do endereço.
     """
     import readline
 
@@ -75,6 +88,7 @@ def explicar(
             _tokenizacao(endereco)
             _previsao(endereco, extrator, crf)
             _remontagem(endereco, crf)
+            _estruturacao(endereco, crf)
         except EOFError:
             break
 
@@ -180,6 +194,102 @@ def _remontagem(endereco: str, crf: sklearn_crfsuite.CRF) -> None:
         "[dim]Os valores voltam verbatim — o espaço entre tokens só é refeito "
         'se existia no texto bruto, então "S/N" e "310A" sobrevivem.[/dim]'
     )
+
+
+def _estruturacao(endereco: str, crf: sklearn_crfsuite.CRF) -> None:
+    _, _, _, _, segmentos = _prever(endereco, ExtratorFeature(), crf)
+    console.rule("[bold]5. Estruturação do endereço[/bold]")
+    if not segmentos:
+        console.print("[yellow]nenhum segmento para estruturar[/yellow]")
+        return
+
+    campos = estruturar_segmentos(segmentos)
+
+    padronizados = _padronizar(campos)
+    resultado = Table(box=None, padding=(0, 2, 0, 0))
+    resultado.add_column("campo", justify="right")
+    resultado.add_column("bruto", overflow="fold")
+    resultado.add_column("padronizado", overflow="fold")
+    for campo, valor in campos.items():
+        if valor is None:
+            continue
+        resultado.add_row(
+            Text(campo, style=_estilo_tipo(campo)),
+            valor,
+            padronizados[campo] or "",
+        )
+    console.print(resultado)
+    console.print()
+    console.print(Text(_formatar(padronizados), style="bold"))
+    console.print(
+        "[dim]O valor entra no campo verbatim e é a padronização de cada campo que "
+        "muda o texto (logradouro pelo léxico de tipos de via, número por extenso, "
+        "complemento e bairro por substituição, cep com hífen); o pipeline real "
+        "chama `estruturar_segmentos` com `padronizar=True`, então é essa linha "
+        "que segue para o geocodebr.[/dim]"
+    )
+
+
+def estruturar_segmentos(
+    segmentos: Sequence[Mapping[str, str]],
+) -> dict[str, str | None]:
+    """Espelha `estruturar_segmentos` do Rust (`estruturacao.rs`).
+
+    Cada trecho fica no primeiro campo livre da sua lista de preferência; trecho
+    sem lista, ou com todos os campos dela já ocupados, é descartado. Parcela e
+    complemento são concatenáveis: entram em sequência no campo já preenchido.
+    """
+    campos: dict[str, str | None] = dict.fromkeys(CAMPOS)
+    for i, segmento in enumerate(segmentos):
+        preferidos, concatenar = campos_preferidos(
+            segmento.get("tipo", ""),
+            segmentos[i - 1].get("tipo") if i else None,
+        )
+        for campo in preferidos:
+            valor = segmento.get("valor", "")
+            if campos[campo] is None:
+                campos[campo] = valor
+                break
+            if concatenar:
+                campos[campo] = f"{campos[campo]} {valor}"
+                break
+    return campos
+
+
+def campos_preferidos(tipo: str, anterior: str | None) -> tuple[list[str], bool]:
+    """Campos que o trecho pode ocupar, na ordem de preferência, e se concatenam.
+
+    A lista vazia descarta o trecho. A ordem dos casos é a mesma do Rust: o
+    primeiro que casa manda.
+    """
+    if tipo == "logradouro":
+        return ["logradouro"], False
+    if tipo in ("numero", "quilometragem_via"):
+        return ["numero", "complemento"], False
+    if tipo == "cep":
+        return ["cep"], False
+    if tipo == "parcela":
+        if anterior == "logradouro":
+            return ["logradouro"], True
+        return ["logradouro", "complemento"], True
+    if tipo in ("nucleo_rural", "recurso_natural", "empreendimento", "ponto_referencia"):
+        return ["logradouro", "localidade"], False
+    if tipo == "complemento":
+        return ["complemento"], True
+    if tipo == "localidade":
+        return ["localidade"], False
+    return [], False
+
+
+def _padronizar(campos: Mapping[str, str | None]) -> dict[str, str | None]:
+    return {
+        campo: None if valor is None else PADRONIZADORES[campo](valor)
+        for campo, valor in campos.items()
+    }
+
+
+def _formatar(campos: Mapping[str, str | None]) -> str:
+    return ", ".join(valor.strip() for valor in campos.values() if valor is not None)
 
 
 def _prever(

@@ -46,13 +46,9 @@ use crate::{
 pub fn estruturar_segmentos(segmentado: &EnderecoSegmentado, padronizar: bool) -> Endereco {
     let mut res = Endereco::default();
     let mut anterior = None;
-    for (i, seg) in segmentado.segmentos.iter().enumerate() {
-        let proximo = segmentado
-            .segmentos
-            .get(i + 1)
-            .map(|seguinte| seguinte.tipo);
-
-        for campo in campos_preferidos(seg.tipo, anterior, proximo) {
+    for seg in &segmentado.segmentos {
+        let (campos, concatenar) = campos_preferidos(seg.tipo, anterior);
+        for campo in campos {
             let destino = match campo {
                 Campo::Logradouro => &mut res.logradouro,
                 Campo::Numero => &mut res.numero,
@@ -60,9 +56,21 @@ pub fn estruturar_segmentos(segmentado: &EnderecoSegmentado, padronizar: bool) -
                 Campo::Localidade => &mut res.localidade,
                 Campo::Cep => &mut res.cep,
             };
-            if destino.is_none() {
-                *destino = Some(seg.valor.clone());
-                break;
+
+            match destino {
+                // Caso não exista nenhum valor no campo esperado, crio um novo
+                None => {
+                    *destino = Some(seg.valor.clone());
+                    break;
+                }
+                // O trecho entra em sequência no campo já preenchido
+                Some(atual) if concatenar => {
+                    atual.push(' ');
+                    atual.push_str(&seg.valor);
+                    break;
+                }
+                // Se já existe algo, eu descarto por padrão.
+                Some(_) => (),
             }
         }
         anterior = Some(seg.tipo);
@@ -85,63 +93,31 @@ enum Campo {
     Cep,
 }
 
-/// Campos que um trecho pode ocupar, na ordem de preferência.
+/// Campos que um trecho pode ocupar, na ordem de preferência, e se ele entra em
+/// sequência no primeiro campo já preenchido em vez de ser descartado.
 ///
-/// A lista vazia descarta o trecho. Só o tipo do trecho anterior e o do seguinte
-/// entram na decisão; quem mais disputa o mesmo campo fica em
-/// [`DISPUTAM_LOGRADOURO`] e [`DISPUTAM_LOCALIDADE`].
+/// A lista vazia descarta o trecho. Só o tipo do trecho e o do anterior entram na
+/// decisão.
 fn campos_preferidos(
     tipo: TipoSegmento,
     anterior: Option<TipoSegmento>,
-    proximo: Option<TipoSegmento>,
-) -> &'static [Campo] {
+) -> (&'static [Campo], bool) {
     use TipoSegmento::*;
 
-    let seguinte_em = |disputantes: &[TipoSegmento]| {
-        proximo.is_some_and(|seguinte| disputantes.contains(&seguinte))
-    };
-
     match tipo {
-        // Logradouro depois do cep não entra: o cep fecha o endereço.
-        Logradouro if anterior == Some(Cep) => &[],
-        Logradouro => &[Campo::Logradouro],
-        // Número em sequência é o segundo número do mesmo imóvel, não um novo.
-        Numero if anterior == Some(Numero) => &[],
-        Numero | Referencia | QuilometragemVia => &[Campo::Numero, Campo::Complemento],
-        Cep => &[Campo::Cep],
-        // Parcela só abre o endereço quando não há logradouro logo em seguida.
-        Parcela if seguinte_em(&DISPUTAM_LOGRADOURO) => &[Campo::Complemento],
-        Parcela => &[Campo::Logradouro, Campo::Complemento],
-        NucleoRural | RecursoNatural => &[Campo::Logradouro, Campo::Localidade],
-        // Depois de uma parcela, o complemento descreve melhor a localidade.
-        Complemento if anterior == Some(Parcela) => &[Campo::Localidade, Campo::Complemento],
-        Complemento => &[Campo::Complemento],
-        // Empreendimento e ponto de referência são lugares: só entram na
-        // localidade se o trecho seguinte não disputa o campo.
-        Empreendimento | PontoReferencia if seguinte_em(&DISPUTAM_LOCALIDADE) => &[],
-        Empreendimento if anterior == Some(Numero) => &[],
-        Empreendimento | PontoReferencia | Localidade => &[Campo::Localidade],
-        Denominacao | Municipio | Uf | Cadastro | Ruido | Outro => &[],
+        Logradouro => (&[Campo::Logradouro], false),
+        Numero | QuilometragemVia => (&[Campo::Numero, Campo::Complemento], false),
+        Cep => (&[Campo::Cep], false),
+        Parcela if anterior == Some(Logradouro) => (&[Campo::Logradouro], true),
+        Parcela => (&[Campo::Logradouro, Campo::Complemento], true),
+        NucleoRural | RecursoNatural | Empreendimento | PontoReferencia => {
+            (&[Campo::Logradouro, Campo::Localidade], false)
+        }
+        Complemento => (&[Campo::Complemento], true),
+        Localidade => (&[Campo::Localidade], false),
+        Denominacao | Referencia | Municipio | Uf | Cadastro | Ruido | Outro => (&[], false),
     }
 }
-
-/// Tipos que a política manda para o logradouro: são eles que disputam o campo.
-const DISPUTAM_LOGRADOURO: [TipoSegmento; 4] = [
-    TipoSegmento::Logradouro,
-    TipoSegmento::Parcela,
-    TipoSegmento::NucleoRural,
-    TipoSegmento::RecursoNatural,
-];
-
-/// Tipos que a política manda para a localidade.
-const DISPUTAM_LOCALIDADE: [TipoSegmento; 6] = [
-    TipoSegmento::Complemento,
-    TipoSegmento::Empreendimento,
-    TipoSegmento::Localidade,
-    TipoSegmento::NucleoRural,
-    TipoSegmento::RecursoNatural,
-    TipoSegmento::PontoReferencia,
-];
 
 #[cfg(test)]
 mod tests {
@@ -192,7 +168,7 @@ mod tests {
             criar_segmento("r y", TipoSegmento::Logradouro),
             // Único a disputar a localidade e não vem depois de número.
             criar_segmento("edifton bar", TipoSegmento::Empreendimento),
-            // Referência entra no número: o alvo costuma ser a numeração.
+            // Referência não é numeração nem lugar: é descartada.
             criar_segmento("esquina com r b", TipoSegmento::Referencia),
             criar_segmento("antiga r c", TipoSegmento::Denominacao),
             criar_segmento("rio de janeiro", TipoSegmento::Municipio),
@@ -204,7 +180,6 @@ mod tests {
             estruturar_segmentos(&segmentado, false),
             Endereco {
                 logradouro: Some("r x".to_string()),
-                numero: Some("esquina com r b".to_string()),
                 localidade: Some("edifton bar".to_string()),
                 ..Default::default()
             }
@@ -212,19 +187,20 @@ mod tests {
     }
 
     #[test]
-    fn segmento_como_endereco_nao_junta_parcela_ao_logradouro() {
-        // O primeiro trecho que chega no campo fica: parcela não suja o
-        // logradouro, vai para o complemento.
-        let segmentado = criar_segmentado(vec![
-            criar_segmento("r x", TipoSegmento::Logradouro),
-            criar_segmento("qd 5 lote 7", TipoSegmento::Parcela),
-        ]);
-
+    fn segmento_como_endereco_concatena_parcela_ao_logradouro() {
+        // Parcela é concatenável: entra em sequência no logradouro já preenchido.
         assert_eq!(
-            estruturar_segmentos(&segmentado, false),
+            estruturar_segmentos(
+                &criar_segmentado(vec![
+                    criar_segmento("r x", TipoSegmento::Logradouro),
+                    criar_segmento("qd 5 lote 7", TipoSegmento::Parcela),
+                    criar_segmento("asa norte", TipoSegmento::Complemento),
+                ]),
+                false,
+            ),
             Endereco {
-                logradouro: Some("r x".to_string()),
-                complemento: Some("qd 5 lote 7".to_string()),
+                logradouro: Some("r x qd 5 lote 7".to_string()),
+                complemento: Some("asa norte".to_string()),
                 ..Default::default()
             }
         );
@@ -243,7 +219,7 @@ mod tests {
             }
         );
 
-        // Entre dois logradouros, a parcela não é nenhum dos dois.
+        // Entre dois logradouros, a parcela concatena no primeiro.
         let entre_logradouros = criar_segmentado(vec![
             criar_segmento("r x", TipoSegmento::Logradouro),
             criar_segmento("qd 5", TipoSegmento::Parcela),
@@ -253,8 +229,7 @@ mod tests {
         assert_eq!(
             estruturar_segmentos(&entre_logradouros, false),
             Endereco {
-                logradouro: Some("r x".to_string()),
-                complemento: Some("qd 5".to_string()),
+                logradouro: Some("r x qd 5".to_string()),
                 ..Default::default()
             }
         );
@@ -296,8 +271,8 @@ mod tests {
     }
 
     #[test]
-    fn segmento_como_endereco_descarta_contextos_da_politica() {
-        // Empreendimento só entra se for o único a disputar a localidade.
+    fn segmento_como_endereco_segue_a_ordem_de_preferencia() {
+        // Empreendimento é lugar: entra no logradouro e deixa a localidade livre.
         let com_localidade = criar_segmentado(vec![
             criar_segmento("cond palm", TipoSegmento::Empreendimento),
             criar_segmento("copacabana", TipoSegmento::Localidade),
@@ -305,12 +280,13 @@ mod tests {
         assert_eq!(
             estruturar_segmentos(&com_localidade, false),
             Endereco {
+                logradouro: Some("cond palm".to_string()),
                 localidade: Some("copacabana".to_string()),
                 ..Default::default()
             }
         );
 
-        // Número em sequência não entra duas vezes.
+        // Número em sequência não concatena: cai no complemento.
         let numero_repetido = criar_segmentado(vec![
             criar_segmento("10", TipoSegmento::Numero),
             criar_segmento("20", TipoSegmento::Numero),
@@ -319,11 +295,12 @@ mod tests {
             estruturar_segmentos(&numero_repetido, false),
             Endereco {
                 numero: Some("10".to_string()),
+                complemento: Some("20".to_string()),
                 ..Default::default()
             }
         );
 
-        // Logradouro depois de um cep fica de fora.
+        // Logradouro depois de um cep entra no próprio campo.
         let depois_de_cep = criar_segmentado(vec![
             criar_segmento("22000-000", TipoSegmento::Cep),
             criar_segmento("r x", TipoSegmento::Logradouro),
@@ -331,7 +308,7 @@ mod tests {
         assert_eq!(
             estruturar_segmentos(&depois_de_cep, false),
             Endereco {
-                logradouro: None,
+                logradouro: Some("r x".to_string()),
                 cep: Some("22000-000".to_string()),
                 ..Default::default()
             }
@@ -339,12 +316,13 @@ mod tests {
     }
 
     #[test]
-    fn segmento_como_endereco_manda_complemento_depois_de_parcela_para_localidade() {
+    fn segmento_como_endereco_empilha_complemento() {
+        // Complemento é concatenável: o segundo trecho entra em sequência.
         let segmentado = criar_segmentado(vec![
             criar_segmento("r x", TipoSegmento::Logradouro),
             criar_segmento("123", TipoSegmento::Numero),
-            criar_segmento("qd 5", TipoSegmento::Parcela),
-            criar_segmento("asa norte", TipoSegmento::Complemento),
+            criar_segmento("apto 45", TipoSegmento::Complemento),
+            criar_segmento("bloco b", TipoSegmento::Complemento),
         ]);
 
         assert_eq!(
@@ -352,8 +330,8 @@ mod tests {
             Endereco {
                 logradouro: Some("r x".to_string()),
                 numero: Some("123".to_string()),
-                complemento: Some("qd 5".to_string()),
-                localidade: Some("asa norte".to_string()),
+                complemento: Some("apto 45 bloco b".to_string()),
+                localidade: None,
                 cep: None,
             }
         );
