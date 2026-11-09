@@ -10,7 +10,7 @@ from pathlib import Path
 import sklearn_crfsuite
 import typer
 from sklearn.metrics import make_scorer
-from sklearn.model_selection import GridSearchCV, ShuffleSplit, train_test_split
+from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn_crfsuite.metrics import flat_accuracy_score, flat_classification_report
 
 from crf_endereco.config import CAMINHO_DATASET, CAMINHO_TAGGER
@@ -33,6 +33,25 @@ ESPACOS_ASCII = frozenset(" \t\n\x0c\r")
 # apareca dos dois lados (67% do corpus vem de tres origens, entao um split
 # aleatorio pode deixar uma delas inteira fora do teste).
 ESTRATIFICACOES = ("origem", "origem_uf", "nenhum")
+
+# Grade e orcamento de `tunar`; a CLI expoe cada um destes valores como opcao.
+GRADE_C1: list[float] = [0.0, 0.01, 0.1, 0.25]
+GRADE_C2: list[float] = [0.1, 0.25, 0.5, 1.0]
+MAX_ITERACOES_TUNING = 500
+MIN_FREQ_TUNING = 3
+N_JOBS_TUNING = 13
+SEMENTE_TUNING = 42
+FRACAO_VALIDACAO_TUNING = 0.1
+VERBOSE_TUNING = 3
+
+# Hiperparametros fixos do modelo que vai para o tagger (o `tunar` so sugere).
+C1_TREINO = 0.1
+C2_TREINO = 0.2
+MAX_ITERACOES_TREINO = 5_000
+MIN_FREQ_TREINO = 2
+VERBOSE_TREINO = True
+# Semente do split treino/teste: `treinar` e `avaliar` precisam da mesma.
+SEMENTE_SPLIT = 42
 
 
 @dataclass(frozen=True)
@@ -90,10 +109,25 @@ def _recortar(exemplos: Exemplos, indices: Sequence[int]) -> Exemplos:
     )
 
 
+def _indices_split(
+    exemplos: Exemplos,
+    fracao_teste: float,
+    semente: int,
+    estratificar_por: str,
+) -> tuple[list[int], list[int]]:
+    """Indices de treino e teste de um split reproduzivel e estratificado."""
+    chaves = _chaves_estratificacao(exemplos, estratificar_por)
+    indices = list(range(len(exemplos.y)))
+    treino, teste = train_test_split(
+        indices, test_size=fracao_teste, random_state=semente, stratify=chaves
+    )
+    return list(treino), list(teste)
+
+
 def dividir(
     exemplos: Exemplos,
     fracao_teste: float = 0.1,
-    semente: int = 42,
+    semente: int = SEMENTE_SPLIT,
     estratificar_por: str = "origem",
 ) -> tuple[Exemplos, Exemplos]:
     """Separa treino e teste de forma reproduzivel e estratificada.
@@ -101,12 +135,8 @@ def dividir(
     O mesmo par (semente, estratificacao) reproduz o split em `treinar` e em
     `avaliar`, entao a avaliacao nunca cai no dataset inteiro.
     """
-    chaves = _chaves_estratificacao(exemplos, estratificar_por)
-    indices = list(range(len(exemplos.y)))
-    treino, teste = train_test_split(
-        indices, test_size=fracao_teste, random_state=semente, stratify=chaves
-    )
-    return _recortar(exemplos, list(treino)), _recortar(exemplos, list(teste))
+    treino, teste = _indices_split(exemplos, fracao_teste, semente, estratificar_por)
+    return _recortar(exemplos, treino), _recortar(exemplos, teste)
 
 
 def _composicao(exemplos: Exemplos) -> Counter[tuple[str, str]]:
@@ -186,11 +216,17 @@ def treinar(
     fracao_teste: float = 0.1,
     estratificar_por: str = "origem",
     com_aumento: bool = False,
+    c1: float = C1_TREINO,
+    c2: float = C2_TREINO,
+    max_iteracoes: int = MAX_ITERACOES_TREINO,
+    min_freq: int = MIN_FREQ_TREINO,
+    verboso: bool = VERBOSE_TREINO,
+    semente: int = SEMENTE_SPLIT,
 ) -> None:
     """Treina o CRF e reporta a acuracia na fracao de teste."""
     exemplos = carregar_exemplos(dataset)
     treino, teste = dividir(
-        exemplos, fracao_teste, estratificar_por=estratificar_por
+        exemplos, fracao_teste, semente, estratificar_por=estratificar_por
     )
     if com_aumento:
         # Só o treino aumenta: a variante de um exemplo no teste vazaria a
@@ -208,12 +244,12 @@ def treinar(
     saida.parent.mkdir(parents=True, exist_ok=True)
     crf = sklearn_crfsuite.CRF(
         algorithm="lbfgs",
-        c1=0.1,
-        c2=0.2,
-        verbose=True,
-        max_iterations=5_000,
+        c1=c1,
+        c2=c2,
+        verbose=verboso,
+        max_iterations=max_iteracoes,
         all_possible_transitions=False,
-        min_freq=2,
+        min_freq=min_freq,
         model_filename=str(saida),
     )
     modelo = crf.fit(treino.x, treino.y)
@@ -228,26 +264,46 @@ def treinar(
     relatorio.imprimir_erros_por_rotulo(teste.y, y_pred)
 
 
-def tunar() -> None:
+def tunar(
+    c1: Sequence[float] = GRADE_C1,
+    c2: Sequence[float] = GRADE_C2,
+    max_iteracoes: int = MAX_ITERACOES_TUNING,
+    min_freq: int = MIN_FREQ_TUNING,
+    n_jobs: int = N_JOBS_TUNING,
+    semente: int = SEMENTE_TUNING,
+    fracao_validacao: float = FRACAO_VALIDACAO_TUNING,
+    verboso: int = VERBOSE_TUNING,
+    com_aumento: bool = False,
+    estratificar_por: str = "origem",
+) -> None:
     """Busca de hiperparametros sobre o mesmo dataset, features e etiquetas.
 
-    Sem aumento de dados: as variantes de um exemplo cairiam dos dois lados dos
-    folds da validacao cruzada.
+    A validacao usa o mesmo split de `treinar`/`avaliar` (fracao, semente e
+    estratificacao), entao o score da busca e comparavel ao do modelo final.
+    `com_aumento` desligado por padrao: as variantes de um exemplo cairiam dos
+    dois lados dos folds da validacao cruzada.
     """
     exemplos = carregar_exemplos()
+    treino_idx, validacao_idx = _indices_split(
+        exemplos, fracao_validacao, semente, estratificar_por
+    )
+    if com_aumento:
+        original = len(exemplos.y)
+        exemplos = aumentar(exemplos)
+        print(f"Aumento: {len(exemplos.y) - original} exemplos com pontuacao removida")
     crf = sklearn_crfsuite.CRF(
         algorithm="lbfgs",
-        max_iterations=500,
+        max_iterations=max_iteracoes,
         all_possible_transitions=False,
-        min_freq=2,
+        min_freq=min_freq,
         verbose=False,
     )
     busca = GridSearchCV(
         crf,
-        param_grid={"c1": [0.0, 0.1, 0.25, 1.0], "c2": [0.1, 0.25, 0.5, 1.0]},
-        cv=ShuffleSplit(n_splits=1, test_size=0.1, random_state=42),
-        verbose=3,
-        n_jobs=13,
+        param_grid={"c1": list(c1), "c2": list(c2)},
+        cv=[(treino_idx, validacao_idx)],
+        verbose=verboso,
+        n_jobs=n_jobs,
         scoring=make_scorer(flat_accuracy_score),
         refit=True,
     )

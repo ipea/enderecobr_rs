@@ -34,6 +34,26 @@ def treinar(
     com_aumento: Annotated[
         bool, typer.Option("--com-aumento", help="treina tambem sem pontuacao")
     ] = False,
+    c1: Annotated[
+        float, typer.Option("--c1", help="Regularizacao L1 do CRF.")
+    ] = modelo_crf.C1_TREINO,
+    c2: Annotated[
+        float, typer.Option("--c2", help="Regularizacao L2 do CRF.")
+    ] = modelo_crf.C2_TREINO,
+    max_iteracoes: Annotated[
+        int, typer.Option("--max-iteracoes", min=1, help="Iteracoes do L-BFGS.")
+    ] = modelo_crf.MAX_ITERACOES_TREINO,
+    min_freq: Annotated[
+        int,
+        typer.Option("--min-freq", min=1, help="Frequencia minima de uma feature."),
+    ] = modelo_crf.MIN_FREQ_TREINO,
+    verboso: Annotated[
+        bool,
+        typer.Option("--verboso/--sem-verboso", help="Log de convergencia do L-BFGS."),
+    ] = modelo_crf.VERBOSE_TREINO,
+    semente: Annotated[
+        int, typer.Option("--semente", help="Semente do split treino/teste.")
+    ] = modelo_crf.SEMENTE_SPLIT,
 ) -> None:
     """Treina o CRF sobre o dataset anotado."""
     modelo_crf.treinar(
@@ -42,12 +62,68 @@ def treinar(
         fracao_teste,
         estratificar_por=estratificar_por,
         com_aumento=com_aumento,
+        c1=c1,
+        c2=c2,
+        max_iteracoes=max_iteracoes,
+        min_freq=min_freq,
+        verboso=verboso,
+        semente=semente,
     )
 
 
-def tunar() -> None:
+def tunar(
+    c1: Annotated[
+        list[float],
+        typer.Option("--c1", help="Valores de c1 testados (repita para testar mais)."),
+    ] = modelo_crf.GRADE_C1,
+    c2: Annotated[
+        list[float],
+        typer.Option("--c2", help="Valores de c2 testados (repita para testar mais)."),
+    ] = modelo_crf.GRADE_C2,
+    max_iteracoes: Annotated[
+        int, typer.Option("--max-iteracoes", min=1, help="Iteracoes do L-BFGS por fit.")
+    ] = modelo_crf.MAX_ITERACOES_TUNING,
+    min_freq: Annotated[
+        int,
+        typer.Option("--min-freq", min=1, help="Frequencia minima de uma feature."),
+    ] = modelo_crf.MIN_FREQ_TUNING,
+    n_jobs: Annotated[
+        int, typer.Option("--n-jobs", help="Fits rodando em paralelo.")
+    ] = modelo_crf.N_JOBS_TUNING,
+    semente: Annotated[
+        int, typer.Option("--semente", help="Semente do split de validacao.")
+    ] = modelo_crf.SEMENTE_TUNING,
+    fracao_validacao: Annotated[
+        float,
+        typer.Option(
+            "--fracao-validacao", min=0.0, max=1.0, help="Fracao separada para validacao."
+        ),
+    ] = modelo_crf.FRACAO_VALIDACAO_TUNING,
+    verboso: Annotated[
+        int, typer.Option("--verboso", min=0, help="Nivel de log da busca.")
+    ] = modelo_crf.VERBOSE_TUNING,
+    com_aumento: Annotated[
+        bool,
+        typer.Option(
+            "--com-aumento",
+            help="Tuna tambem com as variantes sem pontuacao (vazam entre os folds).",
+        ),
+    ] = False,
+    estratificar_por: OpcaoEstratificar = "origem",
+) -> None:
     """Busca hiperparametros do CRF."""
-    modelo_crf.tunar()
+    modelo_crf.tunar(
+        c1,
+        c2,
+        max_iteracoes,
+        min_freq,
+        n_jobs,
+        semente,
+        fracao_validacao,
+        verboso,
+        com_aumento,
+        estratificar_por,
+    )
 
 
 def avaliar(
@@ -57,11 +133,14 @@ def avaliar(
         float, typer.Option(help="mesma fracao de teste usada no treino")
     ] = 0.1,
     estratificar_por: OpcaoEstratificar = "origem",
+    semente: Annotated[
+        int, typer.Option("--semente", help="mesma semente de split usada no treino")
+    ] = modelo_crf.SEMENTE_SPLIT,
 ) -> None:
     """Avalia o CRF no recorte de teste do treino, nunca no dataset inteiro."""
     exemplos = modelo_crf.carregar_exemplos(dataset)
     _, teste = modelo_crf.dividir(
-        exemplos, fracao_teste, estratificar_por=estratificar_por
+        exemplos, fracao_teste, semente, estratificar_por=estratificar_por
     )
     relatorio.avaliar(teste.x, teste.y, teste.categorias, teste.tokens, tagger)
 
