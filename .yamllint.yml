@@ -1,0 +1,4 @@
+extends: default
+# Gerado pelo `maturin generate-ci`, não editar à mão.
+ignore: |
+  .github/workflows/maturin.yml
