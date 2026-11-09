@@ -1,29 +1,37 @@
-import json
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 from typer import BadParameter
 
 from crf_endereco.anotacao.filtro_crf import (
+    Previsao,
+    confianca_media,
     confianca_minima,
-    filtrar_ids_por_incerteza,
-    filtrar_ids_por_tipos,
+    filtrar_por_confianca,
+    filtrar_por_tipos,
+    tipos_das_tags,
     validar_tipos,
 )
-from crf_endereco.anotacao.pendentes import Filtros, pendentes
+from crf_endereco.anotacao.pendentes import Filtros, padrao_busca, pendentes
 from crf_endereco.dataset import criar_banco
 from crf_endereco.segmentador_rust import comando_segmentacao
 
 
-def segmentacao(*tipos: str) -> str:
-    """JSON de saída do segmentador, no formato de `padronizar segmentacao`."""
-    return json.dumps(
-        {
-            "segmentos": [
-                {"valor": f"v{i}", "tipo": tipo} for i, tipo in enumerate(tipos)
-            ]
-        }
+def previsao(
+    identificador: int,
+    tipos: Sequence[str] = (),
+    *,
+    menor: float = 1.0,
+    media: float = 1.0,
+) -> Previsao:
+    """Previsao do CRF como o modelo a devolveria para um endereco."""
+    return Previsao(
+        id=identificador,
+        tipos=frozenset(tipos),
+        menor_confianca=menor,
+        media_confianca=media,
     )
 
 
@@ -49,43 +57,19 @@ def banco_com(linhas: list[tuple[str, str, int]]) -> sqlite3.Connection:
     return conn
 
 
-# --- filtrar_ids_por_tipos -------------------------------------------------
+# --- tipos_das_tags --------------------------------------------------------
 
 
-def test_filtrar_ids_por_tipos_seleciona_so_quem_tem_o_tipo():
-    saida = [
-        segmentacao("logradouro", "numero"),
-        segmentacao("referencia"),
-        segmentacao("logradouro", "nucleo_rural"),
-    ]
-    selecionados = filtrar_ids_por_tipos(
-        saida, [10, 11, 12], frozenset({"referencia", "nucleo_rural"})
-    )
-    assert selecionados == {11, 12}
+def test_tipos_das_tags_extrai_o_tipo_do_rotulo_bio():
+    tags = ["B_LOGRADOURO", "I_LOGRADOURO", "O", "B_NUCLEO_RURAL"]
+    assert tipos_das_tags(tags) == frozenset({"logradouro", "nucleo_rural"})
 
 
-def test_filtrar_ids_por_tipos_ignora_linha_ilegivel():
-    selecionados = filtrar_ids_por_tipos(
-        ["{nao é json", segmentacao("referencia")],
-        [1, 2],
-        frozenset({"referencia"}),
-    )
-    assert selecionados == {2}
+def test_tipos_das_tags_sem_tags_nao_preve_nada():
+    assert tipos_das_tags([]) == frozenset()
 
 
-def test_filtrar_ids_por_tipos_sem_segmentos_nao_seleciona():
-    vazio = json.dumps({"segmentos": []})
-    assert filtrar_ids_por_tipos([vazio], [1], frozenset({"referencia"})) == set()
-
-
-def test_filtrar_ids_por_tipos_exige_mesmo_numero_de_linhas():
-    with pytest.raises(ValueError):
-        _ = filtrar_ids_por_tipos(
-            [segmentacao("referencia")], [1, 2], frozenset({"referencia"})
-        )
-
-
-# --- confianca_minima ------------------------------------------------------
+# --- confianca -------------------------------------------------------------
 
 
 def test_confianca_minima_pega_o_token_mais_inseguro():
@@ -97,51 +81,96 @@ def test_confianca_minima_pega_o_token_mais_inseguro():
     assert confianca_minima(["B_LOGRADOURO", "B_NUMERO"], marginais) == 0.55
 
 
-def test_confianca_minima_sem_token_nao_esta_em_duvida():
+def test_confianca_media_media_os_tokens_previstos():
+    marginais = [
+        {"O": 0.02, "B_LOGRADOURO": 0.98},
+        {"B_NUMERO": 0.55, "O": 0.45},
+    ]
+
+    assert confianca_media(["B_LOGRADOURO", "B_NUMERO"], marginais) == pytest.approx(
+        0.765
+    )
+
+
+def test_confianca_sem_token_nao_esta_em_duvida():
     assert confianca_minima([], []) == 1.0
+    assert confianca_media([], []) == 1.0
 
 
-# --- filtrar_ids_por_incerteza ---------------------------------------------
+# --- filtros ---------------------------------------------------------------
 
 
-def test_incerteza_marca_quem_tem_token_abaixo_do_limiar():
-    confiancas = [0.95, 0.40, 0.61]
+def test_filtrar_por_tipos_seleciona_so_quem_tem_o_tipo():
+    previsoes = [
+        previsao(10, ["logradouro", "numero"]),
+        previsao(11, ["referencia"]),
+        previsao(12, ["logradouro", "nucleo_rural"]),
+    ]
 
-    assert filtrar_ids_por_incerteza(confiancas, [1, 2, 3], 0.6) == {2}
+    selecionados = filtrar_por_tipos(
+        previsoes, frozenset({"referencia", "nucleo_rural"})
+    )
+
+    assert selecionados == {11, 12}
 
 
-def test_incerteza_empate_no_limiar_nao_marca():
-    assert filtrar_ids_por_incerteza([0.6], [1], 0.6) == set()
+def test_filtrar_por_confianca_usa_o_token_menos_confiavel():
+    previsoes = [previsao(1, menor=0.95), previsao(2, menor=0.40, media=0.90)]
+
+    assert filtrar_por_confianca(previsoes, 0.6) == {2}
 
 
-def test_incerteza_exige_mesmo_numero_de_confiancas():
-    with pytest.raises(ValueError):
-        _ = filtrar_ids_por_incerteza([0.2], [1, 2], 0.6)
+def test_filtrar_por_confianca_media_olha_todos_os_tokens():
+    previsoes = [
+        previsao(1, menor=0.95, media=0.97),
+        previsao(2, menor=0.4, media=0.55),
+    ]
+
+    assert filtrar_por_confianca(previsoes, 0.6, media=True) == {2}
 
 
-# --- validar_tipos_filtro --------------------------------------------------
+def test_filtrar_por_confianca_empate_no_limiar_nao_marca():
+    assert filtrar_por_confianca([previsao(1, menor=0.6, media=0.6)], 0.6) == set()
+    assert (
+        filtrar_por_confianca([previsao(1, menor=0.6, media=0.6)], 0.6, media=True)
+        == set()
+    )
+
+
+# --- validar_tipos ---------------------------------------------------------
 
 
 def test_validar_tipos_aceita_tipo_do_modelo():
-    assert validar_tipos(["Referencia", " nucleo_rural "], None) == frozenset(
+    assert validar_tipos(["Referencia", " nucleo_rural "]) == frozenset(
         {"referencia", "nucleo_rural"}
     )
 
 
 def test_validar_tipos_vazio_desliga_o_filtro():
-    assert validar_tipos(None, None) == frozenset()
-    assert validar_tipos([], None) == frozenset()
+    assert validar_tipos(None) == frozenset()
+    assert validar_tipos([]) == frozenset()
 
 
 def test_validar_tipos_recusa_tipo_inexistente():
     with pytest.raises(BadParameter):
-        _ = validar_tipos(["bairro"], None)
+        _ = validar_tipos(["bairro"])
 
 
 def test_validar_tipos_recusa_tipo_que_o_crf_nao_emite():
     # `ruido` existe na ontologia, mas o treinamento o colapsa em `O`.
     with pytest.raises(BadParameter):
-        _ = validar_tipos(["ruido"], None)
+        _ = validar_tipos(["ruido"])
+
+
+# --- padrao de busca -------------------------------------------------------
+
+
+def test_padrao_busca_ignora_caixa_acento_e_espacos_extras():
+    assert padrao_busca("  Asa   Norte ") == "%ASA NORTE%"
+
+
+def test_padrao_busca_nao_deixa_curinga_escapar_do_trecho():
+    assert padrao_busca("100%_x") == r"%100\%\_X%"
 
 
 # --- integração com o banco ------------------------------------------------
@@ -159,7 +188,7 @@ def test_filtro_nao_inclui_linhas_ja_etiquetadas():
     conn = banco_com([("A", "SP", 2)])
     _ = conn.execute(
         "UPDATE enderecos SET resposta_llm = ? WHERE id = 1",
-        (segmentacao("referencia"),),
+        ('{"segmentos": []}',),
     )
     conn.commit()
     aprovados = Filtros(ids=frozenset({1, 2}))

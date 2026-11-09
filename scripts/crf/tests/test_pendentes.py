@@ -103,6 +103,30 @@ def test_recorte_por_municipio():
     assert pendentes(conn, Filtros(municipios=["campinas"])) == []
 
 
+def test_recorte_por_busca_ignora_caixa_e_acento():
+    conn, _ = banco_com([("A", "DF", 2)])
+    _ = conn.execute(
+        "UPDATE enderecos SET endereco = ? WHERE id = 1", ("SQN 210 ASA NORTE",)
+    )
+    _ = conn.execute(
+        "UPDATE enderecos SET endereco = ? WHERE id = 2", ("AV BRASÍLIA 45",)
+    )
+    conn.commit()
+
+    assert {linha.id for linha in pendentes(conn, Filtros(busca="asa  norte"))} == {1}
+    assert {linha.id for linha in pendentes(conn, Filtros(busca="brasilia"))} == {2}
+    assert pendentes(conn, Filtros(busca="campinas")) == []
+
+
+def test_recorte_por_busca_trata_curinga_como_literal():
+    conn, _ = banco_com([("A", "SP", 2)])
+    _ = conn.execute("UPDATE enderecos SET endereco = ? WHERE id = 1", ("RUA 100%",))
+    _ = conn.execute("UPDATE enderecos SET endereco = ? WHERE id = 2", ("RUA 100",))
+    conn.commit()
+
+    assert {linha.id for linha in pendentes(conn, Filtros(busca="100%"))} == {1}
+
+
 def test_filtro_de_ids_limita_a_selecao():
     conn, _ = banco_com([("A", "SP", 4)])
     selecionados = pendentes(conn, Filtros(ids=frozenset({2, 4})))

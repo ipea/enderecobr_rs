@@ -27,6 +27,7 @@ data/modelos/tagger.crf       ── crf treinar ── crf avaliar / crf inspec
 crf popular imoveis_uniao data/brutos/imoveis.xlsx data/anotado/dataset.sqlite -n 1000
 crf etiquetar avulso "RUA DAS FLORES 123 AP 45"
 crf etiquetar lote data/anotado/dataset.sqlite --uf RJ --origem siase -l 500
+crf etiquetar lote data/anotado/dataset.sqlite --busca "asa norte" --incertos-media 0.8
 crf treinar
 crf avaliar
 crf segmentar
@@ -44,19 +45,24 @@ sobrescrever execuções anteriores.
 
 `make` expõe os mesmos comandos (`make test`, `make etiquetar`, ...).
 
-## Como o lote é filtrado pelo CRF
+## Como o lote é filtrado
 
-Os dois filtros rodam o CRF em **todos** os pendentes do recorte (não só em
-`--limite`) e só então sorteiam o lote, porque o sorteio é que escolhe `--limite`.
+Todos os filtros recortam o mesmo conjunto e se acumulam (interseção). Os do CRF
+rodam uma única passada em **todos** os pendentes já recortados por
+`--busca`/`--uf`/`--origem`/... (não só em `--limite`), e só então o lote é
+sorteado.
 
-- `--apenas-tipos logradouro,numero` usa o binário do `enderecobr_rs`: mesmo
-  modelo, mesma segmentação do que é publicado.
-- `--incertos 0.6` usa o modelo Python (`--tagger`), porque as probabilidades
-  marginais não existem na saída do binário. Fica no lote o endereço cujo token
-  **menos** confiável tem probabilidade abaixo do limiar — quanto menor o limiar,
-  mais raro (e mais grave) o caso.
+- `--busca "asa norte"` mantém os endereços que contêm o trecho (LIKE
+  `'%trecho%'`, ignorando caixa e acentos; `%` e `_` são literais).
+- `--apenas-tipos logradouro,numero` mantém quem o CRF prevê com ao menos um
+  desses tipos.
+- `--incertos 0.6` mantém o endereço cujo token **menos** confiável fica abaixo
+  do limiar — quanto menor o limiar, mais raro (e mais grave) o caso.
+- `--incertos-media 0.8` faz o mesmo pela **média** das probabilidades dos
+  tokens: pega o endereço duvidoso como um todo, sem depender de um token só.
 
-Com os dois juntos, vale a interseção.
+Os filtros de previsão compartilham o `--modelo` (padrão `data/modelos/tagger.crf`)
+e as probabilidades marginais do CRF, então não precisam do binário Rust.
 
 ## Como o lote é sorteado
 
@@ -83,7 +89,7 @@ Tudo em uma consulta (`anotacao/pendentes.py`).
 | `anotacao/ferramentas.py` | tools expostas à LLM (CNEFE, busca web, fetch) |
 | `anotacao/cliente_http.py` | HTTP com retry e backoff |
 | `anotacao/pendentes.py` | recorte e sorteio do lote |
-| `anotacao/filtro_crf.py` | filtros pelas previsões do CRF (`--apenas-tipos`, `--incertos`) |
+| `anotacao/filtro_crf.py` | filtros pelas previsões do CRF (`--apenas-tipos`, `--incertos`, `--incertos-media`) |
 | `anotacao/lote.py` | execução em paralelo e gravação do lote |
 | `anotacao/populacao/` | uma base pública por arquivo (`Fonte` = SQL + mapeamento) |
 | `geocode/comparacao.py` | comparação bruto vs segmentado (relatórios) |

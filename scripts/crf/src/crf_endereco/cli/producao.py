@@ -15,8 +15,9 @@ from rich.pretty import pprint
 
 from crf_endereco.anotacao.agente import criar_agente, fechar_agente, segmentar
 from crf_endereco.anotacao.filtro_crf import (
-    prever_incertos,
-    prever_tipos,
+    filtrar_por_confianca,
+    filtrar_por_tipos,
+    prever,
     validar_tipos,
 )
 from crf_endereco.anotacao.lote import Opcoes, dividir_filtros, executar_lote
@@ -192,39 +193,41 @@ def lote(
             max=1.0,
             help=(
                 "Processa só endereços em que o CRF está em dúvida: algum token com "
-                "probabilidade prevista abaixo deste limiar (0–1). Usa as "
-                "probabilidades marginais do modelo Python (--tagger), então roda o "
-                "CRF em todos os pendentes (não só em --limite) antes de etiquetar."
+                "probabilidade prevista abaixo deste limiar (0–1). O modelo roda em "
+                "todos os pendentes (não só em --limite) antes de etiquetar."
             ),
         ),
     ] = None,
-    tagger: Annotated[
+    incertos_media: Annotated[
+        float | None,
+        typer.Option(
+            "--incertos-media",
+            min=0.0,
+            max=1.0,
+            help=(
+                "Como --incertos, mas pela média: endereço cuja média das "
+                "probabilidades previstas, token a token, fica abaixo deste limiar "
+                "(0–1)."
+            ),
+        ),
+    ] = None,
+    busca: Annotated[
+        str | None,
+        typer.Option(
+            "--busca",
+            help=(
+                "Processa só endereços que contêm este trecho (LIKE '%trecho%', "
+                "ignorando caixa e acentos)."
+            ),
+        ),
+    ] = None,
+    modelo: Annotated[
         Path,
         typer.Option(
-            "--tagger",
-            help="Modelo usado em --incertos (padrão: o tagger treinado).",
+            "--modelo",
+            help="CRF usado nos filtros de previsão (padrão: o tagger treinado).",
         ),
     ] = CAMINHO_TAGGER,
-    modelo_crf: Annotated[
-        Path | None,
-        typer.Option(
-            "--modelo-crf",
-            help=(
-                "tagger.crf usado em --apenas-tipos (padrão: o modelo padrão do "
-                "enderecobr_rs, ou ENDERECOBR_MODELO)."
-            ),
-        ),
-    ] = None,
-    binario_crf: Annotated[
-        Path | None,
-        typer.Option(
-            "--binario-crf",
-            help=(
-                "Binário `padronizar` do enderecobr_rs (padrão: "
-                "target/{release,debug}/padronizar ou `cargo run`)."
-            ),
-        ),
-    ] = None,
     verboso: Annotated[
         bool,
         typer.Option(
@@ -237,16 +240,16 @@ def lote(
         lote=lote_id,
         incluir_erros=retentar_erros or apenas_erros,
         apenas_erros=apenas_erros,
+        busca=busca,
         ufs=dividir_filtros(uf),
         origens=dividir_filtros(origem),
         municipios=dividir_filtros(municipio),
     )
     # Valida os argumentos antes de tocar no ambiente (falha rápida, sem .env).
-    tipos = validar_tipos(dividir_filtros(apenas_tipos), modelo_crf)
-    if binario_crf is not None and not binario_crf.is_file():
-        raise typer.BadParameter(
-            f"Binário do segmentador não encontrado: {binario_crf}"
-        )
+    tipos = validar_tipos(dividir_filtros(apenas_tipos))
+    usar_crf = bool(tipos) or incertos is not None or incertos_media is not None
+    if usar_crf and not modelo.is_file():
+        raise typer.BadParameter(f"Modelo CRF não encontrado: {modelo}")
 
     config = carregar_config(env, com_cnefe=com_cnefe)
     console_llm = console if verboso else Console(quiet=True)
@@ -256,33 +259,36 @@ def lote(
 
     conn = abrir_banco(banco)
     try:
-        if tipos or incertos is not None:
+        if usar_crf:
             candidatos = pendentes(conn, filtros)
-            aprovados = frozenset(linha.id for linha in candidatos)
+            console.print(
+                f"[dim]Prevendo {len(candidatos)} pendente(s) com o CRF "
+                f"{modelo.name} para filtrar…[/dim]"
+            )
+            previsoes = prever(candidatos, modelo)
+            aprovados = frozenset(previsao.id for previsao in previsoes)
             if tipos:
-                console.print(
-                    f"[dim]Segmentando {len(candidatos)} pendente(s) para filtrar "
-                    f"por {', '.join(sorted(tipos))}...[/dim]"
-                )
-                por_tipo = prever_tipos(
-                    candidatos, tipos, modelo=modelo_crf, binario=binario_crf
-                )
+                por_tipo = filtrar_por_tipos(previsoes, tipos)
                 aprovados &= por_tipo
                 console.print(
                     f"[dim]Filtro por tipo: {len(por_tipo)} de {len(candidatos)} "
                     "endereço(s) com ao menos um tipo previsto.[/dim]"
                 )
             if incertos is not None:
+                por_menor = filtrar_por_confianca(previsoes, incertos)
+                aprovados &= por_menor
                 console.print(
-                    f"[dim]Prevendo {len(candidatos)} pendente(s) para filtrar por "
-                    f"incerteza abaixo de {incertos:.2f}...[/dim]"
-                )
-                por_incerteza = prever_incertos(candidatos, incertos, tagger=tagger)
-                aprovados &= por_incerteza
-                console.print(
-                    f"[dim]Filtro por incerteza: {len(por_incerteza)} de "
+                    f"[dim]Filtro por incerteza: {len(por_menor)} de "
                     f"{len(candidatos)} endereço(s) com algum token abaixo de "
                     f"{incertos:.2f}.[/dim]"
+                )
+            if incertos_media is not None:
+                por_media = filtrar_por_confianca(previsoes, incertos_media, media=True)
+                aprovados &= por_media
+                console.print(
+                    f"[dim]Filtro por incerteza média: {len(por_media)} de "
+                    f"{len(candidatos)} endereço(s) com média abaixo de "
+                    f"{incertos_media:.2f}.[/dim]"
                 )
             filtros = replace(filtros, ids=aprovados)
 

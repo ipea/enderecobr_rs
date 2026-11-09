@@ -1,9 +1,9 @@
-"""Filtros dos pendentes pelas previsoes e probabilidades do CRF."""
+"""Filtros dos pendentes pelas previsoes e confiancas do CRF."""
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -16,7 +16,6 @@ from crf_endereco.config import CAMINHO_TAGGER
 from crf_endereco.features import ExtratorFeature, tokenize
 from crf_endereco.modelo.crf import carregar_tagger
 from crf_endereco.rotulos import mapa_tipo_segmento
-from crf_endereco.segmentador_rust import rodar_segmentacao
 from crf_endereco.ui import progresso
 
 # Rotulos que o CRF consegue emitir: espelham `TipoSegmento::TODOS` do Rust.
@@ -26,19 +25,24 @@ TIPOS_QUE_O_CRF_EMITE = frozenset(
     tipo for tipo in TIPOS_SEGMENTO if mapa_tipo_segmento.get(tipo, tipo) is not None
 )
 
-# Quantos enderecos vao por chamada ao segmentador (uma linha de entrada e uma
-# de saida JSON por endereco).
-TAMANHO_BLOCO = 5_000
+
+@dataclass(frozen=True)
+class Previsao:
+    """O que o CRF diz de um pendente: base de todos os filtros de previsao."""
+
+    id: int
+    tipos: frozenset[str]
+    # Menor e media das probabilidades marginais das tags previstas.
+    menor_confianca: float
+    media_confianca: float
 
 
-def validar_tipos(valores: Sequence[str] | None, modelo: Path | None) -> frozenset[str]:
+def validar_tipos(valores: Sequence[str] | None) -> frozenset[str]:
     """Normaliza e valida a lista de `--apenas-tipos`; vazia = filtro desligado.
 
     Erra com mensagem explicita quando o tipo nao existe na ontologia ou quando
     existe mas o CRF nunca o emite (o treinamento colapsa esses rotulos em `O`).
     """
-    if modelo is not None and not modelo.is_file():
-        raise typer.BadParameter(f"Modelo CRF não encontrado: {modelo}")
     tipos = frozenset(item.strip().lower() for item in valores or () if item.strip())
     if not tipos:
         return frozenset()
@@ -58,25 +62,9 @@ def validar_tipos(valores: Sequence[str] | None, modelo: Path | None) -> frozens
     return tipos
 
 
-def filtrar_ids_por_tipos(
-    saida: Sequence[str], ids: Sequence[int], tipos: frozenset[str]
-) -> set[int]:
-    """Ids cuja segmentacao (um JSON por linha) tem ao menos um segmento de `tipos`.
-
-    Linha ilegivel conta como nao selecionada: o filtro so inclui quem o modelo
-    comprovadamente marcou com um dos tipos pedidos.
-    """
-    selecionados: set[int] = set()
-    for identificador, linha in zip(ids, saida, strict=True):
-        try:
-            dados = json.loads(linha)
-        except json.JSONDecodeError:
-            continue
-        for segmento in dados.get("segmentos", []):
-            if str(segmento.get("tipo", "")) in tipos:
-                selecionados.add(identificador)
-                break
-    return selecionados
+def tipos_das_tags(tags: Sequence[str]) -> frozenset[str]:
+    """Tipos que as tags BIO preveem (`B_LOGRADOURO` -> `logradouro`)."""
+    return frozenset(tag.partition("_")[2].lower() for tag in tags if tag != "O")
 
 
 def confianca_minima(
@@ -86,88 +74,79 @@ def confianca_minima(
     if not tags:
         return 1.0
     return min(
-        marginal.get(tag, 1.0)
-        for tag, marginal in zip(tags, marginais, strict=True)
+        marginal.get(tag, 1.0) for tag, marginal in zip(tags, marginais, strict=True)
     )
 
 
-def confianca_do_endereco(
-    crf: sklearn_crfsuite.CRF, extrator: ExtratorFeature, endereco: str
+def confianca_media(
+    tags: Sequence[str], marginais: Sequence[Mapping[str, float]]
 ) -> float:
-    """Menor probabilidade marginal entre as tags previstas para os tokens.
+    """Media das probabilidades marginais entre as tags previstas.
 
     1.0 quando o endereco nao tem token: sem token nao ha tag em que o modelo
     possa estar em duvida.
     """
+    if not tags:
+        return 1.0
+    return sum(
+        marginal.get(tag, 1.0) for tag, marginal in zip(tags, marginais, strict=True)
+    ) / len(tags)
+
+
+def prever(linhas: Sequence[Pendente], modelo: Path = CAMINHO_TAGGER) -> list[Previsao]:
+    """Roda o CRF uma vez por pendente e resume o que o modelo previu.
+
+    Uma passada unica serve a todos os filtros: ligar `--apenas-tipos`,
+    `--incertos` e `--incertos-media` juntos nao custa tres predicoes.
+    """
+    crf = carregar_tagger(modelo)
+    extrator = ExtratorFeature()
+    previsoes: list[Previsao] = []
+    with progresso() as barra:
+        tarefa = barra.add_task("Prevendo com o CRF", total=len(linhas))
+        for linha in linhas:
+            tags, marginais = _prever_endereco(crf, extrator, linha.endereco)
+            previsoes.append(
+                Previsao(
+                    id=linha.id,
+                    tipos=tipos_das_tags(tags),
+                    menor_confianca=confianca_minima(tags, marginais),
+                    media_confianca=confianca_media(tags, marginais),
+                )
+            )
+            barra.advance(tarefa)
+    return previsoes
+
+
+def _prever_endereco(
+    crf: sklearn_crfsuite.CRF, extrator: ExtratorFeature, endereco: str
+) -> tuple[list[str], list[dict[str, float]]]:
+    """Tags previstas e probabilidades marginais, vazias quando nao ha token."""
     x = extrator.tokens2features(tokenize(endereco))
     if not x:
-        return 1.0
-    return confianca_minima(
+        return [], []
+    return (
         cast(list[str], crf.predict_single(x)),
         cast(list[dict[str, float]], crf.predict_marginals_single(x)),
     )
 
 
-def filtrar_ids_por_incerteza(
-    confiancas: Sequence[float], ids: Sequence[int], limiar: float
-) -> set[int]:
-    """Ids cuja menor confianca por token fica abaixo de `limiar`."""
-    selecionados: set[int] = set()
-    for identificador, confianca in zip(ids, confiancas, strict=True):
-        if confianca < limiar:
-            selecionados.add(identificador)
-    return selecionados
-
-
-def prever_incertos(
-    linhas: Sequence[Pendente],
-    limiar: float,
-    *,
-    tagger: Path = CAMINHO_TAGGER,
+def filtrar_por_tipos(
+    previsoes: Sequence[Previsao], tipos: frozenset[str]
 ) -> frozenset[int]:
-    """Roda o CRF nos pendentes e devolve os que tem algum token inseguro.
+    """Ids cuja previsao tem ao menos um dos `tipos`."""
+    return frozenset(previsao.id for previsao in previsoes if previsao.tipos & tipos)
 
-    As probabilidades marginais so existem no modelo Python - o binario Rust
-    devolve apenas a segmentacao -, entao aqui o modelo e o `--tagger`.
+
+def filtrar_por_confianca(
+    previsoes: Sequence[Previsao], limiar: float, *, media: bool = False
+) -> frozenset[int]:
+    """Ids cuja confianca (do token menos confiavel, ou a media) fica abaixo.
+
+    No limiar exato o endereco nao entra: o filtro quer os casos em duvida.
     """
-    crf = carregar_tagger(tagger)
-    extrator = ExtratorFeature()
-    confiancas: list[float] = []
-    with progresso() as barra:
-        tarefa = barra.add_task("Medindo a confiança do CRF", total=len(linhas))
-        for linha in linhas:
-            confiancas.append(confianca_do_endereco(crf, extrator, linha.endereco))
-            barra.advance(tarefa)
     return frozenset(
-        filtrar_ids_por_incerteza(
-            confiancas, [linha.id for linha in linhas], limiar
-        )
+        previsao.id
+        for previsao in previsoes
+        if (previsao.media_confianca if media else previsao.menor_confianca) < limiar
     )
-
-
-def prever_tipos(
-    linhas: Sequence[Pendente],
-    tipos: frozenset[str],
-    *,
-    modelo: Path | None = None,
-    binario: Path | None = None,
-) -> frozenset[int]:
-    """Roda o CRF nos pendentes e devolve os ids com ao menos um dos `tipos`.
-
-    Usa o binario do proprio enderecobr_rs, entao a predicao e identica a do
-    segmentador publicado; o modelo e escolhido por `--modelo-crf`
-    (`ENDERECOBR_MODELO` para o binario) ou pelo padrao dele.
-    """
-    selecionados: set[int] = set()
-    with progresso() as barra:
-        tarefa = barra.add_task("Prevendo com o CRF", total=len(linhas))
-        for inicio in range(0, len(linhas), TAMANHO_BLOCO):
-            bloco = linhas[inicio : inicio + TAMANHO_BLOCO]
-            saida = rodar_segmentacao(
-                [linha.endereco for linha in bloco], modelo=modelo, binario=binario
-            )
-            selecionados |= filtrar_ids_por_tipos(
-                saida, [linha.id for linha in bloco], tipos
-            )
-            barra.advance(tarefa, len(bloco))
-    return frozenset(selecionados)

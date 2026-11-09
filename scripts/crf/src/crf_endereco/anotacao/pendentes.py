@@ -8,6 +8,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from crf_endereco.features.texto import normalize
+
 
 @dataclass(frozen=True)
 class Pendente:
@@ -29,6 +31,8 @@ class Filtros:
     ufs: Sequence[str] = ()
     origens: Sequence[str] = ()
     municipios: Sequence[str] = ()
+    # Trecho do endereco (busca ignorando caixa e acentos); vazio desliga.
+    busca: str | None = None
     # Ids aprovados pelo filtro do CRF; `None` desliga o filtro.
     ids: frozenset[int] | None = None
 
@@ -39,6 +43,7 @@ class Filtros:
             itens = [item.strip() for item in valores or () if item.strip()]
             return json.dumps(itens) if itens else None
 
+        busca = (self.busca or "").strip()
         return {
             "lote": self.lote,
             "incluir_erros": self.incluir_erros,
@@ -46,8 +51,22 @@ class Filtros:
             "ufs": lista(self.ufs),
             "origens": lista(self.origens),
             "municipios": lista(self.municipios),
+            "busca": padrao_busca(busca) if busca else None,
             "ids": json.dumps(sorted(self.ids)) if self.ids is not None else None,
         }
+
+
+def sem_acento(texto: str) -> str:
+    """Texto em ASCII e caixa alta, para comparar ignorando acento e caixa."""
+    return normalize(texto).upper()
+
+
+def padrao_busca(busca: str) -> str:
+    """Padrao `LIKE` do trecho, com `%` e `_` tratados como literais."""
+    # Espacos repetidos ou nas pontas nao fazem parte do trecho buscado.
+    trecho = " ".join(sem_acento(busca).split())
+    escapado = trecho.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escapado}%"
 
 
 # Pendentes em ordem de sorteio, balanceada entre as celulas (UF, origem) e
@@ -86,6 +105,7 @@ pend AS (
             )
           )
       AND (:lote IS NULL OR lote = :lote)
+      AND (:busca IS NULL OR sem_acento(endereco) LIKE :busca ESCAPE '\\')
       AND (
             :ufs IS NULL
             OR upper(coalesce(uf, '')) IN (SELECT upper(value) FROM json_each(:ufs))
@@ -121,6 +141,8 @@ def pendentes(
     conn: sqlite3.Connection, filtros: Filtros, limite: int | None = None
 ) -> list[Pendente]:
     """Pendentes do recorte, em ordem de sorteio (todos quando `limite` e nulo)."""
+    # `--busca` compara textos normalizados; a funcao so existe nesta conexao.
+    conn.create_function("sem_acento", 1, sem_acento, deterministic=True)
     linhas = conn.execute(
         SQL_PENDENTES, {**filtros.parametros(), "limite": limite}
     ).fetchall()
