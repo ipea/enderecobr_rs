@@ -6,11 +6,11 @@ use std::{
 };
 /// Endereço de onde o modelo padrão é baixado.
 pub const MODEL_DOWNLOAD_PATH: &str =
-    "https://github.com/ipea/enderecobr_rs/releases/download/modelo-crf-v0.2/tagger.crf";
+    "https://github.com/ipea/enderecobr_rs/releases/download/modelo-crf-v0.1/tagger.crf";
 
 /// Versão do modelo padrão. É usado como subdiretório no cache para que
 /// versões diferentes não se sobrescrevam.
-pub const VERSAO_MODELO: &str = "modelo-crf-v0.2";
+pub const VERSAO_MODELO: &str = "modelo-crf-v0.1";
 
 /// Nome do diretório da biblioteca dentro do cache do sistema.
 pub const NOME_DIRETORIO_CACHE: &str = "enderecobr_rs";
