@@ -1,0 +1,405 @@
+import pytest
+
+from crf_endereco.features import (
+    ExtratorFeature,
+    Vocabulario,
+    is_pontuacao,
+    normalize,
+    tokenize,
+    tokenize_com_offsets,
+)
+
+
+# ----------------------------
+# Utilitários
+# ----------------------------
+def test_normalize_remove_acentos():
+    assert normalize("ação") == "acao"
+
+
+def test_normalize_maiusculas_e_minusculas():
+    assert normalize("ÁbÇ") == "AbC"
+
+
+def test_normalize_sem_acentos_retorna_igual():
+    assert normalize("Rua") == "Rua"
+
+
+def test_tokenize_basico():
+    assert tokenize("Rua das Flores!") == ["Rua", "das", "Flores", "!"]
+    assert tokenize("123, teste") == ["123", ",", "teste"]
+    assert tokenize("") == []
+    assert tokenize("A/B") == ["A", "/", "B"]
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Rua das Flores, 123", ["Rua", "das", "Flores", ",", "123"]),
+        (
+            "Av. Paulista 1000 - São Paulo",
+            ["Av", ".", "Paulista", "1000", "-", "São", "Paulo"],
+        ),
+        # Não esperava que nº iria ficar junto.
+        ("R. Azul, nº 45", ["R", ".", "Azul", ",", "nº", "45"]),
+        ("CEP: 01311-200", ["CEP", ":", "01311", "-", "200"]),
+        ("Bloco B apto. 12", ["Bloco", "B", "apto", ".", "12"]),
+    ],
+)
+def test_tokenize_casos(text: str, expected: list[str]):
+    assert tokenize(text) == expected
+
+
+def test_tokenize_com_offsets():
+    assert tokenize_com_offsets("R. Azul, 45") == [
+        ("R", 0),
+        (".", 1),
+        ("Azul", 3),
+        (",", 7),
+        ("45", 9),
+    ]
+    assert tokenize_com_offsets("") == []
+
+
+def test_is_pontuacao_casos_basicos():
+    assert is_pontuacao(",") is True
+    assert is_pontuacao("...") is True
+    assert is_pontuacao("a") is False
+    assert is_pontuacao("") is False
+
+
+# ----------------------------
+# token2features
+# ----------------------------
+
+
+def token2features(sent: list[str], i: int):
+    return ExtratorFeature().tokens2features(sent)[i]
+
+
+def tokens2features(sent: list[str]):
+    return ExtratorFeature().tokens2features(sent)
+
+
+def test_token2features_primeiro_token_basico():
+    sent = ["Rua", "das", "Flores"]
+    feats = token2features(sent, 0)
+    assert "bias" in feats
+    assert "0_pos" in feats
+    assert "0:RUA" in feats
+    assert "0:is_alpha" in feats
+    assert "0:tam:3" in feats
+    assert "BOS" in feats
+    assert "1:DAS" in feats
+    assert "1:is_alpha" in feats
+    assert "2:FLORES" in feats
+    assert "2:is_alpha" in feats
+
+    assert "EOS" not in feats
+
+
+def test_token2features_token_final():
+    sent = ["Rua", "das", "Flores"]
+    feats = token2features(sent, 2)
+    assert "bias" in feats
+    assert "EOS" in feats
+    assert "0:FLORES" in feats
+    assert "0:is_alpha" in feats
+    assert "0:tam:6" in feats
+    assert "-1:DAS" in feats
+    assert "-1:is_alpha" in feats
+    assert "-2:RUA" in feats
+    assert "-2:is_alpha" in feats
+
+    assert "BOS" not in feats
+
+
+def test_token2features_token_meio_com_digito():
+    sent = ["Rua", "123", "Centro"]
+    feats = token2features(sent, 1)
+    assert "0:is_digit" in feats
+    assert "0:tam:3" in feats
+    assert "0:123" in feats
+    assert "-1:RUA" in feats
+    assert "1:CENTRO" in feats
+    assert "1:is_alpha" in feats
+    assert not any("digit_len" in f for f in feats)
+
+    assert "BOS" not in feats
+    assert "EOS" not in feats
+
+
+def test_token2features_token_pontuacao():
+    sent = ["Rua", ",", "Centro"]
+    feats = token2features(sent, 1)
+    assert "0:," in feats
+    assert "0:is_punct" in feats
+    assert "-1:RUA" in feats
+    assert "-1:is_alpha" in feats
+    assert "1:CENTRO" in feats
+    assert "1:is_alpha" in feats
+
+    assert "EOS" not in feats
+
+
+def test_token2features_com_token_alfanumerico():
+    # O tokenizador separa letras de números, então "A1" é um caso desconhecido.
+    sent = ["Rua", "A1", "Centro"]
+    feats = token2features(sent, 1)
+    assert "0:A1" in feats
+    assert "0:is_unknown" in feats
+    assert "0:is_alpha" not in feats
+    assert "0:tam:2" in feats
+    assert "-1:RUA" in feats
+    assert "1:CENTRO" in feats
+
+    assert "BOS" not in feats
+    assert "EOS" not in feats
+
+
+def test_token2features_com_pontuacao_entre_palavras():
+    sent = ["Rua", ",", "das", "Flores"]
+    feats = token2features(sent, 0)
+    assert "0:RUA" in feats
+    assert "1:DAS" in feats
+    assert "2:FLORES" in feats
+    assert "tem_pontuacao:1" in feats
+    assert "BOS" in feats
+
+    assert "EOS" not in feats
+
+
+def test_token2features_ignora_pontuacoes_sucessivas():
+    sent = ["Rua", ",", ".", "Flores"]
+    feats = token2features(sent, 0)
+    assert "0:RUA" in feats
+    assert "1:FLORES" in feats
+    assert "1:is_alpha" in feats
+    assert "tem_pontuacao:1" in feats
+    assert "BOS" in feats
+
+    assert "EOS" not in feats
+
+
+def test_token2features_palavra_longa():
+    sent = ["Inconstitucionalissimamente"]
+    feats = token2features(sent, 0)
+    assert "0:INCONSTITUCIONALISSIMAMENTE" in feats
+    assert "0:tam:10" in feats
+    assert "0:is_alpha" in feats
+    assert "BOS" in feats
+    assert "EOS" in feats
+    assert "bias" in feats
+
+
+def test_token2features_todos_pontuacao():
+    sent = [",", ".", ";"]
+    feats = token2features(sent, 1)
+    assert "0:is_punct" in feats
+    assert "0:." in feats
+    assert "0:tam:1" in feats
+
+    assert "BOS" not in feats
+    assert "EOS" not in feats
+    assert "-1:," not in feats
+    assert "1:;" not in feats
+
+
+def test_token2features_com_token_numerico_longo_zeros():
+    sent = ["000000000000012345"]
+    feats = token2features(sent, 0)
+    assert "0:is_digit" in feats
+    assert "0:tam:5" in feats
+    assert "0:000000000000012345" in feats
+
+
+def test_token2features_com_token_numerico_longo():
+    sent = ["123456789"]
+    feats = token2features(sent, 0)
+    assert "0:is_digit" in feats
+    assert "0:tam:9" in feats
+    assert "BOS" in feats and "EOS" in feats
+    assert "0:123456789" in feats
+
+
+def test_token2features_com_pontuacao_longa():
+    sent = ["!!!"]
+    feats = token2features(sent, 0)
+    assert "0:is_punct" in feats
+    assert "0:!" in feats
+    assert "BOS" in feats and "EOS" in feats
+
+
+def test_token2features_token_vazio():
+    sent = [""]
+    feats = token2features(sent, 0)
+    assert "0:is_unknown" in feats
+    assert "BOS" in feats
+    assert "EOS" in feats
+    assert "0:tam:0" in feats
+    assert "0:is_alpha" not in feats
+
+
+def test_token2features_token_desconhecido():
+    sent = ["😀"]
+    feats = token2features(sent, 0)
+    assert "0:is_unknown" in feats
+    assert "0:😀" not in feats
+    assert "0:is_alpha" not in feats
+    assert "BOS" in feats and "EOS" in feats
+
+
+def test_token2features_token_com_acentos():
+    sent = ["Árvore"]
+    feats = token2features(sent, 0)
+    assert "0:ARVORE" in feats
+    assert "0:is_alpha" in feats
+    assert "0:tam:6" in feats
+    assert "BOS" in feats and "EOS" in feats
+    assert "bias" in feats
+
+
+# ----------------------------
+# tokens2features
+# ----------------------------
+def test_tokens2features_lista_basica():
+    toks = ["Rua", "das"]
+    feats = tokens2features(toks)
+    assert isinstance(feats, list)
+    assert isinstance(feats[0], dict)
+    assert "0:RUA" in feats[0]
+    assert "0:DAS" in feats[1]
+
+
+def test_tokens2features_contem_bias_em_todos():
+    toks = ["A", "B", "C"]
+    feats = tokens2features(toks)
+    assert all("bias" in f for f in feats)
+
+
+def test_tokens2features_sem_duplicatas():
+    feats = tokens2features(["Rua", ",", "das", "Flores", "123"])
+    for item in feats:
+        assert len(item) == len(set(item))
+
+
+# ----------------------------
+# feature de municipio
+# ----------------------------
+def feats_municipio(sent: list[str], ambiguidade: dict[str, int] | None = None):
+    extrator = ExtratorFeature(ambiguidade={} if ambiguidade is None else ambiguidade)
+    return extrator.tokens2features(sent)
+
+
+def test_municipio_marca_nome_de_varios_tokens():
+    feats = feats_municipio(["Rua", "Sao", "Paulo", "100"])
+    assert "0:municipio_unico_B" in feats[1]
+    assert "0:municipio_unico_I" in feats[2]
+    assert "municipio" not in "".join(feats[0])
+    assert "municipio" not in "".join(feats[3])
+
+
+def test_municipio_ambiguo_usa_feature_propria():
+    # Nome que e localidade em muitos municipios perde a forca de lexico
+    feats = feats_municipio(["Boa", "Vista"], {"BOA VISTA": 1492})
+    assert "0:municipio_ambiguo_B" in feats[0]
+    assert "0:municipio_ambiguo_I" in feats[1]
+    assert "municipio_unico" not in "".join(feats[0])
+
+
+def test_municipio_inequivoco_nao_usa_feature_de_ambiguo():
+    feats = feats_municipio(["Anapolis"], {"ANAPOLIS": 2})
+    assert "0:municipio_unico_B" in feats[0]
+    assert "municipio_ambiguo" not in "".join(feats[0])
+
+
+def test_municipio_marca_nome_de_um_token():
+    feats = feats_municipio(["Rua", "Campinas", "Centro"])
+    assert "0:municipio_unico_B" in feats[1]
+    assert "0:municipio_unico_I" not in feats[1]
+    # "CENTRO" nao e municipio: a feature nao pode disparar para qualquer palavra
+    assert "municipio" not in "".join(feats[2])
+
+
+def test_municipio_casa_nome_com_pontuacao_e_acento():
+    toks = tokenize("Olho d'Água do Borges")
+    assert toks == ["Olho", "d", "'", "Água", "do", "Borges"]
+    feats = feats_municipio(toks)
+    assert "0:municipio_unico_B" in feats[0]
+    assert "0:municipio_unico_I" in feats[1]
+    assert "municipio" not in "".join(feats[2])
+    assert "0:municipio_unico_I" in feats[3]
+    assert "0:municipio_unico_I" in feats[4]
+    assert "0:municipio_unico_I" in feats[5]
+
+
+def test_municipio_prefere_o_nome_mais_longo():
+    # "PASSA QUATRO" tambem e municipio, mas o nome da rua e o composto
+    feats = feats_municipio(tokenize("Santa Rita do Passa Quatro"))
+    assert "0:municipio_unico_B" in feats[0]
+    assert all(any("_I" in marca for marca in f) for f in feats[1:])
+
+
+def test_municipio_exige_nome_completo():
+    feats = feats_municipio(["Rua", "Sao", "100"])
+    assert "municipio" not in "".join(feats[1])
+
+
+# ----------------------------
+# feature de nucleo rural
+# ----------------------------
+def test_nucleo_marca_cabeca_com_nome():
+    feats = tokens2features(tokenize("Povoado Agua Preta, 65"))
+    assert "0:nucleo_B" in feats[0]
+
+
+def test_nucleo_marca_nome_composto():
+    feats = tokens2features(tokenize("Nucleo Rural Boa Esperanca"))
+    assert "0:nucleo_B" in feats[0]
+    assert "0:nucleo_I" in feats[1]
+    assert "nucleo" not in "".join(feats[2])
+
+
+def test_nucleo_marca_a_cabeca_sem_julgar_o_que_vem_depois():
+    # Quem decide se o termo e nucleo, parcela ou ruido e o modelo.
+    for sent in (["Chacara", "51"], ["Povoado"], ["Povoado", "."]):
+        feats = tokens2features(sent)
+        assert "0:nucleo_B" in feats[0]
+
+
+def test_nucleo_aceita_abreviacao():
+    assert "0:nucleo_B" in tokens2features(tokenize("Faz Santa Rita"))[0]
+    assert "0:nucleo_B" in tokens2features(tokenize("Sit Mirador"))[0]
+
+
+def test_nucleo_nao_marca_tipo_de_via():
+    feats = tokens2features(tokenize("Linha Colombo, 200"))
+    assert all("nucleo" not in "".join(f) for f in feats)
+
+
+def test_nucleo_aceita_nome_numeral():
+    assert "0:nucleo_B" in tokens2features(tokenize("Agrovila 2"))[0]
+    assert "0:nucleo_B" in tokens2features(tokenize("Chacara 51"))[0]
+
+
+# ----------------------------
+# vocabulario
+# ----------------------------
+def test_vocabulario_prefere_o_termo_mais_longo():
+    vocabulario = Vocabulario(["SANTA RITA", "SANTA RITA DO PASSA QUATRO"])
+    palavras = ["SANTA", "RITA", "DO", "PASSA", "QUATRO"]
+    assert vocabulario.casar(palavras) == [(0, 5)]
+    assert vocabulario.casar(["SANTA", "RITA"]) == [(0, 2)]
+
+
+def test_vocabulario_ignora_pontuacao_do_termo():
+    assert Vocabulario(["OLHO D'AGUA"]).casar(["OLHO", "D", "AGUA"]) == [(0, 3)]
+
+
+def test_vocabulario_casa_termos_seguidos():
+    vocabulario = Vocabulario(["PASSA QUATRO", "SANTA RITA"])
+    assert vocabulario.casar(["PASSA", "QUATRO", "SANTA", "RITA"]) == [(0, 2), (2, 4)]
+
+
+def test_vocabulario_nao_casa_termo_incompleto():
+    assert Vocabulario(["SANTA RITA"]).casar(["RUA", "SANTA"]) == []

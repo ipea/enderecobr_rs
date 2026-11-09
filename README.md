@@ -5,31 +5,25 @@
 | [![crates.io Latest Release](https://img.shields.io/crates/v/enderecobr_rs.svg)](https://crates.io/crates/enderecobr_rs) <br /> [![docs.rs Rust](https://docs.rs/enderecobr_rs/badge.svg)](https://docs.rs/enderecobr_rs/) <br /> [![codecov](https://codecov.io/gh/ipea/enderecobr_rs/graph/badge.svg?token=ckgU5oGbxf)](https://codecov.io/gh/ipea/enderecobr_rs) <br /> [![CI](https://github.com/ipea/enderecobr_rs/workflows/CI/badge.svg)](https://github.com/ipea/enderecobr_rs/actions) <br /> ![Crates.io Downloads (total downloads)](https://img.shields.io/crates/d/enderecobr_rs) | [![PyPi Latest Release](https://img.shields.io/pypi/v/enderecobr.svg)](https://pypi.org/project/enderecobr) <br /> [![Downloads](https://static.pepy.tech/badge/enderecobr)](https://pepy.tech/project/enderecobr) <br /> [![readthedocs Python](https://app.readthedocs.org/projects/enderecobr-py/badge)](https://enderecobr-py.readthedocs.io) | [![R-repo](https://img.shields.io/badge/github-repo-blue?logo=github)](https://github.com/ipea/enderecobr) <br /> [![CRAN status](https://www.r-pkg.org/badges/version/enderecobr)](https://CRAN.R-project.org/package=enderecobr) <br /> [![CRAN/METACRAN Total downloads](https://cranlogs.r-pkg.org/badges/grand-total/enderecobr?color=blue)](https://CRAN.R-project.org/package=enderecobr) |
 
 
-
-
-
-
-
 [![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 **enderecobr_rs** é uma biblioteca em Rust que disponibiliza diversas funções para padronizar endereços brasileiros,
-corrigindo erros comuns, expandindo abreviações etc, afim de facilitar processamentos posteriores. Ela usa 
-majoritariamente expressões regulares nas padronizações, com exceção do módulo experimental de separação 
-de endereços, que utiliza um modelo probabilístico de [Conditional Random Field](https://en.wikipedia.org/wiki/Conditional_random_field) já embutido na bilioteca.
+corrigindo erros comuns, expandindo abreviações etc, afim de facilitar processamentos posteriores. Ela usa
+majoritariamente expressões regulares nas padronizações, com exceção do módulo de separação de endereços, que utiliza
+um [modelo probabilístico clássico](https://en.wikipedia.org/wiki/Conditional_random_field).
 
-Obs. Esta biblioteca é uma adaptação e expansão para Rust da versão original em R 
-do [enderecobr](https://github.com/ipea/enderecobr) visando ganho de eficiência e 
-expandir a implementação do pacote **endereçobr** em diferentes linguagens usando a 
+Obs. Esta biblioteca é uma adaptação e expansão para Rust da versão original em R
+do [enderecobr](https://github.com/ipea/enderecobr) visando ganho de eficiência e
+expandir a implementação do pacote **endereçobr** em diferentes linguagens usando a
 versão em Rust como base.
-
 
 ## Bindings
 
-Este é o repositório do enderecobr em Rust e em Python. A versão em Python é feita no subdiretório 
-`bindings/python` deste projeto. O repositório da versão em R se mantém em [enderecobr](https://github.com/ipea/enderecobr), 
-utilizando internamente as funções desta lib. Algumas funções ou classes/structs da implementação em 
-Rust podem não estar expostas em outras linguagens. Vide [documentação](https://docs.rs/enderecobr_rs) 
-do Rust para identificar tais situações. Para solicitar esse tipo de mudança ou bindings em outras 
+Este é o repositório do enderecobr em Rust e em Python. A versão em Python é feita no subdiretório
+`bindings/python` deste projeto. O repositório da versão em R se mantém em [enderecobr](https://github.com/ipea/enderecobr),
+utilizando internamente as funções desta lib. Algumas funções ou classes/structs da implementação em
+Rust podem não estar expostas em outras linguagens. Vide [documentação](https://docs.rs/enderecobr_rs)
+do Rust para identificar tais situações. Para solicitar esse tipo de mudança ou bindings em outras
 linguagens de programação, por favor abrir uma Issue ou Pull request neste repositório.
 
 ## Documentação:
@@ -58,9 +52,10 @@ enderecobr_rs = { version = "0.2.0" }
 ### Rust:
 
 ```rust
-use enderecobr_rs::{padronizar_complementos, padronizar_logradouros};
+use enderecobr_rs::{padronizar_complementos, padronizar_logradouros, estruturar_endereco, Endereco};
 assert_eq!(padronizar_logradouros("r. gen.. glicério"), "RUA GENERAL GLICERIO");
 assert_eq!(padronizar_complementos("QD1 LT2 CS3"), "QUADRA 1 LOTE 2 CASA 3");
+assert_eq!(estruturar_endereco("av atlantica, 123, apt 123", true), Endereco { logradouro: Some("AVENIDA ATLANTICA".to_string()), numero: Some("123".to_string()), complemento: Some("APARTAMENTO 123".to_string()), ..Default::default()});
 ```
 
 ### Python:
@@ -69,13 +64,13 @@ assert_eq!(padronizar_complementos("QD1 LT2 CS3"), "QUADRA 1 LOTE 2 CASA 3");
 import enderecobr
 assert enderecobr.padronizar_logradouros("r. gen.. glicério") == "RUA GENERAL GLICERIO"
 assert enderecobr.padronizar_logradouros("QD1 LT2 CS3") == "QUADRA 1 LOTE 2 CASA 3"
+assert enderecobr.estruturar_endereco("av atlantica, 123, apt 123") == enderecobr.Endereco(logradouro="AVENIDA ATLANTICA", numero="123", complemento="APARTAMENTO 123")
 ```
-
 
 ## Release
 
 ```bash
-# Utilitário que ajuda a altera a versão nos arquivos necessários 
+# Utilitário que ajuda a altera a versão nos arquivos necessários
 # (Cargo.toml e pyproject.toml), além de fazr um commit deles e cria a tag no git.
 ./bump-versao-release.sh 0.2.0
 
@@ -88,7 +83,6 @@ git push origin v0.2.0
 # git reset HEAD^
 # git tag -d v0.2.0
 ```
-
 
 ## Nota <a href="https://www.ipea.gov.br"><img src="./assets/ipea_logo.png" alt="Ipea" align="right" width="300"/></a>
 

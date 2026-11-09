@@ -1,278 +1,122 @@
-use pyo3::exceptions::PyValueError;
+//! Bindings em Rust (`pyo3`) do `enderecobr_rs`.
+//!
+//! As docstrings públicas — as mesmas que aparecem em `help()` — ficam nos
+//! comentários de documentação (`///`) junto de cada item. O stub
+//! `enderecobr.pyi` guarda só as assinaturas e tipos, para verificadores
+//! estáticos e IDEs.
+
+mod endereco;
+mod extenso;
+mod padronizador;
+mod segmento;
+mod separador;
+mod texto;
+
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
-#[pyclass]
-struct Padronizador {
-    interno: enderecobr_rs::Padronizador,
+/// Converte as falhas de resolução/download do modelo em erro Python.
+fn erro_de_modelo(erro: String) -> PyErr {
+    PyRuntimeError::new_err(format!("Não foi possível obter o modelo: {erro}"))
 }
 
-#[pymethods]
-impl Padronizador {
-    #[new]
-    fn novo() -> Padronizador {
-        Padronizador {
-            interno: enderecobr_rs::Padronizador::default(),
-        }
-    }
-
-    fn adicionar_substituicoes(&mut self, pares: Vec<Vec<Option<String>>>) {
-        // PS: Aparentemente preciso que seja um Vec de Vec quando não uso
-        // os struct específicos do PyO3.
-
-        // Converte Option<String> em Option<&str>
-        let pares_str: Vec<Vec<Option<&str>>> = pares
-            .iter()
-            .map(|inner| inner.iter().map(|opt| opt.as_deref()).collect())
-            .collect();
-
-        // Converte para um vetor de slices
-        let slices: Vec<&[Option<&str>]> = pares_str.iter().map(Vec::as_slice).collect();
-
-        self.interno.adicionar_pares(&slices);
-    }
-
-    /// Adiciona uma regra simples de substituição.
-    ///
-    /// Toda ocorrência de `regex` será substituída por `substituicao`. É necessário
-    /// chamar [`preparar`][Self::preparar] após adicionar regras manualmente.
-    fn adicionar(&mut self, regex: &str, substituicao: &str) {
-        self.interno.adicionar(regex, substituicao);
-    }
-
-    /// Adiciona uma regra condicional de substituição (com regex de exclusão).
-    ///
-    /// `regex` é substituída por `substituicao` somente se `regex_ignorar` **não**
-    /// corresponder ao texto. É necessário chamar
-    /// [`preparar`][Self::preparar] após adicionar regras manualmente.
-    fn adicionar_com_ignorar(&mut self, regex: &str, substituicao: &str, regex_ignorar: &str) {
-        self.interno
-            .adicionar_com_ignorar(regex, substituicao, regex_ignorar);
-    }
-
-    /// Adiciona regras a partir de três vetores paralelos.
-    ///
-    /// Os vetores devem ter o mesmo comprimento. O terceiro vetor pode conter `None`
-    /// para indicar ausência de condição de exclusão. As regras são preparadas
-    /// automaticamente ao término da execução.
-    fn adicionar_vetores(
-        &mut self,
-        regexes: Vec<String>,
-        substituicoes: Vec<String>,
-        regex_ignorar: Vec<Option<String>>,
-    ) -> PyResult<()> {
-        if regexes.len() != substituicoes.len() || regexes.len() != regex_ignorar.len() {
-            return Err(PyValueError::new_err(
-                "Os três vetores devem ter o mesmo comprimento.",
-            ));
-        }
-
-        let regexes_ref: Vec<&str> = regexes.iter().map(|s| s.as_str()).collect();
-        let substituicoes_ref: Vec<&str> = substituicoes.iter().map(|s| s.as_str()).collect();
-        let ignorar_ref: Vec<Option<&str>> = regex_ignorar.iter().map(|o| o.as_deref()).collect();
-
-        self.interno
-            .adicionar_vetores(&regexes_ref, &substituicoes_ref, &ignorar_ref);
-        Ok(())
-    }
-
-    /// Recompila o conjunto de expressões regulares após adicionar regras manualmente.
-    ///
-    /// Deve ser chamado após [`adicionar`][Self::adicionar] ou
-    /// [`adicionar_com_ignorar`][Self::adicionar_com_ignorar] para que as novas
-    /// regras passem a ser aplicadas.
-    fn preparar(&mut self) {
-        self.interno.preparar();
-    }
-
-    fn padronizar(&self, valor: &str) -> String {
-        self.interno.padronizar(valor)
-    }
-
-    fn obter_substituicoes(&self) -> Vec<(&str, &str, Option<&str>)> {
-        self.interno.obter_pares()
-    }
-
-    /// Retorna as regras como três vetores paralelos: regexes, substituições e
-    /// regexes de exclusão.
-    fn obter_vetores(&self) -> (Vec<&str>, Vec<&str>, Vec<Option<&str>>) {
-        self.interno.obter_vetores()
-    }
+/// Converte a falha de carga do modelo padrão em erro Python.
+fn erro_de_modelo_padrao(erro: String) -> PyErr {
+    PyRuntimeError::new_err(format!("Não foi possível carregar o modelo padrão: {erro}"))
 }
 
-#[pyclass]
-struct IdentificadorPadroes {
-    interno: enderecobr_rs::IdentificadorPadroes,
-}
-
-#[pymethods]
-impl IdentificadorPadroes {
-    #[new]
-    fn novo() -> IdentificadorPadroes {
-        IdentificadorPadroes {
-            interno: enderecobr_rs::IdentificadorPadroes::default(),
-        }
-    }
-
-    /// Adiciona novas expressões regulares ao identificador.
-    fn adicionar(&mut self, regexs: Vec<String>) {
-        self.interno.adicionar(&regexs);
-    }
-
-    /// Verifica se alguma das regexes cadastradas corresponde ao valor.
-    fn identificar(&self, valor: &str) -> bool {
-        self.interno.identificar(valor)
-    }
-}
-
+/// Módulo `enderecobr`: padronização e estruturação de endereços brasileiros.
+///
+/// Implementado em Rust; a docstring de cada item vem do comentário de
+/// documentação correspondente.
 #[pymodule]
 pub mod enderecobr {
-
-    use pyo3::prelude::*;
+    #[pymodule_export]
+    use crate::endereco::Endereco;
 
     #[pymodule_export]
-    use super::Padronizador;
+    use crate::extenso::{
+        numero_por_extenso, padronizar_numero_romano_por_extenso, padronizar_numeros_por_extenso,
+        romano_para_inteiro,
+    };
 
     #[pymodule_export]
-    use super::IdentificadorPadroes;
+    use crate::padronizador::{
+        obter_identificador_dado_faltante, obter_padronizador_bairros,
+        obter_padronizador_complementos, obter_padronizador_logradouros,
+        obter_padronizador_metaphone, obter_padronizador_municipios, obter_padronizador_numeros,
+        obter_padronizador_tipos_logradouros, IdentificadorPadroes, Padronizador,
+    };
 
-    #[pyfunction]
-    fn padronizar_logradouros(valor: &str) -> String {
-        enderecobr_rs::padronizar_logradouros(valor)
-    }
+    #[pymodule_export]
+    use crate::segmento::{EnderecoSegmentado, SegmentoEndereco, TipoSegmento};
 
-    #[pyfunction]
-    fn padronizar_numeros(valor: &str) -> String {
-        enderecobr_rs::padronizar_numeros(valor)
-    }
+    #[pymodule_export]
+    use crate::separador::{
+        estruturar_endereco, obter_caminho_modelo, obter_modelo, segmentar_endereco,
+        segmentar_enderecos, SeparadorEndereco,
+    };
 
-    #[pyfunction]
-    fn padronizar_complementos(valor: &str) -> String {
-        enderecobr_rs::padronizar_complementos(valor)
-    }
+    #[pymodule_export]
+    use crate::texto::{
+        is_dado_faltante, metaphone, normalizar, padronizar_bairros, padronizar_cep,
+        padronizar_cep_leniente, padronizar_cep_numerico, padronizar_complementos,
+        padronizar_estados_para_codigo, padronizar_estados_para_nome,
+        padronizar_estados_para_sigla, padronizar_logradouros, padronizar_municipios,
+        padronizar_numeros, padronizar_numeros_para_int, padronizar_numeros_para_string,
+        padronizar_tipo_logradouro, zerar_dado_faltante,
+    };
 
-    #[pyfunction]
-    fn padronizar_bairros(valor: &str) -> String {
-        enderecobr_rs::padronizar_bairros(valor)
-    }
-    #[pyfunction]
-    fn padronizar_municipios(valor: &str) -> String {
-        enderecobr_rs::padronizar_municipios(valor)
-    }
+    // Constantes do modelo: mesmo nome e valor da crate, para não depender de
+    // string literal espalhada no código de quem usa.
 
-    #[pyfunction]
-    fn padronizar_estados_para_nome(valor: &str) -> &'static str {
-        enderecobr_rs::padronizar_estados_para_nome(valor)
-    }
+    #[pymodule_export]
+    const MODEL_DOWNLOAD_PATH: &str =
+        enderecobr_rs::separador_endereco::modelo::MODEL_DOWNLOAD_PATH;
 
-    #[pyfunction]
-    fn padronizar_estados_para_codigo(valor: &str) -> &'static str {
-        enderecobr_rs::padronizar_estados_para_codigo(valor)
-    }
+    #[pymodule_export]
+    const VERSAO_MODELO: &str = enderecobr_rs::separador_endereco::modelo::VERSAO_MODELO;
 
-    #[pyfunction]
-    fn padronizar_estados_para_sigla(valor: &str) -> &'static str {
-        enderecobr_rs::padronizar_estados_para_sigla(valor)
-    }
+    #[pymodule_export]
+    const NOME_DIRETORIO_CACHE: &str =
+        enderecobr_rs::separador_endereco::modelo::NOME_DIRETORIO_CACHE;
 
-    #[pyfunction]
-    fn padronizar_tipo_logradouro(valor: &str) -> String {
-        enderecobr_rs::padronizar_tipo_logradouro(valor)
-    }
+    #[pymodule_export]
+    const NOME_ARQUIVO_MODELO: &str =
+        enderecobr_rs::separador_endereco::modelo::NOME_ARQUIVO_MODELO;
 
-    #[pyfunction]
-    fn padronizar_cep(valor: &str) -> PyResult<String> {
-        enderecobr_rs::cep::padronizar_cep(valor).map_err(pyo3::exceptions::PyValueError::new_err)
-    }
+    #[pymodule_export]
+    const VAR_AMBIENTE_MODELO: &str =
+        enderecobr_rs::separador_endereco::modelo::VAR_AMBIENTE_MODELO;
 
-    #[pyfunction]
-    fn padronizar_cep_numerico(valor: i32) -> PyResult<String> {
-        enderecobr_rs::cep::padronizar_cep_numerico(valor)
-            .map_err(pyo3::exceptions::PyValueError::new_err)
-    }
+    #[pymodule_export]
+    const VAR_AMBIENTE_SEM_DOWNLOAD: &str =
+        enderecobr_rs::separador_endereco::modelo::VAR_AMBIENTE_SEM_DOWNLOAD;
+}
 
-    #[pyfunction]
-    fn padronizar_cep_leniente(valor: &str) -> String {
-        enderecobr_rs::padronizar_cep_leniente(valor)
-    }
+#[cfg(test)]
+mod testes {
+    use crate::segmento::TipoSegmento;
+    use enderecobr_rs::separador_endereco::TipoSegmento as TipoSegmentoRs;
 
-    #[pyfunction]
-    fn padronizar_numeros_para_int(valor: &str) -> Option<u32> {
-        enderecobr_rs::padronizar_numeros_para_int(valor)
-    }
-
-    #[pyfunction]
-    fn padronizar_numeros_para_string(valor: f64) -> String {
-        enderecobr_rs::padronizar_numeros_para_string(valor)
-    }
-
-    #[pyfunction]
-    fn normalizar(valor: &str) -> String {
-        enderecobr_rs::normalizar(valor).to_string()
-    }
-    #[pyfunction]
-    fn is_dado_faltante(valor: &str) -> bool {
-        enderecobr_rs::is_dado_faltante(valor)
-    }
-
-    #[pyfunction]
-    fn metaphone(valor: &str) -> String {
-        enderecobr_rs::metaphone::metaphone(valor)
-    }
-
-    #[pyfunction]
-    fn padronizar_numeros_por_extenso(valor: &str) -> String {
-        enderecobr_rs::numero_extenso::padronizar_numeros_por_extenso(valor).to_string()
-    }
-
-    #[pyfunction]
-    fn padronizar_numero_romano_por_extenso(valor: &str) -> String {
-        enderecobr_rs::numero_extenso::padronizar_numero_romano_por_extenso(valor).to_string()
-    }
-
-    #[pyfunction]
-    fn numero_por_extenso(valor: i32) -> String {
-        enderecobr_rs::numero_extenso::numero_por_extenso(valor).to_string()
-    }
-
-    #[pyfunction]
-    fn romano_para_inteiro(valor: &str) -> i32 {
-        enderecobr_rs::numero_extenso::romano_para_inteiro(valor)
-    }
-
-    // ========= Padronizadores pré prontos ==========
-
-    #[pyfunction]
-    fn obter_padronizador_logradouros() -> Padronizador {
-        Padronizador {
-            interno: enderecobr_rs::logradouro::criar_padronizador_logradouros(),
-        }
-    }
-
-    #[pyfunction]
-    fn obter_padronizador_numeros() -> Padronizador {
-        Padronizador {
-            interno: enderecobr_rs::numero::criar_padronizador_numeros(),
-        }
-    }
-
-    #[pyfunction]
-    fn obter_padronizador_bairros() -> Padronizador {
-        Padronizador {
-            interno: enderecobr_rs::bairro::criar_padronizador_bairros(),
-        }
-    }
-
-    #[pyfunction]
-    fn obter_padronizador_complementos() -> Padronizador {
-        Padronizador {
-            interno: enderecobr_rs::complemento::criar_padronizador_complemento(),
-        }
-    }
-
-    #[pyfunction]
-    fn obter_padronizador_tipos_logradouros() -> Padronizador {
-        Padronizador {
-            interno: enderecobr_rs::tipo_logradouro::criar_padronizador_tipo_logradouro(),
+    #[test]
+    fn tipo_segmento_espelha_o_rust() {
+        // Mesma quantidade, mesma ordem (a ordem vira o valor inteiro no Python)
+        // e sem duas variantes do Rust caindo na mesma variante do Python.
+        assert_eq!(TipoSegmento::NOMES.len(), TipoSegmentoRs::TODOS.len());
+        for (indice, tipo) in TipoSegmentoRs::TODOS.into_iter().enumerate() {
+            let espelho = TipoSegmento::from(tipo);
+            assert_eq!(
+                espelho as isize, indice as isize,
+                "ordem divergente: {tipo}"
+            );
+            assert_eq!(TipoSegmentoRs::from(espelho), tipo, "ida e volta: {tipo}");
+            // O `name` do Python é o nome da variante, como em `enum.IntEnum`.
+            assert_eq!(
+                TipoSegmento::NOMES[indice],
+                format!("{tipo:?}"),
+                "nome divergente: {tipo}"
+            );
         }
     }
 }

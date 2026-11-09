@@ -50,8 +50,9 @@ doc = [
 
 [tool.pytest.ini_options]
 pythonpath = ["enderecobr"]
-# Testa também docstrings dos arquivos `.pyi`.
-addopts = ["--doctest-glob=*.py", "--doctest-glob=*.pyi"]
+# As docstrings (e seus exemplos) ficam no Rust: `test_docstrings.py` as roda
+# contra o módulo em execução.
+addopts = ["--doctest-glob=*.py"]
 
 [tool.maturin.generate-ci.github]
 pytest = true

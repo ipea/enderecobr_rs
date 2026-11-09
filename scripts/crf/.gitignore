@@ -218,4 +218,10 @@ __marimo__/
 
 ## Projeto
 
-dados/
+data/
+backups/
+*.parquet
+*.sqlite
+*.sqlite-journal
+*.crf
+*.pickle

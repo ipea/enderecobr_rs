@@ -5,8 +5,8 @@ edition = "2021"
 license = "MIT"
 rust-version = '1.81'
 authors = ["Daniel Herszenhut Meirelles Santos <daniel.santos@ipea.gov.br>", "Gabriel Garcia de Almeida <gabriel.almeida@ipea.gov.br", "Rafael Henrique Moraes Pereira <rafael.pereira@ipea.gov.br>"]
-repository = "https://github.com/ipeaGIT/enderecobr_rs"
-homepage = "https://github.com/ipeaGIT/enderecobr_rs"
+repository = "https://github.com/ipea/enderecobr_rs"
+homepage = "https://github.com/ipea/enderecobr_rs"
 documentation = "https://docs.rs/enderecobr_rs"
 categories = ["text-processing", "value-formatting", "science::geo"]
 keywords = ["address", "brazil", "brasil", "regex", "geocoding"]
@@ -20,24 +20,9 @@ members = [
 ]
 
 [[bin]]
-name = "separacao-lote"
-path = "src/bin/separacao-lote.rs"
-required-features = ["experimental", "polars_cli"]
-
-[[bin]]
-name = "bench-separacao"
-path = "src/bin/bench-separacao.rs"
-required-features = ["experimental", "polars_cli"]
-
-[[bin]]
 name = "padronizar"
 path = "src/bin/padronizar.rs"
 required-features = ["cli"]
-
-[[bin]]
-name = "teste-comparativo"
-path = "src/bin/teste-comparativo.rs"
-required-features = ["polars_cli"]
 
 
 [[bin]]
@@ -47,20 +32,22 @@ required-features = ["polars_cli"]
 
 [features] 
 default = []
-experimental = ["crfsuite"]
 cli = ["clap"]
 polars_cli = ["clap", "polars"]
 
 [dependencies]
+aho-corasick = "1.1.4"
 clap = { version = "4.6.7", features = ["derive"], optional = true }
-crfsuite = { version = "0.3.2", optional = true}
+crfsuite = { version = "0.3.2" }
 diacritics = "0.2.2"
+dirs = "7.0.0"
 itertools = "0.15.0"
-# Feature de timezone é temporário até corrigirem a issue abaixo
-# https://github.com/pola-rs/polars/issues/25148
-polars = { version = "0.52.0", features = ["lazy", "parquet", "timezones"], optional = true }
+polars = { version = "0.55.2", features = ["lazy", "parquet"], optional = true }
 regex = "1.13.1"
+reqwest = { version = "0.13.3", features = ["blocking"]}
 rustc-hash = "2.1.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json =  { version = "1.0" }
 unicode-normalization = "0.1.25"
 
 # Perfil de release mais otimizado, porém muito mais lento de compilar.
@@ -73,6 +60,12 @@ strip = true
 lto = "thin"
 # Quanto menor, aumenta o tempo de compilação mas o código fica mais otimizado
 codegen-units = 1
+
+[lints.rust]
+# `cfg(coverage)`/`cfg(coverage_nightly)` são definidos pelo cargo-llvm-cov; sem
+# declaração o compilador os acusa como `unexpected_cfgs`.
+# https://github.com/taiki-e/cargo-llvm-cov?tab=readme-ov-file#exclude-code-from-coverage
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
 
 [lints.clippy]
 # https://rust-trends.com/posts/mastering-clippy-elevating-your-rust-code-quality/
@@ -161,3 +154,6 @@ harness = false
 name = "padronizador_bench"
 harness = false
 
+[[bench]]
+name = "separador_bench"
+harness = false

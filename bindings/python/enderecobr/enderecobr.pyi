@@ -1,1115 +1,204 @@
+# Stub de tipos da extensão compilada em Rust. As docstrings públicas ficam em
+# `src/*.rs` (é de lá que `help()` as lê); aqui ficam só as assinaturas, usadas
+# por verificadores estáticos, IDEs e pelo mkdocstrings.
+
 from collections.abc import Iterable
+from enum import IntEnum
+from pathlib import Path
 
-def normalizar(valor: str) -> str:
-    """
-    Normaliza uma string para processamento posterior, removendo diacríticos e
-    caracteres especiais, convertendo para maiúsculas e reduzindo espaços.
+def normalizar(valor: str) -> str: ...
 
-    Parameters
-    ----------
-    valor : str
-        Texto bruto a ser normalizado.
+def padronizar_logradouros(valor: str) -> str: ...
 
-    Returns
-    -------
-    str
-        Texto normalizado: maiúsculas, sem acentos, com espaços das pontas
-        removidos e espaços internos reduzidos a um único espaço.
+def padronizar_numeros(valor: str) -> str: ...
 
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.normalizar('Olá, mundo')
-    'OLA, MUNDO'
-    >>> enderecobr.normalizar('R. DO AÇAÍ 15º')
-    'R. DO ACAI 15O'
+def padronizar_numeros_para_int(valor: str) -> int | None: ...
 
-    """
-    ...
+def padronizar_numeros_para_string(valor: float) -> str: ...
 
-def padronizar_logradouros(valor: str) -> str:
-    """
-    Padroniza uma string representando logradouros de municípios brasileiros.
+def padronizar_complementos(valor: str) -> str: ...
 
-    Realiza uma série de transformações para normalizar nomes de ruas, avenidas e
-    outros tipos de logradouros segundo convenções comuns em bases de endereços no Brasil.
+def padronizar_bairros(valor: str) -> str: ...
 
-    Parameters
-    ----------
-    valor : str
-        Texto bruto representando um logradouro (ex: 'r. gen.. glicério').
+def padronizar_municipios(valor: str) -> str: ...
 
-    Returns
-    -------
-    str
-        Texto padronizado em caixa alta, sem acentos, com abreviações expandidas
-        e formatação consistente.
+def is_dado_faltante(valor: str) -> bool: ...
 
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_logradouros("r. gen.. glicério")
-    'RUA GENERAL GLICERIO'
+def zerar_dado_faltante(valor: str) -> str: ...
 
-    Notes
-    -----
-    As seguintes operações são aplicadas sequencialmente:
+def padronizar_estados_para_nome(valor: str) -> str: ...
 
-    - Remoção de espaços extras no início, fim e entre palavras;
-    - Conversão para maiúsculas;
-    - Remoção de acentos e conversão de caracteres não-ASCII;
-    - Normalização de pontos em abreviações (ex: 'gen..' → 'GEN');
-    - Inserção de espaços após abreviações com pontos (ex: 'R.JOSE' → 'R. JOSE');
-    - Expansão de abreviações comuns (ex: 'R.' → 'RUA', 'AV.' → 'AVENIDA');
-    - Correção de erros ortográficos frequentes (ex: 'GLICERIO' em vez de 'GLICÉRIO').
+def padronizar_estados_para_codigo(valor: str) -> str: ...
 
-    As expressões regulares são compiladas na primeira chamada, portanto a primeira
-    execução pode ser mais lenta. Chamadas subsequentes reutilizam as regexes compiladas.
-    """
-    ...
+def padronizar_estados_para_sigla(valor: str) -> str: ...
 
-def padronizar_numeros(valor: str) -> str:
-    """
-    Padroniza uma string representando números de logradouros.
+def padronizar_tipo_logradouro(valor: str) -> str: ...
 
-    Normaliza números de endereços, removendo formatações inconsistentes e
-    tratando casos especiais como ausência de número (ex: "SN", "S/N", etc).
+def padronizar_cep(valor: str) -> str: ...
 
-    Parameters
-    ----------
-    valor : str
-        Texto bruto representando o número de um logradouro (ex: '0210', 'S. N. ').
+def padronizar_cep_numerico(valor: int) -> str: ...
 
-    Returns
-    -------
-    str
-        Número padronizado. Números comuns têm zeros à esquerda removidos;
-        valores nulos ou variações de "SN" são convertidos para "S/N".
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_numeros("0210")
-    '210'
-    >>> enderecobr.padronizar_numeros("  S. N.  ")
-    'S/N'
-
-    Notes
-    -----
-    As seguintes operações são aplicadas:
-
-    - Remoção de espaços extras no início, fim e entre caracteres;
-    - Remoção de zeros à esquerda em números;
-    - Detecção e substituição de variações de "sem número" (SN, S N, S./N., etc) por "S/N";
-    - Retorno de string vazia se a entrada for completamente inválida ou nula.
-
-    As expressões regulares são compiladas na primeira chamada, portanto a primeira
-    execução pode ser mais lenta. Chamadas subsequentes reutilizam as regexes compiladas.
-    """
-    ...
-
-def padronizar_numeros_para_int(valor: str) -> int | None:
-    """
-    Padroniza uma string representando números de logradouros para um inteiro.
-
-    Remove zeros à esquerda; variações de SN (S/N, S N etc.) resultam em None.
-    Apenas números simples (sem espaços) são convertidos.
-
-    Parameters
-    ----------
-    valor : str
-        Texto bruto representando o número de um logradouro.
-
-    Returns
-    -------
-    int or None
-        Número convertido, ou None caso a entrada seja inválida, vazia,
-        sem número ou contenha mais de um número.
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_numeros_para_int('0210')
-    210
-    >>> enderecobr.padronizar_numeros_para_int('001')
-    1
-    >>> enderecobr.padronizar_numeros_para_int('1')
-    1
-    >>> enderecobr.padronizar_numeros_para_int('0') is None
-    True
-    >>> enderecobr.padronizar_numeros_para_int('') is None
-    True
-    >>> enderecobr.padronizar_numeros_para_int('S/N') is None
-    True
-    >>> enderecobr.padronizar_numeros_para_int('0180 0181') is None
-    True
-
-    """
-    ...
-
-def padronizar_numeros_para_string(valor: float) -> str:
-    """
-    Converte um valor numérico para a representação textual de número de logradouro.
-
-    Valores menores ou iguais a zero são convertidos para S/N; valores decimais
-    são truncados.
-
-    Parameters
-    ----------
-    valor : int or float
-        Número a ser convertido.
-
-    Returns
-    -------
-    str
-        Representação textual do número, ou S/N para valores não positivos.
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_numeros_para_string(210)
-    '210'
-    >>> enderecobr.padronizar_numeros_para_string(1.1)
-    '1'
-    >>> enderecobr.padronizar_numeros_para_string(0)
-    'S/N'
-    >>> enderecobr.padronizar_numeros_para_string(-11)
-    'S/N'
-
-    """
-    ...
-
-def padronizar_complementos(valor: str) -> str:
-    """
-    Padroniza uma string representando complementos de logradouros.
-
-    Parameters
-    ----------
-    valor : str
-        Texto bruto representando um complemento (ex: 'APTO. 405', 'QD1 LT2 CS3').
-
-    Returns
-    -------
-    str
-        Texto padronizado em caixa alta, sem acentos, com abreviações expandidas
-        e formatação consistente.
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_complementos("QD1 LT2 CS3")
-    'QUADRA 1 LOTE 2 CASA 3'
-    >>> enderecobr.padronizar_complementos("APTO. 405")
-    'APARTAMENTO 405'
-
-    Notes
-    -----
-    As seguintes operações são aplicadas:
-
-    - Remoção de espaços extras no início, fim e entre palavras;
-    - Conversão para maiúsculas;
-    - Remoção de acentos e caracteres não ASCII;
-    - Normalização de pontos em abreviações (ex: 'APTO.' → 'APARTAMENTO');
-    - Expansão de abreviações comuns (ex: 'QD' → 'QUADRA', 'LT' → 'LOTE', 'CS' → 'CASA');
-    - Correção de erros ortográficos ou variações comuns.
-
-    As expressões regulares são compiladas na primeira chamada, portanto a primeira
-    execução pode ser mais lenta. Chamadas subsequentes reutilizam as regexes compiladas.
-    """
-    ...
-
-def padronizar_bairros(valor: str) -> str:
-    """
-    Padroniza uma string representando bairros de municípios brasileiros.
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_bairros("PRQ IND")
-    'PARQUE INDUSTRIAL'
-    >>> enderecobr.padronizar_bairros("NSA SEN DE FATIMA")
-    'NOSSA SENHORA DE FATIMA'
-    >>> enderecobr.padronizar_bairros("ILHA DO GOV")
-    'ILHA DO GOVERNADOR'
-
-    Notes
-    -----
-    Operações realizadas durante a padronização:
-
-    - Remoção de espaços em branco antes, depois e excesso entre palavras;
-    - Conversão para caixa alta;
-    - Remoção de acentos e caracteres não ASCII;
-    - Adição de espaços após abreviações com pontos;
-    - Expansão de abreviações comuns usando expressões regulares;
-    - Correção de pequenos erros ortográficos.
-
-    As expressões regulares são compiladas na primeira chamada, portanto a primeira
-    execução pode ser mais lenta. Chamadas subsequentes reutilizam as regexes compiladas.
-    """
-    ...
-
-def padronizar_municipios(valor: str) -> str:
-    """
-    Padroniza uma string representando municípios brasileiros.
-
-    Parameters
-    ----------
-    valor : str
-        String contendo o nome ou código de um município brasileiro.
-        Pode ser nome (com variações de caixa, acentos, espaçamento),
-        código IBGE (7 ou 8 dígitos, com ou sem zeros à esquerda), ou string vazia.
-
-    Returns
-    -------
-    str
-        Nome canônico do município em caixa alta, sem acentos, com correções
-        ortográficas e atualizações conforme o IBGE 2022. **Valores que não
-        casem com nenhum município conhecido** (nem por grafia exata, nem por
-        aproximação fonética) **retornam string vazia** — trate `""` como
-        "município desconhecido".
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_municipios("3304557")
-    'RIO DE JANEIRO'
-    >>> enderecobr.padronizar_municipios("003304557")
-    'RIO DE JANEIRO'
-    >>> enderecobr.padronizar_municipios("  3304557  ")
-    'RIO DE JANEIRO'
-    >>> enderecobr.padronizar_municipios("RIO DE JANEIRO")
-    'RIO DE JANEIRO'
-    >>> enderecobr.padronizar_municipios("rio de janeiro")
-    'RIO DE JANEIRO'
-    >>> enderecobr.padronizar_municipios("SÃO PAULO")
-    'SAO PAULO'
-    >>> enderecobr.padronizar_municipios("PARATI")
-    'PARATY'
-    >>> enderecobr.padronizar_municipios("AUGUSTO SEVERO")
-    'CAMPO GRANDE'
-    >>> enderecobr.padronizar_municipios("SAO VALERIO DA NATIVIDADE")
-    'SAO VALERIO'
-    >>> enderecobr.padronizar_municipios("LAGOA DANTA")
-    "LAGOA D'ANTA"
-    >>> enderecobr.padronizar_municipios("")  # entrada vazia
-    ''
-    >>> enderecobr.padronizar_municipios("BANANA")  # irreconhecível
-    ''
-    >>> enderecobr.padronizar_municipios("!!!!")  # sem conteúdo útil
-    ''
-    >>> enderecobr.padronizar_municipios("PARATI!!!!")  # ruído descartado antes da busca
-    'PARATY'
-
-    Notes
-    -----
-    As seguintes operações são realizadas:
-
-    - Remoção de espaços em branco no início/fim e excesso entre palavras.
-    - Conversão para caixa alta.
-    - Remoção de zeros à esquerda em códigos numéricos.
-    - Busca do nome completo do município a partir do código IBGE.
-    - Remoção de acentos e caracteres não ASCII.
-    - Correção de erros ortográficos comuns e nomes desatualizados,
-      com base na lista oficial de municípios do IBGE (2022).
-
-    As expressões regulares são compiladas na primeira chamada, portanto a primeira
-    execução pode ser mais lenta. Chamadas subsequentes reutilizam as regexes compiladas.
-    """
-    ...
-
-def is_dado_faltante(valor: str) -> bool:
-    """
-    Identifica se uma string representa um dado faltante.
-
-    Parameters
-    ----------
-    valor : str
-        Texto a ser verificado.
-
-    Returns
-    -------
-    bool
-        True se o texto corresponder a um padrão de dado faltante
-        (ex: SI, NS, NI, NA), False caso contrário.
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.is_dado_faltante('SI')
-    True
-    >>> enderecobr.is_dado_faltante('SEM INFORMAÇÃO')
-    True
-    >>> enderecobr.is_dado_faltante('NA')
-    True
-    >>> enderecobr.is_dado_faltante('N CONSTA')
-    True
-    >>> enderecobr.is_dado_faltante('RUA B')
-    False
-
-    """
-    ...
-
-def padronizar_estados_para_nome(valor: str) -> str:
-    """
-    Padroniza uma string representando estados brasileiros para seu nome por extenso,
-    porém sem diacríticos.
-
-    Parameters
-    ----------
-    valor : str
-        String contendo o código numérico (ex: '21', '021'), sigla (ex: 'MA', 'ma') ou nome
-        de um estado brasileiro. Pode conter espaços extras ou formatação irregular.
-
-    Returns
-    -------
-    str
-        Nome por extenso do estado em caixa alta e sem diacríticos (ex: 'MARANHAO').
-        Retorna string vazia se o valor for inválido, vazio ou não corresponder a um estado.
-
-    Notes
-    -----
-    Operações realizadas durante a padronização:
-
-    - Remoção de espaços em branco no início e fim, e espaços extras internos;
-    - Conversão para caixa alta;
-    - Remoção de zeros à esquerda (em códigos numéricos);
-    - Mapeamento partir do código numérico ou da abreviação da UF, do nome completo de cada estado.
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_estados_para_nome("21")
-    'MARANHAO'
-    >>> enderecobr.padronizar_estados_para_nome("021")
-    'MARANHAO'
-    >>> enderecobr.padronizar_estados_para_nome("MA")
-    'MARANHAO'
-    >>> enderecobr.padronizar_estados_para_nome(" 21")
-    'MARANHAO'
-    >>> enderecobr.padronizar_estados_para_nome(" MA ")
-    'MARANHAO'
-    >>> enderecobr.padronizar_estados_para_nome("ma")
-    'MARANHAO'
-    >>> enderecobr.padronizar_estados_para_nome("")
-    ''
-    >>> enderecobr.padronizar_estados_para_nome("me")
-    ''
-    >>> enderecobr.padronizar_estados_para_nome("maranhao")
-    'MARANHAO'
-
-    """
-    ...
-
-def padronizar_estados_para_codigo(valor: str) -> str:
-    """
-    Padroniza uma string representando estados brasileiros para o código do IBGE.
-
-    Parameters
-    ----------
-    valor : str
-        Código numérico (ex: 21, 021), sigla (ex: MA, ma) ou nome de
-        um estado brasileiro.
-
-    Returns
-    -------
-    str
-        Código do IBGE do estado (ex: 21), em caixa alta. Retorna string vazia
-        se o valor for inválido, vazio ou não corresponder a um estado.
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_estados_para_codigo('21')
-    '21'
-    >>> enderecobr.padronizar_estados_para_codigo('021')
-    '21'
-    >>> enderecobr.padronizar_estados_para_codigo('MA')
-    '21'
-    >>> enderecobr.padronizar_estados_para_codigo('')
-    ''
-    >>> enderecobr.padronizar_estados_para_codigo('me')
-    ''
-    >>> enderecobr.padronizar_estados_para_codigo('maranhao')
-    '21'
-
-    """
-    ...
-
-def padronizar_estados_para_sigla(valor: str) -> str:
-    """
-    Padroniza uma string representando estados brasileiros para sua sigla de duas letras.
-
-    Parameters
-    ----------
-    valor : str
-        Código numérico (ex: 21, 021), sigla (ex: MA, ma) ou nome de
-        um estado brasileiro.
-
-    Returns
-    -------
-    str
-        Sigla da UF em caixa alta (ex: MA). Retorna string vazia se o valor for
-        inválido, vazio ou não corresponder a um estado.
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_estados_para_sigla('21')
-    'MA'
-    >>> enderecobr.padronizar_estados_para_sigla('021')
-    'MA'
-    >>> enderecobr.padronizar_estados_para_sigla('MA')
-    'MA'
-    >>> enderecobr.padronizar_estados_para_sigla('')
-    ''
-    >>> enderecobr.padronizar_estados_para_sigla('me')
-    ''
-    >>> enderecobr.padronizar_estados_para_sigla('maranhao')
-    'MA'
-
-    """
-    ...
-
-def padronizar_tipo_logradouro(valor: str) -> str:
-    """
-    Padroniza uma string representando complementos de logradouros.
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_tipo_logradouro("R")
-    'RUA'
-    >>> enderecobr.padronizar_tipo_logradouro("AVE")
-    'AVENIDA'
-    >>> enderecobr.padronizar_tipo_logradouro("QDRA")
-    'QUADRA'
-
-    Notes
-    -----
-    Operações realizadas durante a padronização:
-
-    - Remoção de espaços em branco antes e depois das strings e remoção de espaços em excesso entre palavras.
-    - Conversão de caracteres para caixa alta.
-    - Remoção de acentos e caracteres não ASCII.
-    - Adição de espaços após abreviações sinalizadas por pontos.
-    - Expansão de abreviações frequentemente utilizadas através de expressões regulares.
-    - Correção de pequenos erros ortográficos.
-
-    A primeira chamada pode ser mais lenta devido à compilação inicial das expressões regulares.
-    """
-
-def padronizar_cep(valor: str) -> str:
-    """
-    Padroniza CEPs em formato textual para uma string formatada.
-
-    Completa com zeros à esquerda quando necessário e retorna erro se o valor
-    contiver caracteres inválidos ou exceder o tamanho permitido de CEP.
-
-    Parameters
-    ----------
-    valor : str
-        CEP em formato textual (ex: 12345-6, a123b45 6 sem os inválidos).
-
-    Returns
-    -------
-    str
-        CEP padronizado no formato XXXXX-XXX.
-
-    Raises
-    ------
-    ValueError
-        Se o CEP tiver caracteres inválidos ou muitos dígitos.
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_cep('12345-6')
-    '00123-456'
-
-    """
-    ...
-
-def padronizar_cep_numerico(valor: int) -> str:
-    """
-    Padroniza um CEP numérico para uma string formatada.
-
-    Completa com zeros à esquerda quando necessário e retorna erro se o valor
-    exceder o tamanho permitido de CEP.
-
-    Parameters
-    ----------
-    valor : int
-        CEP em formato numérico (ex: 123456).
-
-    Returns
-    -------
-    str
-        CEP padronizado no formato XXXXX-XXX.
-
-    Raises
-    ------
-    ValueError
-        Se o CEP tiver muitos dígitos.
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_cep_numerico(123456)
-    '00123-456'
-
-    """
-    ...
-
-def padronizar_cep_leniente(valor: str) -> str:
-    """
-    Padroniza CEPs em formato textual para uma string formatada, tentando corrigir possíveis erros.
-
-    Esta função ignora quaisquer caracteres não numéricos, além de remover números
-    extras e completar com zeros à esquerda quando necessário.
-
-    Parameters
-    ----------
-    valor : str
-        CEP em formato textual, que pode conter caracteres não numéricos e formatação irregular.
-
-    Returns
-    -------
-    str
-        CEP padronizado no formato XXXXX-XXX (com 8 dígitos, separados por hífen, completado com zeros à esquerda se necessário).
-
-    Examples
-    --------
-    >>> import enderecobr
-    >>> enderecobr.padronizar_cep_leniente("a123b45  6")
-    '00123-456'
-
-    Notes
-    -----
-    - São extraídos apenas os dígitos numéricos da entrada.
-    - Se mais de 8 dígitos forem fornecidos, apenas os 8 primeiros são considerados.
-    - Se menos de 8 dígitos forem fornecidos, zeros são adicionados à esquerda.
-    """
-    ...
+def padronizar_cep_leniente(valor: str) -> str: ...
 
 class Padronizador:
-    """
-    Estrutura para padronização condicional de textos de endereços usando expressões regulares.
 
-    Permite definir regras de substituição com condições de exclusão (``regex_ignorar``).
-    Usa um conjunto de regex compilado para acelerar a detecção de padrões.
+    def __init__(self) -> None: ...
 
-    Use `$1`, `$2`... para referenciar um grupo de captura na string de substituição.
+    def adicionar_substituicoes(self, pares: Iterable[Iterable[None | str]]) -> None: ...
 
-    Por usar o motor de expressões regulares do Rust, esta classe **NÃO** aceita o uso de:
+    def padronizar(self, valor: str) -> str: ...
 
-    - look-arounds -> ex: `^RUA(?!\\.)` (começa com "RUA", mas não deve ter um ponto após);
-    - backreferences -> ex: `(\\w+) \\1` (duas palavras iguais repetidas após um espaço);
+    def obter_substituicoes(self) -> list[tuple[str, str, None | str]]: ...
 
-
-    Examples
-    --------
-    >>> from enderecobr import Padronizador
-    >>> pad = Padronizador()
-    >>> pad.adicionar_substituicoes([
-    ...     ["AV ", "AVENIDA "],
-    ...     ["^R ", "RUA ", "R APT"],
-    ... ])
-    >>> pad.padronizar("AV AZUL")
-    'AVENIDA AZUL'
-    >>> pad.padronizar("R APT AMARELA")
-    'R APT AMARELA'
-
-    """
-
-    def __init__(self) -> None:
-        """
-        Inicializa um novo padronizador com nenhuma regra de substituição.
-        """
-
-    def adicionar_substituicoes(self, pares: Iterable[Iterable[None | str]]) -> None:
-        """
-        Adiciona múltiplas regras de substituição a partir de uma lista de listas.
-
-        Cada sublista representa uma regra no formato:
-        [regex, substituição, regex_ignorar] (valores None são ignorados).
-
-        Regras:
-
-        - 1 item: equivalente a [regex, '']
-        - 2 itens: equivalente a [regex, substituição]
-        - 3 ou mais itens: equivalente a [regex, substituição, regex_ignorar]
-
-        Parameters
-        ----------
-        pares : list of list of (str or None)
-            Lista de regras de substituição. Cada regra é uma lista com até três elementos.
-
-        Examples
-        --------
-        >>> pad = Padronizador()
-        >>> pad.adicionar_substituicoes([
-        ...     ["R ", "RUA ", "APT R "],
-        ...     ["AV ", "AVENIDA ", None],
-        ...     ["NO ", "Nº"]
-        ... ])
-
-        """
-        ...
-
-    def padronizar(self, valor: str) -> str:
-        """
-        Aplica todas as regras de substituição ao texto, com normalização prévia.
-
-        O texto é convertido para maiúsculas, acentos são removidos, e espaços
-        extras são reduzidos. As regras são aplicadas em ordem, com condição de
-        exclusão verificada antes de cada substituição.
-
-        Parameters
-        ----------
-        valor : str
-            Texto de entrada a ser padronizado.
-
-        Returns
-        -------
-        str
-            Texto padronizado.
-
-        Examples
-        --------
-        >>> pad = Padronizador()
-        >>> pad.adicionar_substituicoes([[r"\bR\b", "RUA"]])
-        >>> pad.padronizar("  r amarela ")
-        'RUA AMARELA'
-
-        """
-        ...
-
-    def obter_substituicoes(self) -> list[tuple[str, str, None | str]]:
-        """
-        Retorna as regras de substituição atuais.
-
-        Returns
-        -------
-        list of tuple of (str, str, str or None)
-            Lista de triplas: (regex, substituição, regex_ignorar).
-
-        Examples
-        --------
-        >>> pad = Padronizador()
-        >>> pad.adicionar_substituicoes([["R ", "RUA "]])
-        >>> pad.obter_substituicoes()
-        [('R ', 'RUA ', None)]
-
-        """
-        ...
-
-    def adicionar(self, regex: str, substituicao: str) -> None:
-        r"""
-        Adiciona uma regra simples de substituição.
-
-        Toda ocorrência de ``regex`` será substituída por ``substituicao``.
-        É necessário chamar ``Padronizador.preparar`` após adicionar regras
-        manualmente para que passem a valer.
-
-        Parameters
-        ----------
-        regex : str
-            Expressão regular a ser substituída.
-        substituicao : str
-            Texto de substituição (use ``$1``, ``$2``... para grupos capturados).
-
-        Examples
-        --------
-        >>> pad = Padronizador()
-        >>> pad.adicionar(r'R\.', 'RUA')
-        >>> pad.preparar()
-        >>> pad.padronizar('R. AZUL')
-        'RUA AZUL'
-
-        """
-        ...
+    def adicionar(self, regex: str, substituicao: str) -> None: ...
 
     def adicionar_com_ignorar(
         self, regex: str, substituicao: str, regex_ignorar: str
-    ) -> None:
-        """
-        Adiciona uma regra condicional de substituição (com regex de exclusão).
-
-        ``regex`` é substituída por ``substituicao`` somente se ``regex_ignorar``
-        não corresponder ao texto. É necessário chamar ``Padronizador.preparar``
-        após adicionar regras manualmente.
-
-        Parameters
-        ----------
-        regex : str
-            Expressão regular a ser substituída.
-        substituicao : str
-            Texto de substituição.
-        regex_ignorar : str
-            Expressão regular de exclusão.
-
-        Examples
-        --------
-        >>> pad = Padronizador()
-        >>> pad.adicionar_com_ignorar(r'^R ', 'RUA ', r'R APT')
-        >>> pad.preparar()
-        >>> pad.padronizar('R AMARELA')
-        'RUA AMARELA'
-        >>> pad.padronizar('R APT AMARELA')
-        'R APT AMARELA'
-
-        """
-        ...
+    ) -> None: ...
 
     def adicionar_vetores(
         self,
         regexes: Iterable[str],
         substituicoes: Iterable[str],
         regex_ignorar: Iterable[None | str],
-    ) -> None:
-        """
-        Adiciona regras a partir de três vetores paralelos.
+    ) -> None: ...
 
-        Os vetores devem ter o mesmo comprimento. O terceiro vetor pode conter
-        None para indicar ausência de condição de exclusão. As regras são
-        preparadas automaticamente ao término da execução.
+    def preparar(self) -> None: ...
 
-        Parameters
-        ----------
-        regexes : iterable of str
-            Expressões regulares a serem substituídas.
-        substituicoes : iterable of str
-            Textos de substituição correspondentes.
-        regex_ignorar : iterable of (str or None)
-            Expressões de exclusão correspondentes (ou None).
-
-        Examples
-        --------
-        >>> pad = Padronizador()
-        >>> pad.adicionar_vetores(['R ', 'AV '], ['RUA ', 'AVENIDA '], [None, None])
-        >>> pad.padronizar('R AZUL')
-        'RUA AZUL'
-
-        """
-        ...
-
-    def preparar(self) -> None:
-        r"""
-        Recompila o conjunto de expressões regulares após adicionar regras manualmente.
-
-        Deve ser chamado após ``Padronizador.adicionar`` ou
-        ``Padronizador.adicionar_com_ignorar`` para que as novas regras
-        passem a ser aplicadas.
-
-        Examples
-        --------
-        >>> pad = Padronizador()
-        >>> pad.adicionar(r'R\.', 'RUA')
-        >>> pad.preparar()
-
-        """
-        ...
-
-    def obter_vetores(self) -> tuple[list[str], list[str], list[None | str]]:
-        """
-        Retorna as regras como três vetores paralelos.
-
-        Returns
-        -------
-        tuple of (list of str, list of str, list of (str or None))
-            Vetores ``(regex, substituicao, ignorar)``.
-
-        Examples
-        --------
-        >>> pad = Padronizador()
-        >>> pad.adicionar_substituicoes([['R ', 'RUA ']])
-        >>> pad.obter_vetores()
-        (['R '], ['RUA '], [None])
-
-        """
-        ...
+    def obter_vetores(self) -> tuple[list[str], list[str], list[None | str]]: ...
 
 class IdentificadorPadroes:
-    """
-    Wrapper fino sobre um conjunto de expressões regulares compiladas para
-    identificar rapidamente padrões em textos.
 
-    Examples
-    --------
-    >>> from enderecobr import IdentificadorPadroes
-    >>> idp = IdentificadorPadroes()
-    >>> idp.adicionar(['RUA', 'AVENIDA'])
-    >>> idp.identificar('RUA AZUL')
-    True
-    >>> idp.identificar('TRAVESSA')
-    False
+    def __init__(self) -> None: ...
 
-    """
+    def adicionar(self, regexs: Iterable[str]) -> None: ...
 
-    def __init__(self) -> None:
-        """
-        Inicializa um novo identificador de padrões, sem nenhuma regex cadastrada.
-        """
+    def identificar(self, valor: str) -> bool: ...
 
-    def adicionar(self, regexs: Iterable[str]) -> None:
-        """
-        Adiciona novas expressões regulares ao identificador.
+def obter_padronizador_logradouros() -> Padronizador: ...
 
-        Parameters
-        ----------
-        regexs : iterable of str
-            Lista de padrões regex a serem compilados e adicionados ao conjunto.
+def obter_padronizador_numeros() -> Padronizador: ...
 
-        Examples
-        --------
-        >>> idp = IdentificadorPadroes()
-        >>> idp.adicionar(['RUA', 'AV'])
+def obter_padronizador_bairros() -> Padronizador: ...
 
-        """
-        ...
+def obter_padronizador_complementos() -> Padronizador: ...
 
-    def identificar(self, valor: str) -> bool:
-        """
-        Verifica se alguma das regexes cadastradas corresponde ao valor.
+def obter_padronizador_tipos_logradouros() -> Padronizador: ...
 
-        Parameters
-        ----------
-        valor : str
-            Texto a ser verificado.
+def obter_padronizador_municipios() -> Padronizador: ...
 
-        Returns
-        -------
-        bool
-            True se alguma regex corresponder, False caso contrário.
+def obter_padronizador_metaphone() -> Padronizador: ...
 
-        Examples
-        --------
-        >>> idp = IdentificadorPadroes()
-        >>> idp.adicionar(['RUA'])
-        >>> idp.identificar('RUA AZUL')
-        True
-        >>> idp.identificar('AVENIDA')
-        False
+def obter_identificador_dado_faltante() -> IdentificadorPadroes: ...
 
-        """
-        ...
+def metaphone(valor: str) -> str: ...
 
-def obter_padronizador_logradouros() -> Padronizador:
-    """
-    Obtém o padronizador utilizado internamente pela função `padronizar_logradouros`.
-    Útil para adicionar padrões de substituição não incluídos originalmente.
-    """
-    ...
+def padronizar_numeros_por_extenso(valor: str) -> str: ...
 
-def obter_padronizador_numeros() -> Padronizador:
-    """
-    Obtém o padronizador utilizado internamente pela função `padronizar_numeros`.
-    Útil para adicionar padrões de substituição não incluídos originalmente.
-    """
-    ...
+def padronizar_numero_romano_por_extenso(valor: str) -> str: ...
 
-def obter_padronizador_bairros() -> Padronizador:
-    """
-    Obtém o padronizador utilizado internamente pela função `padronizar_bairros`.
-    Útil para adicionar padrões de substituição não incluídos originalmente.
-    """
-    ...
+def numero_por_extenso(n: int) -> str: ...
 
-def obter_padronizador_complementos() -> Padronizador:
-    """
-    Obtém o padronizador utilizado internamente pela função `padronizar_complementos`.
-    Útil para adicionar padrões de substituição não incluídos originalmente.
-    """
-    ...
+def romano_para_inteiro(valor: str) -> int: ...
 
-def obter_padronizador_tipos_logradouros() -> Padronizador:
-    """
-    Obtém o padronizador utilizado internamente pela função `padronizar_tipo_logradouro`.
-    Útil para adicionar padrões de substituição não incluídos originalmente.
-    """
-    ...
+class TipoSegmento(IntEnum):
 
-def metaphone(valor: str) -> str:
-    """
-    Gera um código fonético (Metaphone-BR adaptado) para nomes em português.
+    Logradouro: int
+    Numero: int
+    Complemento: int
+    Empreendimento: int
+    Parcela: int
+    QuilometragemVia: int
+    Referencia: int
+    PontoReferencia: int
+    Denominacao: int
+    Localidade: int
+    NucleoRural: int
+    RecursoNatural: int
+    Cep: int
+    Municipio: int
+    Uf: int
+    Cadastro: int
+    Ruido: int
+    Outro: int
 
-    Aplica transformações fonéticas a um nome visando representar sua pronúncia
-    aproximada em português brasileiro. Útil para agrupar nomes com sonoridade
-    similar, mesmo com grafias diferentes.
+    @staticmethod
+    def todos() -> list[TipoSegmento]: ...
 
-    Parameters
-    ----------
-    valor : str
-        Nome ou texto a ser convertido em código fonético. Pode conter acentos,
-        caracteres especiais, espaços e letras minúsculas.
+class SegmentoEndereco:
 
-    Returns
-    -------
-    str
-        Código fonético em maiúsculas, com transformações aplicadas segundo regras
-        adaptadas do Metaphone para o português brasileiro.
+    def __init__(self, valor: str, tipo: TipoSegmento) -> None: ...
 
-    Notes
-    -----
-    O processo inclui:
+    valor: str
+    tipo: TipoSegmento
 
-        - Remoção de acentos, números e conversão para maiúsculas;
-        - Eliminação de letras silenciosas (ex: 'H' inicial);
-        - Simplificação de dígrafos (ex: 'LH' → 'L', 'CH' → 'X');
-        - Agrupamento de consoantes com sonoridade similar (ex: C/K/S, G/J);
-        - Tratamento de sons nasais e vogais duplicadas;
-        - Compactação de espaços e letras repetidas.
+class EnderecoSegmentado:
 
-    Esta é uma adaptação que não segue rigorosamente nenhum algoritmo Metaphone
-    publicado, mas foi inspirada neles, considerando o contexto do português brasileiro.
+    segmentos: list[SegmentoEndereco]
 
-    Examples
-    --------
-    >>> enderecobr.metaphone("João Silva")
-    'JOAO SILVA'
-    >>> enderecobr.metaphone("Marya")
-    'MARIA'
-    >>> enderecobr.metaphone("Helena")
-    'ELENA'
-    >>> enderecobr.metaphone("Philippe")
-    'FILIPE'
-    >>> enderecobr.metaphone("Chavier")
-    'XAVIER'
-    >>> enderecobr.metaphone("Maçã")
-    'MASA'
+    def como_json(self) -> str: ...
 
-    """
-    ...
+    def como_endereco(self, padronizar: bool = True) -> Endereco: ...
 
-def padronizar_numeros_por_extenso(valor: str) -> str:
-    """
-    Converte sequências de dígitos em uma string para seus equivalentes por extenso em português.
+class Endereco:
 
-    A função percorre a string de entrada e, ao encontrar números inteiros (em formato ASCII),
-    os substitui pelo nome completo do número (ex: "2" → "dois"), utilizando a função `numero_por_extenso`.
+    logradouro: str | None
+    numero: str | None
+    complemento: str | None
+    localidade: str | None
+    cep: str | None
 
-    Parameters
-    ----------
-    valor : str
-        String de entrada que pode conter dígitos a serem convertidos.
+    def __init__(
+        self,
+        logradouro: str | None = None,
+        numero: str | None = None,
+        complemento: str | None = None,
+        localidade: str | None = None,
+        cep: str | None = None,
+    ) -> None: ...
 
-    Returns
-    -------
-    str
-        Nova string com dígitos convertidos por extenso. Retorna a string original se não houver dígitos.
+    def formatar(self) -> str: ...
 
-    Notes
-    -----
-    - Números muito grandes ou inválidos (ex: overflow no parse para `i32`) são deixados inalterados.
-    - Não trata números negativos ou decimais.
-    - Se a string de entrada não contém nenhum dígito ASCII, retorna a string original.
+    def padronizar(self) -> None: ...
 
-    Examples
-    --------
-    >>> enderecobr.padronizar_numeros_por_extenso("RUA 2")
-    'RUA DOIS'
-    >>> enderecobr.padronizar_numeros_por_extenso("RUA -2")
-    'RUA -DOIS'
-    >>> enderecobr.padronizar_numeros_por_extenso("RUA -2.2")
-    'RUA -DOIS.DOIS'
-    >>> enderecobr.padronizar_numeros_por_extenso("Sem números")
-    'Sem números'
+    def endereco_padronizado(self) -> Endereco: ...
 
-    """
-    ...
+    def como_json(self) -> str: ...
 
-def padronizar_numero_romano_por_extenso(valor: str) -> str:
-    """
-    Substitui números romanos em um texto por suas representações por extenso (em palavras).
-    Apenas sequências que formam números romanos válidos (1–3999) são convertidas.
+class SeparadorEndereco:
 
-    Parameters
-    ----------
-    valor : str
-        Texto contendo números romanos a serem convertidos.
+    def __init__(self) -> None: ...
 
-    Returns
-    -------
-    str
-        Texto com números romanos substituídos por suas formas por extenso (maiúsculas).
-        Retorna o texto original se nenhuma substituição for necessária.
+    @staticmethod
+    def carregar(caminho: str | Path) -> SeparadorEndereco: ...
 
-    Examples
-    --------
-    >>> enderecobr.padronizar_numero_romano_por_extenso("Capítulo IX")
-    'Capítulo NOVE'
+    def carregar_modelo(self, caminho: str | Path) -> None: ...
 
-    >>> enderecobr.padronizar_numero_romano_por_extenso("Séculos XV e XX")
-    'Séculos QUINZE e VINTE'
+    def segmentar(self, texto: str) -> EnderecoSegmentado: ...
 
-    >>> enderecobr.padronizar_numero_romano_por_extenso("Rei João VI e Papa Bento XVI")
-    'Rei João SEIS e Papa Bento DEZESSEIS'
+    def segmentar_enderecos(self, textos: Iterable[str]) -> list[EnderecoSegmentado]: ...
 
-    """
-    ...
+def obter_caminho_modelo(path_modelo: str | Path | None = None) -> Path: ...
 
-def numero_por_extenso(n: int) -> str:
-    """
-    Converte um número inteiro para sua representação por extenso em português.
+def obter_modelo(path_modelo: str | Path | None = None) -> Path: ...
 
-    Retorna uma string com o número por extenso em letras maiúsculas.
+def segmentar_endereco(endereco: str) -> EnderecoSegmentado: ...
 
-    Parameters
-    ----------
-    n : int
-        Número inteiro a ser convertido.
+def segmentar_enderecos(enderecos: Iterable[str]) -> list[EnderecoSegmentado]: ...
 
-    Returns
-    -------
-    str
-        Representação por extenso do número em português.
+def estruturar_endereco(endereco: str, padronizar: bool = True) -> Endereco: ...
 
-    Examples
-    --------
-    >>> enderecobr.numero_por_extenso(0)
-    'ZERO'
-    >>> enderecobr.numero_por_extenso(42)
-    'QUARENTA E DOIS'
-    >>> enderecobr.numero_por_extenso(-1500)
-    'MENOS MIL E QUINHENTOS'
-    >>> enderecobr.numero_por_extenso(2_001_000)
-    'DOIS MILHOES E MIL'
+# Constantes do modelo padrão. As descrições ficam em `__init__.py`, que é onde
+# elas conseguem chegar ao mkdocstrings.
 
-    """
-    ...
+MODEL_DOWNLOAD_PATH: str
 
-def romano_para_inteiro(valor: str) -> int:
-    """
-    Converte um número romano em sua representação por extenso (número inteiro).
+NOME_ARQUIVO_MODELO: str
 
-    Aceita entradas em maiúsculas ou minúsculas. A conversão segue a regra padrão de números romanos,
-    onde símbolos menores à esquerda de maiores são subtraídos. Suporta valores de 1 a 3999.
+NOME_DIRETORIO_CACHE: str
 
-    Parameters
-    ----------
-    valor : str
-        String contendo a representação de um número romano (ex: "IX", "MCMXC").
+VERSAO_MODELO: str
 
-    Returns
-    -------
-    int
-        Valor inteiro correspondente ao número romano. Retorna resultados inesperados se a string
-        contiver caracteres inválidos (não tratados como erro).
+VAR_AMBIENTE_MODELO: str
 
-    Examples
-    --------
-    >>> enderecobr.romano_para_inteiro("IX")
-    9
-    >>> enderecobr.romano_para_inteiro("xlII")
-    42
-    >>> enderecobr.romano_para_inteiro("MCMXC")
-    1990
-    >>> enderecobr.romano_para_inteiro("mmmcmxcix")
-    3999
-
-    Notes
-    -----
-    - Caracteres inválidos são tratados como 0 e podem gerar resultados inesperados.
-    - A função não valida a correção gramatical da sequência romana (ex: "IIII" retorna 4).
-    """
-    ...
+VAR_AMBIENTE_SEM_DOWNLOAD: str

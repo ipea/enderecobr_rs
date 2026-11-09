@@ -58,8 +58,8 @@ mod tests {
         assert_eq!(zerar_dado_faltante("NAO POSSUI"), "");
         assert_eq!(zerar_dado_faltante("RUA A"), "RUA A");
 
-        assert_eq!(is_dado_faltante("NAO POSSUI"), true);
-        assert_eq!(is_dado_faltante("RUA A"), false);
-        assert_eq!(is_dado_faltante("VL SILVANIA"), false);
+        assert!(is_dado_faltante("NAO POSSUI"));
+        assert!(!is_dado_faltante("RUA A"));
+        assert!(!is_dado_faltante("VL SILVANIA"));
     }
 }
