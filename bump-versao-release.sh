@@ -2,18 +2,54 @@
 set -euo pipefail
 
 # Checagem se o argumento existe
-if [[ $# -ne 1 ]]; then
-  echo "Uso: $0 <versão>" >&2
+DRY_RUN=0
+VERSION=""
+
+for arg in "$@"; do
+  case "$arg" in
+    -n | --dry-run) DRY_RUN=1 ;;
+    -h | --help)
+      echo "Uso: $0 [-n|--dry-run] <versão>" >&2
+      exit 0
+      ;;
+    -*)
+      echo "Erro: opção desconhecida: $arg" >&2
+      exit 1
+      ;;
+    *)
+      if [[ -n "$VERSION" ]]; then
+        echo "Erro: argumento demais: $arg" >&2
+        exit 1
+      fi
+      VERSION="$arg"
+      ;;
+  esac
+done
+
+if [[ -z "$VERSION" ]]; then
+  echo "Uso: $0 [-n|--dry-run] <versão>" >&2
   exit 1
 fi
-
-VERSION="$1"
 
 # Verificação do formato do argumento como versionamento semântico
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "Erro: versão inválida: $VERSION" >&2
   echo "Esperado: MAJOR.MINOR.PATCH (ex.: 0.4.3)" >&2
   exit 1
+fi
+
+if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+  echo "Erro: tag v$VERSION já existe. Remova com git tag -d v$VERSION" >&2
+  exit 1
+fi
+
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  echo "[dry-run] versões atuais:"
+  grep -H -m1 -E '^version = ' Cargo.toml bindings/python/pyproject.toml bindings/python/Cargo.toml | sed 's/^/  /'
+  echo "[dry-run] passariam a: $VERSION"
+  echo "[dry-run] rodaria: cargo check (x2), uv sync, git commit, git tag v$VERSION"
+  echo "[dry-run] nada foi alterado"
+  exit 0
 fi
 
 # Substituições inplace das versões nos arquivos chave
@@ -32,7 +68,6 @@ git add Cargo.toml Cargo.lock bindings/python/pyproject.toml bindings/python/Car
 git commit -m "chore: release v$VERSION"
 
 # Cria a tag para a release
-# PS: Esse comando dá erro quando a tag já existe. Remova ela com `git tag -d v0.x.x`
 git tag "v$VERSION"
 
 cat <<EOF
