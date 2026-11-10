@@ -121,12 +121,15 @@ class ExtratorFeature:
         """
         token = normalize(token).upper().strip()
 
-        # `tam` usa o comprimento sem zeros à esquerda: "000123" e "123" caem
-        # no mesmo bucket. O Rust abandonou a feature `digit_len`.
-        sem_zeros = token.lstrip("0") if token.isdigit() else token
-        tam_palavra = min(len(sem_zeros), 10)
+        # `tam` preserva o zero à esquerda ("01000" -> 5): sem isso o CEP perde
+        # o sinal de 5 dígitos e o hífen seguinte não é reconhecido. O
+        # comprimento sem zeros, que o cadastro usa no número zero-padded, vai
+        # em `tam_num`, emitida pelo Rust também.
+        tam_palavra = min(len(token), 10)
 
         feats: list[str] = [token, f"tam:{tam_palavra}"]
+        if token.isdigit():
+            feats.append(f"tam_num:{min(len(token.lstrip('0')), 10)}")
 
         if token in MARCADORES_CONHECIDOS_DF:
             feats.append("marcador_df")

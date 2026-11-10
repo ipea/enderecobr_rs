@@ -107,7 +107,7 @@ fn campos_preferidos(
     match tipo {
         Logradouro => (&[Campo::Logradouro], false),
         Numero | QuilometragemVia => (&[Campo::Numero, Campo::Complemento], false),
-        Cep => (&[Campo::Cep], false),
+        Cep => (&[Campo::Cep], true),
         Parcela if anterior == Some(Logradouro) => (&[Campo::Logradouro], true),
         Parcela => (&[Campo::Logradouro, Campo::Complemento], true),
         NucleoRural | RecursoNatural | Empreendimento | PontoReferencia => {

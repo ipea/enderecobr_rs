@@ -26,6 +26,7 @@ enum TipoToken {
 struct TokenInfo<'a> {
     normalizado: Cow<'a, str>,
     tam_bucket: u8,
+    tam_num: Option<u8>,
     tipo: TipoToken,
     marcador_df: bool,
     marcador_palmas: bool,
@@ -335,11 +336,13 @@ impl ExtratorFeature {
             Desconhecido
         };
 
-        let tam_bucket = if tipo == Digito {
-            normalizado.trim_start_matches('0').len().min(10) as u8
-        } else {
-            normalizado.len().min(10) as u8
-        };
+        // O bucket cru preserva o zero à esquerda: sem ele "01000" e "1000"
+        // ficam indistinguíveis e o CEP perde o sinal de 5 dígitos.
+        let tam_bucket = normalizado.len().min(10) as u8;
+        // Já o cadastro grava número zero-padded, então o comprimento sem
+        // zeros continua disponível como feature própria.
+        let tam_num = (tipo == Digito)
+            .then(|| normalizado.trim_start_matches('0').len().min(10) as u8);
 
         if tipo == Pontuacao {
             normalizado = Cow::Owned(normalizado.chars().take(1).collect());
@@ -353,6 +356,7 @@ impl ExtratorFeature {
             uf: SIGLAS_ESTADOS.contains(normalizado.as_ref()),
             normalizado,
             tam_bucket,
+            tam_num,
             tipo,
         }
     }
@@ -362,6 +366,9 @@ impl ExtratorFeature {
     fn _token_info_posicional(&self, tok_info: &TokenInfo, pos: i8, res: &mut Vec<String>) {
         res.push(format!("{}:{}", pos, tok_info.normalizado));
         res.push(format!("{}:tam:{}", pos, tok_info.tam_bucket));
+        if let Some(tam_num) = tok_info.tam_num {
+            res.push(format!("{}:tam_num:{}", pos, tam_num));
+        }
 
         if tok_info.marcador_df {
             res.push(format!("{}:marcador_df", pos));
@@ -611,11 +618,22 @@ mod tests {
 
     #[test]
     fn test_token2features_com_token_numerico_longo_zeros() {
-        // O `tam` de um dígito usa o comprimento sem zeros à esquerda.
+        // `tam` conta os zeros; o comprimento sem zeros vai em `tam_num`.
         let feats = token2features(&["000000000000012345"], 0);
         assert!(feats.contains(&"0:is_digit".to_string()));
-        assert!(feats.contains(&"0:tam:5".to_string()));
+        assert!(feats.contains(&"0:tam:10".to_string()));
+        assert!(feats.contains(&"0:tam_num:5".to_string()));
         assert!(feats.contains(&"0:000000000000012345".to_string()));
+    }
+
+    #[test]
+    fn test_token2features_cep_preserva_comprimento() {
+        let feats = token2features(&["01000", "-", "000"], 0);
+        assert!(feats.contains(&"0:tam:5".to_string()));
+        assert!(feats.contains(&"0:tam_num:4".to_string()));
+        let feats_ultimo = token2features(&["01000", "-", "000"], 2);
+        assert!(feats_ultimo.contains(&"0:tam:3".to_string()));
+        assert!(feats_ultimo.contains(&"0:tam_num:0".to_string()));
     }
 
     #[test]

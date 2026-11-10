@@ -169,7 +169,8 @@ def _glossario() -> None:
     for exemplo, significado in [
         ("bias, 2_pos", "sempre presente; _pos = faixa de posição do token (0–3)"),
         ("0:RUA", "a própria palavra, normalizada e em maiúsculas"),
-        ("0:tam:6", "comprimento da palavra (máx. 10; zeros à esquerda ignorados)"),
+        ("0:tam:6", "comprimento do token, zeros à esquerda incluídos (máx. 10)"),
+        ("0:tam_num:6", "comprimento do número sem os zeros à esquerda"),
         ("-1:APTO, 2:CENTRO", "palavra do vizinho; a busca salta pontuação"),
         ("0:is_digit/alpha/punct", "só um desses tipos por token"),
         ("0:marcador_df / palmas", "vocabulário típico de Brasília / Palmas"),
