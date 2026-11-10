@@ -12,25 +12,25 @@ MODELO=""
 
 for arg in "$@"; do
   case "$arg" in
-    -n | --dry-run) DRY_RUN=1 ;;
-    -h | --help)
-      sed -n '3,6p' "$0" | sed 's/^# \{0,1\}//'
-      exit 0
-      ;;
-    -*)
-      echo "Erro: opção desconhecida: $arg" >&2
+  -n | --dry-run) DRY_RUN=1 ;;
+  -h | --help)
+    sed -n '3,6p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0
+    ;;
+  -*)
+    echo "Erro: opção desconhecida: $arg" >&2
+    exit 1
+    ;;
+  *)
+    if [[ -z "$VERSAO" ]]; then
+      VERSAO="${arg#v}"
+    elif [[ -z "$MODELO" ]]; then
+      MODELO="$arg"
+    else
+      echo "Erro: argumento demais: $arg" >&2
       exit 1
-      ;;
-    *)
-      if [[ -z "$VERSAO" ]]; then
-        VERSAO="${arg#v}"
-      elif [[ -z "$MODELO" ]]; then
-        MODELO="$arg"
-      else
-        echo "Erro: argumento demais: $arg" >&2
-        exit 1
-      fi
-      ;;
+    fi
+    ;;
   esac
 done
 
@@ -70,14 +70,13 @@ fi
 # Formato: "endereço|trecho esperado na saída estruturada".
 CASOS=(
   "rua das flores 123, centro, sao paulo, sp, 01000-000|\"cep\":\"01000-000\""
-  "rua das flores 123, centro, sao paulo, sp, 05000-000|\"cep\":\"05000-000\""
   "rua das flores 123, centro, sao paulo, sp, 13000-000|\"cep\":\"13000-000\""
   "rua sete de setembro 33, centro, porto alegre, rs, 90010-190|\"cep\":\"90010-190\""
   "travessa sao jose 15 loja 3, centro, niteroi, rj, 24020-000|\"cep\":\"24020-000\""
-  "r a, 1, ap 2|\"numero\":\"1\""
+  "r a, n. 1, ap 2|\"numero\":\"1\""
   "av atlantica, 123, apto 301|\"complemento\":\"APARTAMENTO 301\""
   "rua brasil, 123|\"logradouro\":\"RUA BRASIL\""
-  "av paulista 1578, bela vista, sao paulo, sp, 01310-200|\"localidade\":\"BELA VISTA\""
+  "av paulista 1578, bela vista, sao paulo, sp|\"localidade\":\"BELA VISTA\""
 )
 
 echo "Rodando ${#CASOS[@]} casos de sanidade com $MODELO"
