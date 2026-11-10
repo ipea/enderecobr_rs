@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::sync::LazyLock;
 
-use crfsuite::Attribute;
 use regex::Regex;
 use rustc_hash::FxHashSet;
 
@@ -236,14 +235,6 @@ impl ExtratorFeature {
         self._features(toks)
     }
 
-    /// Features de cada token, convertidas em atributos do CRF.
-    pub fn tokens2attributes(&self, tokens: &[&str]) -> Vec<Vec<Attribute>> {
-        self._features(tokens)
-            .into_iter()
-            .map(|feats| feats.into_iter().map(Attribute::from).collect())
-            .collect()
-    }
-
     /// Features de todos os tokens, na ordem e já deduplicadas.
     fn _features(&self, toks: &[&str]) -> Vec<Vec<String>> {
         let tok_info: Vec<TokenInfo> = toks.iter().map(|tok| self._token_info(tok)).collect();
@@ -341,8 +332,8 @@ impl ExtratorFeature {
         let tam_bucket = normalizado.len().min(10) as u8;
         // Já o cadastro grava número zero-padded, então o comprimento sem
         // zeros continua disponível como feature própria.
-        let tam_num = (tipo == Digito)
-            .then(|| normalizado.trim_start_matches('0').len().min(10) as u8);
+        let tam_num =
+            (tipo == Digito).then(|| normalizado.trim_start_matches('0').len().min(10) as u8);
 
         if tipo == Pontuacao {
             normalizado = Cow::Owned(normalizado.chars().take(1).collect());

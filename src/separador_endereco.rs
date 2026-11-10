@@ -103,7 +103,9 @@
 //!O modelo cuida apenas da segmentação; com `padronizar = true`, cada campo resultante
 //!passa depois pelo padronizador do seu tipo, baseado em expressões regulares.
 //!
-//!A obtenção do arquivo do modelo (busca, download e cache) fica em [`modelo`].
+//!A obtenção do arquivo do modelo (busca, download e cache) fica em [`modelo`], e a
+//!inferência em si (Viterbi e marginais) em [`crf`].
+pub mod crf;
 mod estruturacao;
 pub mod features;
 pub mod modelo;
@@ -111,9 +113,9 @@ pub mod vocabulario;
 
 use std::{cell::RefCell, path::PathBuf, sync::LazyLock};
 
-use crfsuite::{Attribute, Model, Tagger};
-
 use serde::Serialize;
+
+use crate::separador_endereco::crf::Tagger;
 
 pub use crate::separador_endereco::estruturacao::estruturar_segmentos;
 pub use crate::separador_endereco::modelo::{obter_caminho_modelo, obter_modelo};
@@ -128,7 +130,7 @@ use crate::{endereco::Endereco, separador_endereco::features::ExtratorFeature};
 /// Instancie apenas quando quiser trabalhar com um arquivo de modelo próprio.
 pub struct SeparadorEndereco {
     /// Modelo usado na classificação dos trechos do endereço.
-    pub model: Model,
+    pub modelo: crf::Modelo,
     /// Responsável por transformar o texto nos atributos lidos pelo modelo.
     pub extrator: ExtratorFeature,
 }
@@ -332,15 +334,10 @@ impl SeparadorEndereco {
     /// falha mais ao segmentar: a única falha restante seria falta de memória,
     /// que já é testada aqui.
     pub fn carregar(caminho: PathBuf) -> Result<SeparadorEndereco, String> {
-        let model = Model::from_file(&caminho.to_string_lossy()).map_err(|erro| {
-            format!(
-                "Não foi possível carregar o modelo {}: {erro}",
-                caminho.display()
-            )
-        })?;
+        let modelo = crf::Modelo::carregar(&caminho)?;
 
         let separador = SeparadorEndereco {
-            model,
+            modelo,
             extrator: ExtratorFeature::new(None),
         };
 
@@ -349,12 +346,6 @@ impl SeparadorEndereco {
         drop(separador.novo_tagger());
 
         Ok(separador)
-    }
-
-    /// Converte uma lista de tokens nos atributos que o modelo usa para
-    /// classificar cada um. Raramente necessária fora do uso interno.
-    pub fn tokens2attributes(&self, tokens: &[&str]) -> Vec<Vec<Attribute>> {
-        self.extrator.tokens2attributes(tokens)
     }
 
     /// Junta os tokens em segmentos, seguindo os rótulos BIO devolvidos pelo modelo.
@@ -423,23 +414,18 @@ impl SeparadorEndereco {
     }
 
     /// Cria um tagger para este modelo.
-    ///
-    /// A criação já foi testada em [`carregar`](Self::carregar), então a única
-    /// falha possível aqui seria falta de memória.
     fn novo_tagger(&self) -> Tagger<'_> {
-        self.model
-            .tagger()
-            .expect("Não foi possível criar o tagger do CRF (memória insuficiente)")
+        self.modelo.tagger()
     }
 
     /// Pipeline completo (tokenização, features, modelo e remontagem dos segmentos),
     /// usando um tagger já pronto para ele poder ser reaproveitado.
     fn processar_com_tagger(&self, tagger: &mut Tagger<'_>, texto: &str) -> EnderecoSegmentado {
         let (tokens, offsets) = self.extrator.tokenize(texto);
-        let atributos = self.tokens2attributes(&tokens);
-        let tags = tagger
-            .tag(&atributos)
-            .expect("Não foi possível executar o tagging do CRF");
+        if tokens.is_empty() {
+            return EnderecoSegmentado::default();
+        }
+        let tags = tagger.rotular(&self.extrator.tokens2features(&tokens));
 
         EnderecoSegmentado {
             segmentos: self.montar_segmentos(texto, &tokens, &tags, &offsets),
@@ -781,16 +767,36 @@ mod tests {
     // está no cache, como no CI, os testes simplesmente passam sem executar.
 
     #[test]
+    fn estimar_devolve_marginal_do_rotulo_previsto() {
+        let Some(caminho) = obter_modelo_no_cache() else {
+            return;
+        };
+        let separador = SeparadorEndereco::carregar(caminho).unwrap();
+        let (tokens, _) = separador.extrator.tokenize("rua brasil, 123");
+        let features = separador.extrator.tokens2features(&tokens);
+
+        let estimativa = separador.modelo.tagger().estimar(&features);
+
+        assert_eq!(estimativa.rotulos.len(), tokens.len());
+        assert_eq!(estimativa.marginais.len(), tokens.len());
+        assert!(estimativa.marginais.iter().all(|m| (0.0..=1.0).contains(m)));
+        assert!(estimativa.marginais.iter().all(|m| *m > 0.0));
+        assert!(estimativa.lognorm.is_finite());
+    }
+
+    #[test]
     fn carregar_permite_segmentar_com_o_modelo_do_cache() {
         let Some(caminho) = obter_modelo_no_cache() else {
             return;
         };
         let separador = SeparadorEndereco::carregar(caminho).unwrap();
 
-        let atributos = separador.tokens2attributes(&["rua", "brasil", "123"]);
-        assert_eq!(atributos.len(), 3);
-        for atributos_token in &atributos {
-            assert!(!atributos_token.is_empty());
+        let features = separador
+            .extrator
+            .tokens2features(&["rua", "brasil", "123"]);
+        assert_eq!(features.len(), 3);
+        for features_token in &features {
+            assert!(!features_token.is_empty());
         }
 
         assert_eq!(

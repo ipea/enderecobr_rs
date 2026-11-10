@@ -38,7 +38,7 @@ polars_cli = ["clap", "polars"]
 [dependencies]
 aho-corasick = "1.1.4"
 clap = { version = "4.6.7", features = ["derive"], optional = true }
-crfsuite = { version = "0.3.2" }
+crfsuite-compliant-rs = { version = "0.4.2", default-features = false }
 diacritics = "0.2.2"
 dirs = "7.0.0"
 itertools = "0.15.0"
