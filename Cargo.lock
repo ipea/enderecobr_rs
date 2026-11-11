@@ -871,7 +871,7 @@ dependencies = [
 
 [[package]]
 name = "enderecobr_py"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "enderecobr_rs",
  "pyo3",
@@ -879,7 +879,7 @@ dependencies = [
 
 [[package]]
 name = "enderecobr_rs"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "aho-corasick",
  "clap",
