@@ -24,7 +24,7 @@ enum TipoToken {
 
 struct TokenInfo<'a> {
     normalizado: Cow<'a, str>,
-    tam_bucket: u8,
+    tam: u8,
     tam_num: Option<u8>,
     tipo: TipoToken,
     marcador_df: bool,
@@ -213,7 +213,7 @@ fn is_pontuacao(word: &str) -> bool {
 impl ExtratorFeature {
     /// Cria um extrator. `distancias_vizinhaca` define quais tokens vizinhos
     /// entram como contexto (por padrão, os dois anteriores e os dois seguintes).
-    pub fn new(distancias_vizinhaca: Option<Vec<i32>>) -> Self {
+    pub fn novo(distancias_vizinhaca: Option<Vec<i32>>) -> Self {
         Self {
             distancias_vizinhaca: distancias_vizinhaca.unwrap_or(vec![-2, -1, 1, 2]),
             // \p{L} => caracteres unicode
@@ -327,9 +327,9 @@ impl ExtratorFeature {
             Desconhecido
         };
 
-        // O bucket cru preserva o zero à esquerda: sem ele "01000" e "1000"
-        // ficam indistinguíveis e o CEP perde o sinal de 5 dígitos.
-        let tam_bucket = normalizado.len().min(10) as u8;
+        // O comprimento cru conta os zeros à esquerda: sem isso "01000" e
+        // "1000" ficam indistinguíveis e o CEP perde o sinal de 5 dígitos.
+        let tam = normalizado.len().min(10) as u8;
         // Já o cadastro grava número zero-padded, então o comprimento sem
         // zeros continua disponível como feature própria.
         let tam_num =
@@ -346,7 +346,7 @@ impl ExtratorFeature {
             marcador_palmas: MARCADORES_CONHECIDOS_PALMAS.contains(normalizado.as_ref()),
             uf: SIGLAS_ESTADOS.contains(normalizado.as_ref()),
             normalizado,
-            tam_bucket,
+            tam,
             tam_num,
             tipo,
         }
@@ -356,7 +356,7 @@ impl ExtratorFeature {
     /// direto no vetor da posição para não alocar um `Vec` por vizinho.
     fn _token_info_posicional(&self, tok_info: &TokenInfo, pos: i8, res: &mut Vec<String>) {
         res.push(format!("{}:{}", pos, tok_info.normalizado));
-        res.push(format!("{}:tam:{}", pos, tok_info.tam_bucket));
+        res.push(format!("{}:tam:{}", pos, tok_info.tam));
         if let Some(tam_num) = tok_info.tam_num {
             res.push(format!("{}:tam_num:{}", pos, tam_num));
         }
@@ -459,15 +459,23 @@ mod tests {
     use super::*;
 
     fn token2features(sent: &[&str], i: usize) -> Vec<String> {
-        ExtratorFeature::new(None).tokens2features(sent)[i].clone()
+        ExtratorFeature::novo(None).tokens2features(sent)[i].clone()
     }
 
     fn tokens2features(sent: &[&str]) -> Vec<Vec<String>> {
-        ExtratorFeature::new(None).tokens2features(sent)
+        ExtratorFeature::novo(None).tokens2features(sent)
+    }
+
+    /// Se a lista ordenada perde itens, é porque havia repetição.
+    fn tem_duplicata(features: &[String]) -> bool {
+        let mut ordenado = features.to_vec();
+        ordenado.sort_unstable();
+        ordenado.dedup();
+        ordenado.len() != features.len()
     }
 
     fn tokenize(sent: &str) -> Vec<&str> {
-        ExtratorFeature::new(None).tokenize(sent).0
+        ExtratorFeature::novo(None).tokenize(sent).0
     }
 
     #[test]
@@ -696,17 +704,14 @@ mod tests {
     #[test]
     fn test_tokens2features_sem_duplicatas() {
         let feats = tokens2features(&["Rua", ",", "das", "Flores", "123"]);
-        for item in &feats {
-            let mut ordenado = item.clone();
-            ordenado.sort_unstable();
-            ordenado.dedup();
-            assert_eq!(ordenado.len(), item.len());
-        }
+        let duplicados: Vec<&Vec<String>> =
+            feats.iter().filter(|item| tem_duplicata(item)).collect();
+        assert!(duplicados.is_empty());
     }
 
     /// Features de cada token do texto.
     fn features(texto: &str) -> Vec<Vec<String>> {
-        ExtratorFeature::new(None).sent2features(texto)
+        ExtratorFeature::novo(None).sent2features(texto)
     }
 
     /// Se o token tem alguma feature com o trecho dado.
@@ -791,8 +796,9 @@ mod tests {
     #[test]
     fn nucleo_marca_a_cabeca_sem_julgar_o_que_vem_depois() {
         // Quem decide se o termo é núcleo, parcela ou ruído é o modelo.
-        for texto in ["Chacara 51", "Povoado", "Povoado Sitio", "Estancia SE"] {
-            assert!(tem(&features(texto), 0, "0:nucleo_B"), "{texto}");
-        }
+        assert!(tem(&features("Chacara 51"), 0, "0:nucleo_B"));
+        assert!(tem(&features("Povoado"), 0, "0:nucleo_B"));
+        assert!(tem(&features("Povoado Sitio"), 0, "0:nucleo_B"));
+        assert!(tem(&features("Estancia SE"), 0, "0:nucleo_B"));
     }
 }

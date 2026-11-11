@@ -81,15 +81,20 @@ def test_confianca_minima_pega_o_token_mais_inseguro():
     assert confianca_minima(["B_LOGRADOURO", "B_NUMERO"], marginais) == 0.55
 
 
-def test_confianca_media_media_os_tokens_previstos():
+def test_confianca_media_media_geometrica_dos_tokens_previstos():
     marginais = [
         {"O": 0.02, "B_LOGRADOURO": 0.98},
         {"B_NUMERO": 0.55, "O": 0.45},
     ]
 
+    # Media geometrica de 0.98 e 0.55, nao a aritmetica (0.765).
     assert confianca_media(["B_LOGRADOURO", "B_NUMERO"], marginais) == pytest.approx(
-        0.765
+        0.734166, abs=1e-6
     )
+
+
+def test_confianca_media_zera_com_probabilidade_nula():
+    assert confianca_media(["B_NUMERO"], [{"B_NUMERO": 0.0}]) == 0.0
 
 
 def test_confianca_sem_token_nao_esta_em_duvida():

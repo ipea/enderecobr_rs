@@ -143,7 +143,7 @@ def testa_separador_sem_modelo():
         _ = separador.segmentar("av n sra copacabana, 123")
 
     # Testa também usando o método estático.
-    with pytest.raises(RuntimeError, match="Não foi possível carregar o modelo"):
+    with pytest.raises(RuntimeError, match="Não foi possível ler /nao/existe/tagger.crf"):
         _ = enderecobr.SeparadorEndereco.carregar("/nao/existe/tagger.crf")
 
 

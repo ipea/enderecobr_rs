@@ -15,8 +15,6 @@ permissions:
   contents: read
 
 jobs:
-  # Alvos 32-bit comentados: liblbfgs-sys e libcqdb não compilam em 32-bit
-  # desde o crfsuite-sys 0.3.2. Reativar quando isso for corrigido upstream.
   linux:
     runs-on: ${{ matrix.platform.runner }}
     strategy:

@@ -131,10 +131,13 @@ class SegmentoEndereco:
 
     valor: str
     tipo: TipoSegmento
+    probabilidade: float | None
 
 class EnderecoSegmentado:
 
     segmentos: list[SegmentoEndereco]
+    probabilidade: float | None
+    confianca: float | None
 
     def como_json(self) -> str: ...
 
@@ -147,6 +150,8 @@ class Endereco:
     complemento: str | None
     localidade: str | None
     cep: str | None
+    probabilidade: float | None
+    confianca: float | None
 
     def __init__(
         self,
@@ -174,19 +179,31 @@ class SeparadorEndereco:
 
     def carregar_modelo(self, caminho: str | Path) -> None: ...
 
-    def segmentar(self, texto: str) -> EnderecoSegmentado: ...
+    def segmentar(self, texto: str, com_probabilidade: bool = False) -> EnderecoSegmentado: ...
 
-    def segmentar_enderecos(self, textos: Iterable[str]) -> list[EnderecoSegmentado]: ...
+    def segmentar_enderecos(
+        self, textos: Iterable[str], com_probabilidade: bool = False
+    ) -> list[EnderecoSegmentado]: ...
 
 def obter_caminho_modelo(path_modelo: str | Path | None = None) -> Path: ...
 
 def obter_modelo(path_modelo: str | Path | None = None) -> Path: ...
 
-def segmentar_endereco(endereco: str) -> EnderecoSegmentado: ...
+def segmentar_endereco(
+    endereco: str, com_probabilidade: bool = False
+) -> EnderecoSegmentado: ...
 
-def segmentar_enderecos(enderecos: Iterable[str]) -> list[EnderecoSegmentado]: ...
+def segmentar_enderecos(
+    enderecos: Iterable[str], com_probabilidade: bool = False
+) -> list[EnderecoSegmentado]: ...
 
-def estruturar_endereco(endereco: str, padronizar: bool = True) -> Endereco: ...
+def estruturar_endereco(
+    endereco: str, padronizar: bool = True, com_probabilidade: bool = False
+) -> Endereco: ...
+
+def estruturar_segmentos(
+    segmentado: EnderecoSegmentado, padronizar: bool = True
+) -> Endereco: ...
 
 # Constantes do modelo padrão. As descrições ficam em `__init__.py`, que é onde
 # elas conseguem chegar ao mkdocstrings.

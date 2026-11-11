@@ -111,9 +111,10 @@ pub mod features;
 pub mod modelo;
 pub mod vocabulario;
 
-use std::{cell::RefCell, path::PathBuf, sync::LazyLock};
+use std::{cell::RefCell, ops::Range, path::PathBuf, sync::LazyLock};
 
 use serde::Serialize;
+use strum::{Display, IntoStaticStr, VariantArray};
 
 use crate::separador_endereco::crf::Tagger;
 
@@ -135,6 +136,110 @@ pub struct SeparadorEndereco {
     pub extrator: ExtratorFeature,
 }
 
+/// O que pedir a uma segmentação.
+///
+/// ```
+/// use enderecobr_rs::separador_endereco::OpcoesSegmentacao;
+///
+/// assert!(!OpcoesSegmentacao::sem_probabilidades().probabilidades);
+/// assert!(OpcoesSegmentacao::com_probabilidades().probabilidades);
+/// ```
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OpcoesSegmentacao {
+    /// Calcula a probabilidade de cada trecho, a probabilidade do endereço
+    /// inteiro e a confiança por token, ao custo de cerca de 10% a mais de
+    /// tempo. Sem isso os campos de probabilidade ficam vazios.
+    pub probabilidades: bool,
+}
+
+impl OpcoesSegmentacao {
+    /// Segmenta sem calcular probabilidades: o caminho mais rápido.
+    pub fn sem_probabilidades() -> OpcoesSegmentacao {
+        OpcoesSegmentacao::default()
+    }
+
+    /// Pede a probabilidade de cada trecho, a do endereço inteiro e a
+    /// confiança por token, ao custo de cerca de 10% a mais de tempo.
+    pub fn com_probabilidades() -> OpcoesSegmentacao {
+        OpcoesSegmentacao {
+            probabilidades: true,
+        }
+    }
+}
+
+/// O que pedir ao estruturar um endereço.
+///
+/// ```
+/// use enderecobr_rs::separador_endereco::OpcoesEndereco;
+///
+/// let padrao = OpcoesEndereco::default();
+/// assert!(padrao.padronizar);
+/// assert!(!padrao.probabilidades);
+///
+/// let cru = padrao.sem_padronizar().com_probabilidades();
+/// assert!(!cru.padronizar);
+/// assert!(cru.probabilidades);
+///
+/// // Os quatro builders se sobrepõem de propósito, para qualquer ponto ser
+/// // ponto de partida.
+/// assert_eq!(cru.com_padronizar(), OpcoesEndereco::default().com_probabilidades());
+/// assert_eq!(cru.sem_probabilidades(), padrao.sem_padronizar());
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpcoesEndereco {
+    /// Passa os campos encontrados pelas funções de padronização, que
+    /// expandem abreviações, corrigem a caixa e normalizam números e CEP.
+    pub padronizar: bool,
+    /// Preenche as probabilidades do endereço, ao custo de cerca de 10% a mais
+    /// de tempo. Sem isso, os campos de probabilidade ficam vazios.
+    pub probabilidades: bool,
+}
+
+impl Default for OpcoesEndereco {
+    /// O caminho comum: padroniza os campos e não calcula probabilidades.
+    fn default() -> OpcoesEndereco {
+        OpcoesEndereco {
+            padronizar: true,
+            probabilidades: false,
+        }
+    }
+}
+
+impl OpcoesEndereco {
+    /// Mantém os campos como vieram da segmentação.
+    pub fn sem_padronizar(self) -> OpcoesEndereco {
+        OpcoesEndereco {
+            padronizar: false,
+            ..self
+        }
+    }
+
+    /// Passa os campos pelas funções de padronização.
+    pub fn com_padronizar(self) -> OpcoesEndereco {
+        OpcoesEndereco {
+            padronizar: true,
+            ..self
+        }
+    }
+
+    /// Pede as probabilidades do endereço, ao custo de cerca de 10% a mais de
+    /// tempo.
+    pub fn com_probabilidades(self) -> OpcoesEndereco {
+        OpcoesEndereco {
+            probabilidades: true,
+            ..self
+        }
+    }
+
+    /// Deixa os campos de probabilidade vazios.
+    pub fn sem_probabilidades(self) -> OpcoesEndereco {
+        OpcoesEndereco {
+            probabilidades: false,
+            ..self
+        }
+    }
+}
+
 /// Tipo de informação que um trecho do endereço representa.
 ///
 /// As variantes espelham, uma a uma, os rótulos que o modelo probabilístico emite.
@@ -146,8 +251,11 @@ pub struct SeparadorEndereco {
 /// assert_eq!(TipoSegmento::from("logradouro"), TipoSegmento::Logradouro);
 /// assert_eq!(TipoSegmento::from("novo_rotulo"), TipoSegmento::Outro);
 /// ```
-#[derive(Serialize, Debug, PartialEq, Eq, Clone, Copy, Hash)]
+#[derive(
+    Serialize, Debug, PartialEq, Eq, Clone, Copy, Hash, Display, IntoStaticStr, VariantArray,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum TipoSegmento {
     /// Tipo de via + título + nome: `R ALCIDES CARNEIRO LEAL`, `ROD BR-116`.
     Logradouro,
@@ -189,6 +297,8 @@ pub enum TipoSegmento {
     Ruido,
     /// Conteúdo que não cabe em nenhum outro tipo — inclusive rótulo que ainda
     /// não tem variante própria.
+    #[strum(serialize = "outros")]
+    #[serde(rename = "outros")]
     Outro,
 }
 
@@ -201,26 +311,7 @@ impl TipoSegmento {
     /// let rotulos: Vec<&str> = TipoSegmento::TODOS.iter().map(|tipo| tipo.como_str()).collect();
     /// assert_eq!(rotulos[..3], ["logradouro", "numero", "complemento"]);
     /// ```
-    pub const TODOS: [TipoSegmento; 18] = [
-        TipoSegmento::Logradouro,
-        TipoSegmento::Numero,
-        TipoSegmento::Complemento,
-        TipoSegmento::Empreendimento,
-        TipoSegmento::Parcela,
-        TipoSegmento::QuilometragemVia,
-        TipoSegmento::Referencia,
-        TipoSegmento::PontoReferencia,
-        TipoSegmento::Denominacao,
-        TipoSegmento::Localidade,
-        TipoSegmento::NucleoRural,
-        TipoSegmento::RecursoNatural,
-        TipoSegmento::Cep,
-        TipoSegmento::Municipio,
-        TipoSegmento::Uf,
-        TipoSegmento::Cadastro,
-        TipoSegmento::Ruido,
-        TipoSegmento::Outro,
-    ];
+    pub const TODOS: &'static [TipoSegmento] = TipoSegmento::VARIANTS;
 
     /// Rótulo em minúsculas, igual ao usado na serialização e nos dumps do modelo.
     ///
@@ -229,40 +320,8 @@ impl TipoSegmento {
     ///
     /// assert_eq!(TipoSegmento::Cep.como_str(), "cep");
     /// ```
-    pub const fn como_str(self) -> &'static str {
-        match self {
-            TipoSegmento::Logradouro => "logradouro",
-            TipoSegmento::Numero => "numero",
-            TipoSegmento::Complemento => "complemento",
-            TipoSegmento::Empreendimento => "empreendimento",
-            TipoSegmento::Parcela => "parcela",
-            TipoSegmento::QuilometragemVia => "quilometragem_via",
-            TipoSegmento::Referencia => "referencia",
-            TipoSegmento::PontoReferencia => "ponto_referencia",
-            TipoSegmento::Denominacao => "denominacao",
-            TipoSegmento::Localidade => "localidade",
-            TipoSegmento::NucleoRural => "nucleo_rural",
-            TipoSegmento::RecursoNatural => "recurso_natural",
-            TipoSegmento::Cep => "cep",
-            TipoSegmento::Municipio => "municipio",
-            TipoSegmento::Uf => "uf",
-            TipoSegmento::Cadastro => "cadastro",
-            TipoSegmento::Ruido => "ruido",
-            TipoSegmento::Outro => "outros",
-        }
-    }
-}
-
-impl std::fmt::Display for TipoSegmento {
-    /// Escreve o mesmo texto de [`TipoSegmento::como_str`].
-    ///
-    /// ```
-    /// use enderecobr_rs::separador_endereco::TipoSegmento;
-    ///
-    /// assert_eq!(TipoSegmento::Referencia.to_string(), "referencia");
-    /// ```
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.como_str())
+    pub fn como_str(self) -> &'static str {
+        self.into()
     }
 }
 
@@ -281,7 +340,8 @@ impl From<&str> for TipoSegmento {
     /// ```
     fn from(rotulo: &str) -> Self {
         Self::TODOS
-            .into_iter()
+            .iter()
+            .copied()
             .find(|tipo| tipo.como_str().eq_ignore_ascii_case(rotulo))
             .unwrap_or(TipoSegmento::Outro)
     }
@@ -292,6 +352,20 @@ impl From<&str> for TipoSegmento {
 pub struct SegmentoEndereco {
     pub valor: String,
     pub tipo: TipoSegmento,
+    /// Probabilidade de a rotulagem deste trecho estar correta, quando pedida.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probabilidade: Option<f64>,
+}
+
+impl SegmentoEndereco {
+    /// Cria um trecho ainda sem probabilidade calculada.
+    pub fn novo(valor: impl Into<String>, tipo: TipoSegmento) -> SegmentoEndereco {
+        SegmentoEndereco {
+            valor: valor.into(),
+            tipo,
+            probabilidade: None,
+        }
+    }
 }
 
 /// Resultado da segmentação: os trechos identificados, na ordem em que aparecem
@@ -302,18 +376,10 @@ pub struct SegmentoEndereco {
 ///     segmento_como_json, EnderecoSegmentado, SegmentoEndereco, TipoSegmento,
 /// };
 ///
-/// let segmentado = EnderecoSegmentado {
-///     segmentos: vec![
-///         SegmentoEndereco {
-///             valor: "av atlantica".to_string(),
-///             tipo: TipoSegmento::Logradouro,
-///         },
-///         SegmentoEndereco {
-///             valor: "123".to_string(),
-///             tipo: TipoSegmento::Numero,
-///         },
-///     ],
-/// };
+/// let segmentado = EnderecoSegmentado::novo(vec![
+///     SegmentoEndereco::novo("av atlantica", TipoSegmento::Logradouro),
+///     SegmentoEndereco::novo("123", TipoSegmento::Numero),
+/// ]);
 ///
 /// assert_eq!(
 ///     segmento_como_json(&segmentado),
@@ -324,6 +390,15 @@ pub struct SegmentoEndereco {
 pub struct EnderecoSegmentado {
     /// Trechos identificados no endereço.
     pub segmentos: Vec<SegmentoEndereco>,
+    /// Probabilidade de a rotulagem do endereço inteiro estar correta, quando
+    /// pedida (vide [`OpcoesSegmentacao::com_probabilidades`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probabilidade: Option<f64>,
+    /// Certeza média por trecho, entre 0 e 1: a média geométrica das
+    /// probabilidades de cada token, normalizada pelo tamanho do endereço —
+    /// diferente do campo [`Self::probabilidade`], que cai com o tamanho.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confianca: Option<f64>,
 }
 
 impl SeparadorEndereco {
@@ -338,7 +413,7 @@ impl SeparadorEndereco {
 
         let separador = SeparadorEndereco {
             modelo,
-            extrator: ExtratorFeature::new(None),
+            extrator: ExtratorFeature::novo(None),
         };
 
         // Cria um tagger de teste e o descarta: garante já na carga que o modelo
@@ -348,16 +423,19 @@ impl SeparadorEndereco {
         Ok(separador)
     }
 
-    /// Junta os tokens em segmentos, seguindo os rótulos BIO devolvidos pelo modelo.
+    /// Junta os tokens em segmentos, seguindo os rótulos devolvidos pelo modelo.
+    /// Devolve, junto, a faixa de tokens de cada segmento, na mesma ordem.
     fn montar_segmentos(
         &self,
         original: &str,
         tokens: &[&str],
         tags: &[String],
         offsets: &[usize],
-    ) -> Vec<SegmentoEndereco> {
+    ) -> (Vec<SegmentoEndereco>, Vec<Range<usize>>) {
         let mut segmentos = Vec::with_capacity(4);
-        for ((tok, tok_tipo), offset) in tokens.iter().zip(tags).zip(offsets) {
+        let mut faixas: Vec<Range<usize>> = Vec::with_capacity(4);
+        for (indice, ((tok, tok_tipo), offset)) in tokens.iter().zip(tags).zip(offsets).enumerate()
+        {
             // Rótulos são "B_<TIPO>", "I_<TIPO>" ou "O": comparar o byte do BIO
             // evita comparações de string no hot path.
             let Some((bio, tipo)) = tok_tipo.split_once('_') else {
@@ -366,10 +444,10 @@ impl SeparadorEndereco {
 
             let tipo = TipoSegmento::from(tipo);
             match bio.as_bytes().first().copied() {
-                Some(b'B') => segmentos.push(SegmentoEndereco {
-                    valor: tok.to_string(),
-                    tipo,
-                }),
+                Some(b'B') => {
+                    segmentos.push(SegmentoEndereco::novo(*tok, tipo));
+                    faixas.push(indice..indice + 1);
+                }
                 Some(b'I') => {
                     let Some(ultimo_segmento) = segmentos.last_mut() else {
                         continue;
@@ -386,18 +464,21 @@ impl SeparadorEndereco {
                         ultimo_segmento.valor.push(' ');
                     }
                     ultimo_segmento.valor.push_str(tok);
+                    if let Some(faixa) = faixas.last_mut() {
+                        faixa.end = indice + 1;
+                    }
                 }
                 _ => continue,
             }
         }
 
-        segmentos
+        (segmentos, faixas)
     }
 
     /// Segmenta um endereço com este separador. Vide [`segmentar_endereco`].
-    pub fn segmentar(&self, texto: &str) -> EnderecoSegmentado {
+    pub fn segmentar(&self, texto: &str, opcoes: &OpcoesSegmentacao) -> EnderecoSegmentado {
         let mut tagger = self.novo_tagger();
-        self.processar_com_tagger(&mut tagger, texto)
+        self.processar(&mut tagger, texto, opcoes)
     }
 
     /// Segmenta vários endereços com este separador, reaproveitando o mesmo
@@ -405,30 +486,58 @@ impl SeparadorEndereco {
     /// em sequência).
     ///
     /// A saída mantém a ordem da entrada.
-    pub fn segmentar_enderecos(&self, textos: &[&str]) -> Vec<EnderecoSegmentado> {
+    pub fn segmentar_enderecos(
+        &self,
+        textos: &[&str],
+        opcoes: &OpcoesSegmentacao,
+    ) -> Vec<EnderecoSegmentado> {
         let mut tagger = self.novo_tagger();
         textos
             .iter()
-            .map(|texto| self.processar_com_tagger(&mut tagger, texto))
+            .map(|texto| self.processar(&mut tagger, texto, opcoes))
             .collect()
     }
 
     /// Cria um tagger para este modelo.
     fn novo_tagger(&self) -> Tagger<'_> {
-        self.modelo.tagger()
+        self.modelo.novo_tagger()
     }
 
-    /// Pipeline completo (tokenização, features, modelo e remontagem dos segmentos),
-    /// usando um tagger já pronto para ele poder ser reaproveitado.
-    fn processar_com_tagger(&self, tagger: &mut Tagger<'_>, texto: &str) -> EnderecoSegmentado {
+    /// Pipeline completo (tokenização, features, modelo e remontagem dos
+    /// segmentos), usando um tagger já pronto para ele poder ser reaproveitado.
+    ///
+    /// Com [`OpcoesSegmentacao::probabilidades`], cada trecho e o endereço
+    /// inteiro saem com as probabilidades preenchidas.
+    fn processar(
+        &self,
+        tagger: &mut Tagger<'_>,
+        texto: &str,
+        opcoes: &OpcoesSegmentacao,
+    ) -> EnderecoSegmentado {
         let (tokens, offsets) = self.extrator.tokenize(texto);
         if tokens.is_empty() {
             return EnderecoSegmentado::default();
         }
-        let tags = tagger.rotular(&self.extrator.tokens2features(&tokens));
+        let features = self.extrator.tokens2features(&tokens);
+
+        if !opcoes.probabilidades {
+            let tags = tagger.rotular(&features);
+            let (segmentos, _) = self.montar_segmentos(texto, &tokens, &tags, &offsets);
+            return EnderecoSegmentado::novo(segmentos);
+        }
+
+        let estimativa = tagger.rotular_com_probabilidades(&features);
+        let (mut segmentos, faixas) =
+            self.montar_segmentos(texto, &tokens, &estimativa.rotulos, &offsets);
+        let probabilidades = tagger.probabilidade_trecho(&faixas);
+        for (segmento, probabilidade) in segmentos.iter_mut().zip(probabilidades) {
+            segmento.probabilidade = Some(probabilidade);
+        }
 
         EnderecoSegmentado {
-            segmentos: self.montar_segmentos(texto, &tokens, &tags, &offsets),
+            segmentos,
+            probabilidade: Some(estimativa.probabilidade),
+            confianca: Some(estimativa.confianca),
         }
     }
 }
@@ -466,15 +575,12 @@ fn com_tagger<R>(
 /// Segmenta uma string de endereço em suas partes constituintes utilizando o
 /// modelo padrão.
 ///
-/// # Panics
-///
-/// Panic se o modelo padrão não puder ser obtido ou carregado. Use
-/// [`tentar_segmentar_endereco`] para tratar esse caso como erro.
+/// Devolve o motivo da falha quando o modelo não está disponível.
 ///
 /// ```
 /// use enderecobr_rs::separador_endereco::{
 ///     modelo::{obter_modelo, VAR_AMBIENTE_SEM_DOWNLOAD},
-///     segmentar_endereco, EnderecoSegmentado, SegmentoEndereco, TipoSegmento,
+///     segmentar_endereco, EnderecoSegmentado, OpcoesSegmentacao, SegmentoEndereco, TipoSegmento,
 /// };
 ///
 /// // Evitando problemas no CI
@@ -485,63 +591,55 @@ fn com_tagger<R>(
 /// }
 ///
 /// // Exemplo de fato:
-/// let endereco_segmentado = segmentar_endereco("av n sra copacabana, 123, apt 301");
-/// let endereco_esperado = EnderecoSegmentado {
-///     segmentos: vec![
-///         SegmentoEndereco {
-///             valor: "av n sra copacabana".to_string(),
-///             tipo: TipoSegmento::Logradouro,
-///         },
-///         SegmentoEndereco {
-///             valor: "123".to_string(),
-///             tipo: TipoSegmento::Numero,
-///         },
-///         SegmentoEndereco {
-///             valor: "apt 301".to_string(),
-///             tipo: TipoSegmento::Complemento,
-///         },
-///     ],
-/// };
+/// let endereco_segmentado =
+///     segmentar_endereco("av n sra copacabana, 123, apt 301",
+///                      &OpcoesSegmentacao::sem_probabilidades())
+///         .unwrap();
+/// let endereco_esperado = EnderecoSegmentado::novo(vec![
+///     SegmentoEndereco::novo("av n sra copacabana", TipoSegmento::Logradouro),
+///     SegmentoEndereco::novo("123", TipoSegmento::Numero),
+///     SegmentoEndereco::novo("apt 301", TipoSegmento::Complemento),
+/// ]);
 /// assert_eq!(endereco_segmentado, endereco_esperado);
 /// ```
-pub fn segmentar_endereco(texto: &str) -> EnderecoSegmentado {
-    tentar_segmentar_endereco(texto).expect("Não foi possível segmentar o endereço")
-}
-
-/// Igual a [`segmentar_endereco`], mas devolve o motivo da falha em vez de
-/// entrar em panic quando o modelo não está disponível.
-pub fn tentar_segmentar_endereco(texto: &str) -> Result<EnderecoSegmentado, String> {
+pub fn segmentar_endereco(
+    texto: &str,
+    opcoes: &OpcoesSegmentacao,
+) -> Result<EnderecoSegmentado, String> {
     let separador = separador_padrao()?;
     Ok(com_tagger(separador, |tagger| {
-        separador.processar_com_tagger(tagger, texto)
+        separador.processar(tagger, texto, opcoes)
     }))
 }
 
 /// Segmenta vários endereços de uma vez, com o modelo padrão carregado uma única
-/// vez. Vide [`segmentar_endereco`] para mais informações. Mais eficiente de processar
-/// uma lista ou coluna de endereços.
+/// vez. Vide [`segmentar_endereco`] para mais informações. Mais eficiente para
+/// processar uma lista ou coluna de endereços.
 ///
-/// # Panics
-///
-/// Panic se o modelo padrão não puder ser obtido ou carregado. Use
-/// [`tentar_segmentar_enderecos`] para tratar esse caso como erro.
-pub fn segmentar_enderecos(textos: &[&str]) -> Vec<EnderecoSegmentado> {
-    tentar_segmentar_enderecos(textos).expect("Não foi possível segmentar os endereços")
-}
-
-/// Igual a [`segmentar_enderecos`], mas devolve o motivo da falha em vez de
-/// entrar em panic quando o modelo não está disponível.
-pub fn tentar_segmentar_enderecos(textos: &[&str]) -> Result<Vec<EnderecoSegmentado>, String> {
+/// A saída mantém a ordem da entrada.
+pub fn segmentar_enderecos(
+    textos: &[&str],
+    opcoes: &OpcoesSegmentacao,
+) -> Result<Vec<EnderecoSegmentado>, String> {
     let separador = separador_padrao()?;
     Ok(com_tagger(separador, |tagger| {
         textos
             .iter()
-            .map(|texto| separador.processar_com_tagger(tagger, texto))
+            .map(|texto| separador.processar(tagger, texto, opcoes))
             .collect()
     }))
 }
 
 impl EnderecoSegmentado {
+    /// Cria a segmentação ainda sem probabilidades calculadas.
+    pub fn novo(segmentos: Vec<SegmentoEndereco>) -> EnderecoSegmentado {
+        EnderecoSegmentado {
+            segmentos,
+            probabilidade: None,
+            confianca: None,
+        }
+    }
+
     /// Serializa os segmentos em JSON. Equivalente a [`segmento_como_json`].
     pub fn como_json(&self) -> String {
         segmento_como_json(self)
@@ -562,15 +660,10 @@ impl EnderecoSegmentado {
 /// Vide a documentação de [`segmentar_endereco`] e [`estruturar_segmentos`]
 /// para mais detalhes.
 ///
-/// # Panics
-///
-/// Panic se o modelo padrão não puder ser carregado. Use
-/// [`tentar_estruturar_endereco`] para tratar esse caso como erro.
-///
 /// ```
 /// use enderecobr_rs::separador_endereco::{
 ///     modelo::{obter_modelo, VAR_AMBIENTE_SEM_DOWNLOAD},
-///     estruturar_endereco
+///     estruturar_endereco, OpcoesEndereco
 /// };
 /// use enderecobr_rs::endereco::Endereco;
 ///
@@ -582,7 +675,9 @@ impl EnderecoSegmentado {
 /// }
 ///
 /// // Exemplo de fato
-/// let endereco = estruturar_endereco("av atlantica, 123, apto 301", true);
+/// let endereco =
+///     estruturar_endereco("av atlantica, 123, apto 301", &OpcoesEndereco::default())
+///         .unwrap();
 /// assert_eq!(endereco, Endereco {
 ///   logradouro: Some("AVENIDA ATLANTICA".to_string()),
 ///   numero: Some("123".to_string()),
@@ -590,16 +685,12 @@ impl EnderecoSegmentado {
 ///   ..Default::default()
 /// });
 /// ```
-pub fn estruturar_endereco(endereco: &str, padronizar: bool) -> Endereco {
-    tentar_estruturar_endereco(endereco, padronizar)
-        .expect("Não foi possível estruturar o endereço")
-}
-
-/// Igual a [`estruturar_endereco`], mas devolve o motivo da falha em vez de
-/// entrar em panic quando o modelo não está disponível.
-pub fn tentar_estruturar_endereco(endereco: &str, padronizar: bool) -> Result<Endereco, String> {
-    tentar_segmentar_endereco(endereco)
-        .map(|segmentado| estruturar_segmentos(&segmentado, padronizar))
+pub fn estruturar_endereco(endereco: &str, opcoes: &OpcoesEndereco) -> Result<Endereco, String> {
+    let segmentacao = OpcoesSegmentacao {
+        probabilidades: opcoes.probabilidades,
+    };
+    segmentar_endereco(endereco, &segmentacao)
+        .map(|segmentado| estruturar_segmentos(&segmentado, opcoes.padronizar))
 }
 
 /// Serializa os segmentos encontrados em JSON. Usando internamente no CLI.
@@ -610,12 +701,10 @@ pub fn tentar_estruturar_endereco(endereco: &str, padronizar: bool) -> Result<En
 /// use enderecobr_rs::separador_endereco::{EnderecoSegmentado, SegmentoEndereco, TipoSegmento,
 /// segmento_como_json};
 ///
-/// let segmentado = EnderecoSegmentado {
-///     segmentos: vec![SegmentoEndereco {
-///         valor: "20000-000".to_string(),
-///         tipo: TipoSegmento::Cep,
-///     }],
-/// };
+/// let segmentado = EnderecoSegmentado::novo(vec![SegmentoEndereco::novo(
+///     "20000-000",
+///     TipoSegmento::Cep,
+/// )]);
 ///
 /// assert_eq!(
 ///     segmento_como_json(&segmentado),
@@ -627,7 +716,7 @@ pub fn segmento_como_json(segmentado: &EnderecoSegmentado) -> String {
 }
 
 #[cfg(test)]
-mod testes_tipo_segmento {
+mod tests_tipo_segmento {
     use super::TipoSegmento;
 
     #[test]
@@ -643,9 +732,30 @@ mod testes_tipo_segmento {
 
     #[test]
     fn como_str_volta_para_o_rotulo() {
-        for tipo in TipoSegmento::TODOS {
-            assert_eq!(TipoSegmento::from(tipo.como_str()), tipo);
-        }
+        let volta: Vec<TipoSegmento> = TipoSegmento::TODOS
+            .iter()
+            .map(|tipo| TipoSegmento::from(tipo.como_str()))
+            .collect();
+        assert_eq!(volta, TipoSegmento::TODOS.to_vec());
+    }
+
+    #[test]
+    fn serde_usa_o_mesmo_rotulo_de_como_str() {
+        let json: Vec<String> = TipoSegmento::TODOS
+            .iter()
+            .map(|tipo| {
+                serde_json::to_value(tipo)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        let rotulos: Vec<String> = TipoSegmento::TODOS
+            .iter()
+            .map(|tipo| tipo.como_str().to_string())
+            .collect();
+        assert_eq!(json, rotulos);
     }
 
     #[test]
@@ -665,53 +775,22 @@ mod testes_tipo_segmento {
     }
 }
 
+// Os testes que precisam do modelo e de itens privados ficam aqui; os de
+// integração, que só usam a API pública, estão em `tests/crf.rs`.
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::endereco::Endereco;
-    use crate::separador_endereco::modelo::{
-        NOME_ARQUIVO_MODELO, NOME_DIRETORIO_CACHE, VAR_AMBIENTE_MODELO, VAR_AMBIENTE_SEM_DOWNLOAD,
-        VERSAO_MODELO,
-    };
+    use crate::separador_endereco::modelo::obter_modelo_no_cache;
 
     /// Constrói um segmento sem repetir a struct em cada teste.
     fn criar_segmento(valor: &str, tipo: TipoSegmento) -> SegmentoEndereco {
-        SegmentoEndereco {
-            valor: valor.to_string(),
-            tipo,
-        }
+        SegmentoEndereco::novo(valor, tipo)
     }
 
     /// Constrói uma segmentação a partir dos segmentos, na ordem em que aparecem.
     fn criar_segmentado(segmentos: Vec<SegmentoEndereco>) -> EnderecoSegmentado {
-        EnderecoSegmentado { segmentos }
-    }
-
-    /// Caminho do modelo padrão no cache do sistema, sem passar pelas
-    /// variáveis de ambiente (portanto nunca baixa nada).
-    fn obter_modelo_no_cache() -> Option<PathBuf> {
-        dirs::cache_dir()
-            .map(|cache| {
-                cache
-                    .join(NOME_DIRETORIO_CACHE)
-                    .join(VERSAO_MODELO)
-                    .join(NOME_ARQUIVO_MODELO)
-            })
-            .filter(|caminho| caminho.is_file())
-    }
-
-    /// Prepara o ambiente para os testes que usam o modelo padrão:
-    /// devolve o caminho do modelo ou `None` (teste pulado) quando ele não
-    /// está disponível, como no CI, que não baixa o modelo.
-    ///
-    /// As variáveis de ambiente também são apontadas para esse modelo, para
-    /// evitar downloads acidentais e interferência dos testes de `modelo.rs`,
-    /// que manipulam as mesmas variáveis.
-    fn preparar_modelo_padrao() -> Option<PathBuf> {
-        let caminho = obter_modelo_no_cache()?;
-        std::env::set_var(VAR_AMBIENTE_MODELO, caminho.as_os_str());
-        std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "true");
-        Some(caminho)
+        EnderecoSegmentado::novo(segmentos)
     }
 
     #[test]
@@ -767,62 +846,6 @@ mod tests {
     // está no cache, como no CI, os testes simplesmente passam sem executar.
 
     #[test]
-    fn estimar_devolve_marginal_do_rotulo_previsto() {
-        let Some(caminho) = obter_modelo_no_cache() else {
-            return;
-        };
-        let separador = SeparadorEndereco::carregar(caminho).unwrap();
-        let (tokens, _) = separador.extrator.tokenize("rua brasil, 123");
-        let features = separador.extrator.tokens2features(&tokens);
-
-        let estimativa = separador.modelo.tagger().estimar(&features);
-
-        assert_eq!(estimativa.rotulos.len(), tokens.len());
-        assert_eq!(estimativa.marginais.len(), tokens.len());
-        assert!(estimativa.marginais.iter().all(|m| (0.0..=1.0).contains(m)));
-        assert!(estimativa.marginais.iter().all(|m| *m > 0.0));
-        assert!(estimativa.lognorm.is_finite());
-    }
-
-    #[test]
-    fn carregar_permite_segmentar_com_o_modelo_do_cache() {
-        let Some(caminho) = obter_modelo_no_cache() else {
-            return;
-        };
-        let separador = SeparadorEndereco::carregar(caminho).unwrap();
-
-        let features = separador
-            .extrator
-            .tokens2features(&["rua", "brasil", "123"]);
-        assert_eq!(features.len(), 3);
-        for features_token in &features {
-            assert!(!features_token.is_empty());
-        }
-
-        assert_eq!(
-            separador.segmentar("rua brasil, 123"),
-            criar_segmentado(vec![
-                criar_segmento("rua brasil", TipoSegmento::Logradouro),
-                criar_segmento("123", TipoSegmento::Numero),
-            ])
-        );
-
-        assert_eq!(
-            separador.segmentar_enderecos(&["rua brasil, 123", "r brasil, 50"]),
-            vec![
-                criar_segmentado(vec![
-                    criar_segmento("rua brasil", TipoSegmento::Logradouro),
-                    criar_segmento("123", TipoSegmento::Numero),
-                ]),
-                criar_segmentado(vec![
-                    criar_segmento("r brasil", TipoSegmento::Logradouro),
-                    criar_segmento("50", TipoSegmento::Numero),
-                ]),
-            ]
-        );
-    }
-
-    #[test]
     fn montar_segmentos_segue_os_rotulos_bio() {
         let Some(caminho) = obter_modelo_no_cache() else {
             return;
@@ -837,155 +860,45 @@ mod tests {
             .map(|tag| tag.to_string())
             .collect();
 
+        let (segmentos, faixas) = separador.montar_segmentos("a,b 100", &tokens, &tags, &offsets);
         assert_eq!(
-            separador.montar_segmentos("a,b 100", &tokens, &tags, &offsets),
+            segmentos,
             vec![criar_segmento("ab", TipoSegmento::Logradouro)]
         );
+        assert_eq!(faixas, vec![0..3]);
 
         // `I-` sem segmento anterior é descartado.
         assert_eq!(
-            separador.montar_segmentos("z", &["z"], &["I_logradouro".to_string()], &[0],),
+            separador
+                .montar_segmentos("z", &["z"], &["I_logradouro".to_string()], &[0])
+                .0,
             Vec::new()
         );
 
         // `I-` após espaço junta com espaço.
         assert_eq!(
-            separador.montar_segmentos(
-                "x 1",
-                &["x", "1"],
-                &["B_numero".to_string(), "I_numero".to_string()],
-                &[0, 2],
-            ),
+            separador
+                .montar_segmentos(
+                    "x 1",
+                    &["x", "1"],
+                    &["B_numero".to_string(), "I_numero".to_string()],
+                    &[0, 2],
+                )
+                .0,
             vec![criar_segmento("x 1", TipoSegmento::Numero)]
         );
 
         // Prefixo BIO desconhecido é descartado.
         assert_eq!(
-            separador.montar_segmentos(
-                "a b",
-                &["a", "b"],
-                &["B_logradouro".to_string(), "X_logradouro".to_string()],
-                &[0, 2],
-            ),
+            separador
+                .montar_segmentos(
+                    "a b",
+                    &["a", "b"],
+                    &["B_logradouro".to_string(), "X_logradouro".to_string()],
+                    &[0, 2],
+                )
+                .0,
             vec![criar_segmento("a", TipoSegmento::Logradouro)]
-        );
-    }
-
-    #[test]
-    fn segmentar_endereco_separa_partes_simples() {
-        if preparar_modelo_padrao().is_none() {
-            return;
-        }
-
-        assert_eq!(
-            segmentar_endereco("rua brasil, 123"),
-            criar_segmentado(vec![
-                criar_segmento("rua brasil", TipoSegmento::Logradouro),
-                criar_segmento("123", TipoSegmento::Numero),
-            ])
-        );
-    }
-
-    #[test]
-    fn tentar_segmentar_endereco_devolve_ok() {
-        if preparar_modelo_padrao().is_none() {
-            return;
-        }
-
-        assert_eq!(
-            tentar_segmentar_endereco("r brasil, 50"),
-            Ok(criar_segmentado(vec![
-                criar_segmento("r brasil", TipoSegmento::Logradouro),
-                criar_segmento("50", TipoSegmento::Numero),
-            ]))
-        );
-    }
-
-    #[test]
-    fn segmentar_enderecos_mantem_a_ordem_da_entrada() {
-        if preparar_modelo_padrao().is_none() {
-            return;
-        }
-
-        let entradas = ["rua brasil, 123", "av atlantica, 123, apto 301"];
-        let saida_esperada = vec![
-            criar_segmentado(vec![
-                criar_segmento("rua brasil", TipoSegmento::Logradouro),
-                criar_segmento("123", TipoSegmento::Numero),
-            ]),
-            criar_segmentado(vec![
-                criar_segmento("av atlantica", TipoSegmento::Logradouro),
-                criar_segmento("123", TipoSegmento::Numero),
-                criar_segmento("apto 301", TipoSegmento::Complemento),
-            ]),
-        ];
-
-        assert_eq!(segmentar_enderecos(&entradas), saida_esperada);
-        assert_eq!(tentar_segmentar_enderecos(&entradas), Ok(saida_esperada));
-    }
-
-    #[test]
-    fn estruturar_endereco_padroniza_os_campos() {
-        if preparar_modelo_padrao().is_none() {
-            return;
-        }
-
-        assert_eq!(
-            estruturar_endereco("av atlantica, 123, apto 301", true),
-            Endereco {
-                logradouro: Some("AVENIDA ATLANTICA".to_string()),
-                numero: Some("123".to_string()),
-                complemento: Some("APARTAMENTO 301".to_string()),
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn estruturar_endereco_sem_padronizar_mantem_os_segmentos() {
-        if preparar_modelo_padrao().is_none() {
-            return;
-        }
-
-        assert_eq!(
-            estruturar_endereco("av atlantica, 123, apto 301", false),
-            Endereco {
-                logradouro: Some("av atlantica".to_string()),
-                numero: Some("123".to_string()),
-                complemento: Some("apto 301".to_string()),
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn estruturar_endereco_preenche_localidade_e_cep() {
-        if preparar_modelo_padrao().is_none() {
-            return;
-        }
-
-        assert_eq!(
-            estruturar_endereco(
-                "r a, 1, ap 2, copacabana, rio de janeiro, rj, 22000-000",
-                true,
-            ),
-            Endereco {
-                logradouro: Some("RUA A".to_string()),
-                numero: Some("1".to_string()),
-                complemento: Some("APARTAMENTO 2".to_string()),
-                localidade: Some("COPACABANA".to_string()),
-                cep: Some("22000-000".to_string()),
-            }
-        );
-
-        assert_eq!(
-            tentar_estruturar_endereco("r a, 1, ap 2", false),
-            Ok(Endereco {
-                logradouro: Some("r a".to_string()),
-                numero: Some("1".to_string()),
-                complemento: Some("ap 2".to_string()),
-                ..Default::default()
-            })
         );
     }
 }

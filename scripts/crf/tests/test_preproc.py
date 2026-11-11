@@ -209,7 +209,9 @@ def test_token2features_com_token_numerico_longo_zeros():
     sent = ["000000000000012345"]
     feats = token2features(sent, 0)
     assert "0:is_digit" in feats
-    assert "0:tam:5" in feats
+    # `tam` conta os zeros e satura em 10; o comprimento sem zeros vai em `tam_num`.
+    assert "0:tam:10" in feats
+    assert "0:tam_num:5" in feats
     assert "0:000000000000012345" in feats
 
 

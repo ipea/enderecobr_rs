@@ -52,10 +52,21 @@ enderecobr_rs = { version = "0.2.0" }
 ### Rust:
 
 ```rust
-use enderecobr_rs::{padronizar_complementos, padronizar_logradouros, estruturar_endereco, Endereco};
+use enderecobr_rs::{
+    padronizar_complementos, padronizar_logradouros, estruturar_endereco, Endereco, OpcoesEndereco,
+};
 assert_eq!(padronizar_logradouros("r. gen.. glicério"), "RUA GENERAL GLICERIO");
 assert_eq!(padronizar_complementos("QD1 LT2 CS3"), "QUADRA 1 LOTE 2 CASA 3");
-assert_eq!(estruturar_endereco("av atlantica, 123, apt 123", true), Endereco { logradouro: Some("AVENIDA ATLANTICA".to_string()), numero: Some("123".to_string()), complemento: Some("APARTAMENTO 123".to_string()), ..Default::default()});
+assert_eq!(
+    estruturar_endereco("av Atlantica, 123, apt 123", &OpcoesEndereco::default())
+        .unwrap(),
+    Endereco {
+        logradouro: Some("AVENIDA ATLANTICA".to_string()),
+        numero: Some("123".to_string()),
+        complemento: Some("APARTAMENTO 123".to_string()),
+        ..Default::default()
+    }
+);
 ```
 
 ### Python:
@@ -70,9 +81,13 @@ assert enderecobr.estruturar_endereco("av atlantica, 123, apt 123") == enderecob
 ## Release
 
 ```bash
-# Utilitário que ajuda a altera a versão nos arquivos necessários
-# (Cargo.toml e pyproject.toml), além de fazr um commit deles e cria a tag no git.
-./bump-versao-release.sh 0.2.0
+# Utilitário que altera a versão nos arquivos necessários (Cargo.toml e
+# pyproject.toml), faz o commit deles e cria a tag no git.
+./bump-versao.sh 0.2.0
+
+# A mesma chamada sobe também um modelo CRF novo, no mesmo commit: roda os
+# testes de integração com ele, publica o asset da release e aponta o código.
+# ./bump-versao.sh 0.6.0 0.3.0 ~/modelos/tagger_novo.crf
 
 # Faz o push do commit e da tag para o repositório principal.
 # O Github CI deve fazer o restante das checagens, compilações e gatilhos necessários.

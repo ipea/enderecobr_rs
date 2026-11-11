@@ -7,6 +7,9 @@ use crate::{
 };
 
 /// Representa um endereço separado em seus atributos constituintes.
+///
+/// Vide [`OpcoesSegmentacao`](crate::separador_endereco::OpcoesSegmentacao)
+/// para preencher as probabilidades.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Endereco {
     /// Nome do logradouro (rua, avenida, travessa etc.).
@@ -19,6 +22,20 @@ pub struct Endereco {
     pub localidade: Option<String>,
     /// CEP no formato `XXXXX-XXX`.
     pub cep: Option<String>,
+    /// Probabilidade de a segmentação que originou este endereço estar correta.
+    ///
+    /// Cai com o tamanho do endereço; para comparar endereços de tamanhos
+    /// diferentes, use [`Self::confianca`]. Fica vazia quando a segmentação não
+    /// pediu as probabilidades (vide
+    /// [`OpcoesSegmentacao`](crate::separador_endereco::OpcoesSegmentacao)).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probabilidade: Option<f64>,
+    /// Certeza média por trecho, entre 0 e 1: a média geométrica das
+    /// probabilidades de cada token, que não cai com o tamanho do endereço.
+    ///
+    /// Fica vazia quando a segmentação não pediu as probabilidades.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confianca: Option<f64>,
 }
 
 /// Serializa o endereço em JSON.
@@ -86,6 +103,7 @@ impl Endereco {
             complemento,
             localidade,
             cep,
+            ..Default::default()
         }
     }
 
@@ -131,6 +149,7 @@ mod tests {
             complemento: Some("apt 405".to_string()),
             localidade: Some("jd botanico".to_string()),
             cep: Some("20040020".to_string()), // antes era None
+            ..Default::default()
         };
         let esperado = Endereco {
             logradouro: Some("RUA GENERAL GLICERIO".to_string()),
@@ -138,6 +157,7 @@ mod tests {
             complemento: Some("APARTAMENTO 405".to_string()),
             localidade: Some("JARDIM BOTANICO".to_string()),
             cep: Some("20040-020".to_string()), // antes era None
+            ..Default::default()
         };
 
         assert_eq!(original.endereco_padronizado(), esperado.clone());

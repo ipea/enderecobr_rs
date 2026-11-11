@@ -207,9 +207,9 @@ def lote(
             min=0.0,
             max=1.0,
             help=(
-                "Como --incertos, mas pela média: endereço cuja média das "
-                "probabilidades previstas, token a token, fica abaixo deste limiar "
-                "(0–1)."
+                "Como --incertos, mas pela média: endereço cuja média "
+                "geométrica das probabilidades previstas, token a token, fica "
+                "abaixo deste limiar (0–1)."
             ),
         ),
     ] = None,

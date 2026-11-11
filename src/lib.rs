@@ -351,9 +351,8 @@ pub use tipo_logradouro::padronizar_tipo_logradouro;
 pub use separador_endereco::estruturar_endereco;
 pub use separador_endereco::segmentar_endereco;
 pub use separador_endereco::segmentar_enderecos;
-pub use separador_endereco::tentar_estruturar_endereco;
-pub use separador_endereco::tentar_segmentar_endereco;
-pub use separador_endereco::tentar_segmentar_enderecos;
+pub use separador_endereco::OpcoesEndereco;
+pub use separador_endereco::OpcoesSegmentacao;
 
 pub use separador_endereco::estruturar_segmentos;
 
@@ -375,13 +374,23 @@ pub fn obter_padronizador_por_tipo(tipo: &str) -> Result<fn(&str) -> String, &st
         "metaphone" => Ok(metaphone::metaphone),
         "dado_faltante" => Ok(|x| is_dado_faltante(x).to_string()),
 
-        "segmentacao" => Ok(|val| segmentar_endereco(val).como_json()),
+        "segmentacao" => Ok(|val| {
+            segmentar_endereco(val, &OpcoesSegmentacao::sem_probabilidades())
+                .expect("Não foi possível segmentar o endereço")
+                .como_json()
+        }),
 
-        "estruturacao" => {
-            Ok(|val| estruturar_segmentos(&segmentar_endereco(val), true).como_json())
-        }
+        "estruturacao" => Ok(|val| {
+            estruturar_endereco(val, &OpcoesEndereco::default())
+                .expect("Não foi possível estruturar o endereço")
+                .como_json()
+        }),
 
-        "formatacao" => Ok(|val| estruturar_segmentos(&segmentar_endereco(val), true).formatar()),
+        "formatacao" => Ok(|val| {
+            estruturar_endereco(val, &OpcoesEndereco::default())
+                .expect("Não foi possível estruturar o endereço")
+                .formatar()
+        }),
 
         _ => Err("Nenhum padronizador encontrado"),
     }
@@ -475,6 +484,7 @@ mod tests {
             complemento: Some("apto. 405".to_string()),
             localidade: Some("jd botânico".to_string()),
             cep: Some("20.040-020".to_string()),
+            ..Default::default()
         };
 
         let esperado = Endereco {
@@ -483,6 +493,7 @@ mod tests {
             complemento: Some("APARTAMENTO 405".to_string()),
             localidade: Some("JARDIM BOTANICO".to_string()),
             cep: Some("20040-020".to_string()),
+            ..Default::default()
         };
         assert_eq!(endereco.endereco_padronizado(), esperado);
     }
@@ -495,6 +506,7 @@ mod tests {
             complemento: Some("qd 5".to_string()),
             localidade: Some("prq ind".to_string()),
             cep: None,
+            ..Default::default()
         };
 
         let esperado = Endereco {
@@ -503,6 +515,7 @@ mod tests {
             complemento: Some("QUADRA 5".to_string()),
             localidade: Some("PARQUE INDUSTRIAL".to_string()),
             cep: None,
+            ..Default::default()
         };
         assert_eq!(endereco.endereco_padronizado(), esperado);
     }
@@ -533,6 +546,7 @@ mod tests {
             complemento: None,
             localidade: Some("CENTRO".to_string()),
             cep: None,
+            ..Default::default()
         };
         assert_eq!(endereco.formatar(), "RUA A, 123, CENTRO");
     }
@@ -546,6 +560,7 @@ mod tests {
             complemento: None,
             localidade: Some("CENTRO".to_string()),
             cep: Some("20040-020".to_string()),
+            ..Default::default()
         };
         assert_eq!(endereco.formatar(), "RUA A, 123, CENTRO, 20040-020");
     }

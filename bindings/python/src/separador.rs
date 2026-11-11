@@ -92,6 +92,10 @@ impl SeparadorEndereco {
     /// ----------
     /// texto : str
     ///     Endereço bruto a ser segmentado.
+    /// com_probabilidade : bool, optional
+    ///     Se `True`, preenche `probabilidade` e `confianca` no resultado (e
+    ///     `probabilidade` em cada segmento), ao custo de cerca de 10% a mais
+    ///     de tempo na segmentação.
     ///
     /// Returns
     /// -------
@@ -114,11 +118,18 @@ impl SeparadorEndereco {
     /// >>> seg = sep.segmentar('av n sra copacabana, 123, apt 301')  # doctest: +SKIP
     /// >>> [s.valor for s in seg.segmentos]  # doctest: +SKIP
     /// ['av n sra copacabana', '123', 'apt 301']
-    fn segmentar(&self, py: Python<'_>, texto: &str) -> PyResult<EnderecoSegmentado> {
+    #[pyo3(signature = (texto, com_probabilidade = false))]
+    fn segmentar(
+        &self,
+        py: Python<'_>,
+        texto: &str,
+        com_probabilidade: bool,
+    ) -> PyResult<EnderecoSegmentado> {
         let separador = self.modelo()?;
+        let opcoes = crate::opcoes_de_segmentacao(com_probabilidade);
 
         // A inferência é a parte cara: rodar sem o GIL libera as outras threads.
-        Ok(py.detach(|| separador.segmentar(texto)).into())
+        Ok(py.detach(|| separador.segmentar(texto, &opcoes)).into())
     }
 
     /// Segmenta vários endereços de uma vez com o modelo desta instância.
@@ -130,6 +141,8 @@ impl SeparadorEndereco {
     /// ----------
     /// textos : iterable of str
     ///     Endereços brutos a serem segmentados.
+    /// com_probabilidade : bool, optional
+    ///     Se `True`, preenche `probabilidade` e `confianca` em cada resultado.
     ///
     /// Returns
     /// -------
@@ -151,16 +164,19 @@ impl SeparadorEndereco {
     /// >>> resultados = sep.segmentar_enderecos(['av n sra copacabana, 123'])  # doctest: +SKIP
     /// >>> resultados[0].segmentos[0].tipo  # doctest: +SKIP
     /// 'logradouro'
+    #[pyo3(signature = (textos, com_probabilidade = false))]
     fn segmentar_enderecos(
         &self,
         py: Python<'_>,
         textos: Vec<String>,
+        com_probabilidade: bool,
     ) -> PyResult<Vec<EnderecoSegmentado>> {
         let separador = self.modelo()?;
+        let opcoes = crate::opcoes_de_segmentacao(com_probabilidade);
 
         let segmentados = py.detach(|| {
             let textos: Vec<&str> = textos.iter().map(String::as_str).collect();
-            separador.segmentar_enderecos(&textos)
+            separador.segmentar_enderecos(&textos, &opcoes)
         });
         Ok(segmentados
             .into_iter()
@@ -296,6 +312,10 @@ pub fn obter_caminho_modelo(path_modelo: Option<PathBuf>) -> PyResult<PathBuf> {
 /// ----------
 /// endereco : str
 ///     Endereço bruto a ser segmentado.
+/// com_probabilidade : bool, optional
+///     Se `True`, preenche `probabilidade` e `confianca` no resultado (e
+///     `probabilidade` em cada segmento), ao custo de cerca de 10% a mais de
+///     tempo na segmentação.
 ///
 /// Returns
 /// -------
@@ -318,9 +338,15 @@ pub fn obter_caminho_modelo(path_modelo: Option<PathBuf>) -> PyResult<PathBuf> {
 /// O GIL é liberado durante a inferência, então outras threads do Python
 /// seguem rodando.
 #[pyfunction]
-pub fn segmentar_endereco(py: Python<'_>, endereco: &str) -> PyResult<EnderecoSegmentado> {
+#[pyo3(signature = (endereco, com_probabilidade = false))]
+pub fn segmentar_endereco(
+    py: Python<'_>,
+    endereco: &str,
+    com_probabilidade: bool,
+) -> PyResult<EnderecoSegmentado> {
+    let opcoes = crate::opcoes_de_segmentacao(com_probabilidade);
     let segmentado = py
-        .detach(|| enderecobr_rs::tentar_segmentar_endereco(endereco))
+        .detach(|| enderecobr_rs::segmentar_endereco(endereco, &opcoes))
         .map_err(crate::erro_de_modelo_padrao)?;
     Ok(segmentado.into())
 }
@@ -338,6 +364,8 @@ pub fn segmentar_endereco(py: Python<'_>, endereco: &str) -> PyResult<EnderecoSe
 /// ----------
 /// enderecos : iterable of str
 ///     Endereços brutos a serem segmentados.
+/// com_probabilidade : bool, optional
+///     Se `True`, preenche `probabilidade` e `confianca` em cada resultado.
 ///
 /// Returns
 /// -------
@@ -358,14 +386,17 @@ pub fn segmentar_endereco(py: Python<'_>, endereco: &str) -> PyResult<EnderecoSe
 /// >>> len(resultados)  # doctest: +SKIP
 /// 2
 #[pyfunction]
+#[pyo3(signature = (enderecos, com_probabilidade = false))]
 pub fn segmentar_enderecos(
     py: Python<'_>,
     enderecos: Vec<String>,
+    com_probabilidade: bool,
 ) -> PyResult<Vec<EnderecoSegmentado>> {
+    let opcoes = crate::opcoes_de_segmentacao(com_probabilidade);
     let segmentados = py
         .detach(|| {
             let textos: Vec<&str> = enderecos.iter().map(String::as_str).collect();
-            enderecobr_rs::tentar_segmentar_enderecos(&textos)
+            enderecobr_rs::segmentar_enderecos(&textos, &opcoes)
         })
         .map_err(crate::erro_de_modelo_padrao)?;
     Ok(segmentados
@@ -403,10 +434,21 @@ pub fn segmentar_enderecos(
 /// >>> end.numero  # doctest: +SKIP
 /// '123'
 #[pyfunction]
-#[pyo3(signature = (endereco, padronizar = true))]
-pub fn estruturar_endereco(py: Python<'_>, endereco: &str, padronizar: bool) -> PyResult<Endereco> {
+#[pyo3(signature = (endereco, padronizar = true, com_probabilidade = false))]
+pub fn estruturar_endereco(
+    py: Python<'_>,
+    endereco: &str,
+    padronizar: bool,
+    com_probabilidade: bool,
+) -> PyResult<Endereco> {
     let estruturado = py
-        .detach(|| enderecobr_rs::tentar_estruturar_endereco(endereco, padronizar))
+        .detach(|| {
+            let opcoes = enderecobr_rs::OpcoesEndereco {
+                padronizar,
+                probabilidades: com_probabilidade,
+            };
+            enderecobr_rs::estruturar_endereco(endereco, &opcoes)
+        })
         .map_err(crate::erro_de_modelo_padrao)?;
     Ok(estruturado.into())
 }

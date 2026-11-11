@@ -124,6 +124,26 @@ impl Endereco {
         self.interno.cep = valor;
     }
 
+    /// Probabilidade de a segmentação que originou este endereço estar correta.
+    ///
+    /// Cai com o tamanho do endereço; para comparar endereços de tamanhos
+    /// diferentes, use `confianca`. `None` quando a segmentação não pediu as
+    /// probabilidades (`com_probabilidade=False`).
+    #[getter]
+    fn probabilidade(&self) -> Option<f64> {
+        self.interno.probabilidade
+    }
+
+    /// Certeza média por trecho, entre 0 e 1.
+    ///
+    /// É a média geométrica das probabilidades de cada token, então não cai com
+    /// o tamanho do endereço. `None` quando a segmentação não pediu as
+    /// probabilidades.
+    #[getter]
+    fn confianca(&self) -> Option<f64> {
+        self.interno.confianca
+    }
+
     /// Junta os campos preenchidos em um único texto, separados por vírgula.
     ///
     /// Campos `None` ou vazios são omitidos. É o mesmo texto devolvido por

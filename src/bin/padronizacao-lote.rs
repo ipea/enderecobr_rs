@@ -6,19 +6,18 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use enderecobr_rs::padronizar_estados_para_sigla;
-use enderecobr_rs::separador_endereco::estruturar_segmentos;
 use enderecobr_rs::separador_endereco::modelo::VAR_AMBIENTE_MODELO;
 use enderecobr_rs::{
-    padronizar_bairros, padronizar_cep_leniente, padronizar_complementos, padronizar_logradouros,
-    padronizar_municipios, padronizar_numeros, padronizar_tipo_logradouro,
-    separador_endereco::segmentar_endereco, Endereco,
+    estruturar_endereco, padronizar_bairros, padronizar_cep_leniente, padronizar_complementos,
+    padronizar_logradouros, padronizar_municipios, padronizar_numeros, padronizar_tipo_logradouro,
+    Endereco, OpcoesEndereco,
 };
 use itertools::Itertools;
 use polars::prelude::{
-    col, sync_on_close::SyncOnCloseType, Column, DataFrame, DataType, Field, FileWriteFormat,
-    IntoColumn, LazyFrame, ParquetCompression, ParquetWriteOptions, PlRefPath, PolarsError,
-    PolarsResult, ScanArgsParquet, Schema, SinkDestination, SinkTarget, StatisticsOptions,
-    StringChunked, UnifiedSinkArgs,
+    col, polars_err, sync_on_close::SyncOnCloseType, Column, DataFrame, DataType, Field,
+    FileWriteFormat, IntoColumn, LazyFrame, ParquetCompression, ParquetWriteOptions, PlRefPath,
+    PolarsError, PolarsResult, ScanArgsParquet, Schema, SinkDestination, SinkTarget,
+    StatisticsOptions, StringChunked, UnifiedSinkArgs,
 };
 
 #[derive(Debug, Clone)]
@@ -121,6 +120,14 @@ struct Args {
     #[arg(long, default_value = "false")]
     timing: bool,
 
+    /// Acrescenta as colunas `probabilidade_endereco` (probabilidade de a
+    /// segmentação inteira estar correta) e `confianca_endereco` (certeza média
+    /// por trecho, que não cai com o tamanho do endereço). Só tem efeito
+    /// combinado com `-e/--endereco`, e deixa a segmentação cerca de 10% mais
+    /// lenta.
+    #[arg(long, default_value = "false")]
+    probabilidades: bool,
+
     /// Número máximo de threads (cores) usadas no processamento. Sem esta opção,
     /// o Polars usa todos os núcleos disponíveis.
     #[arg(
@@ -188,37 +195,68 @@ const CAMPOS_ENDERECO: [&str; 5] = [
     "cep_extraido",
 ];
 
+/// Colunas de probabilidade, emitidas só com `-e` e `--probabilidades`.
+const COLUNA_PROBABILIDADE: &str = "probabilidade_endereco";
+const COLUNA_CONFIANCA: &str = "confianca_endereco";
+const CAMPOS_PROBABILIDADE: [&str; 2] = [COLUNA_PROBABILIDADE, COLUNA_CONFIANCA];
+
 /// Acumuladores do modo `--timing` (nanossegundos gastos e nº de endereços).
 static TEMPO_SEGMENTACAO_NS: AtomicU64 = AtomicU64::new(0);
 static NUM_ENDERECOS: AtomicU64 = AtomicU64::new(0);
 
-fn campo_endereco_processado() -> Field {
-    let campos = CAMPOS_ENDERECO
+fn campo_endereco_processado(probabilidades: bool) -> Field {
+    let mut campos: Vec<Field> = CAMPOS_ENDERECO
         .iter()
         .map(|&nome| Field::new(nome.into(), DataType::String))
         .collect();
+    if probabilidades {
+        campos.extend(
+            CAMPOS_PROBABILIDADE
+                .iter()
+                .map(|&nome| Field::new(nome.into(), DataType::Float64)),
+        );
+    }
     Field::new("endereco_processado".into(), DataType::Struct(campos))
+}
+
+/// Traduz a opção de linha de comando nas opções do estruturar.
+fn opcoes_de_endereco(probabilidades: bool) -> OpcoesEndereco {
+    if probabilidades {
+        OpcoesEndereco::default().com_probabilidades()
+    } else {
+        OpcoesEndereco::default()
+    }
 }
 
 /// Segmenta o endereço e padroniza os campos; no modo `--timing`, acumula ainda o
 /// tempo gasto na segmentação.
-fn segmentar_padronizado(texto: &str, timing: bool) -> Endereco {
-    let Some(inicio) = timing.then(Instant::now) else {
-        return estruturar_segmentos(&segmentar_endereco(texto), true);
-    };
-
-    let segmentado = segmentar_endereco(texto);
-    TEMPO_SEGMENTACAO_NS.fetch_add(inicio.elapsed().as_nanos() as u64, Ordering::Relaxed);
-    NUM_ENDERECOS.fetch_add(1, Ordering::Relaxed);
-    estruturar_segmentos(&segmentado, true)
+///
+/// Com `probabilidades`, a saída traz também a probabilidade e a confiança do
+/// endereço.
+fn segmentar_padronizado(
+    texto: &str,
+    timing: bool,
+    probabilidades: bool,
+) -> Result<Endereco, String> {
+    let inicio = timing.then(Instant::now);
+    let resultado = estruturar_endereco(texto, &opcoes_de_endereco(probabilidades));
+    if let Some(inicio) = inicio {
+        TEMPO_SEGMENTACAO_NS.fetch_add(inicio.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        NUM_ENDERECOS.fetch_add(1, Ordering::Relaxed);
+    }
+    resultado
 }
 
-fn expandir_endereco(col: Column, timing: bool) -> PolarsResult<Column> {
+fn expandir_endereco(col: Column, timing: bool, probabilidades: bool) -> PolarsResult<Column> {
     let enderecos: Vec<Option<Endereco>> = col
         .str()?
         .iter()
-        .map(|opt| opt.map(|texto| segmentar_padronizado(texto, timing)))
-        .collect();
+        .map(|opt| {
+            opt.map(|texto| segmentar_padronizado(texto, timing, probabilidades))
+                .transpose()
+        })
+        .collect::<Result<Vec<_>, String>>()
+        .map_err(|erro| polars_err!(ComputeError: "{}", erro))?;
 
     let extratores: [fn(&Endereco) -> Option<String>; 5] = [
         |e| e.logradouro.clone(),
@@ -227,7 +265,7 @@ fn expandir_endereco(col: Column, timing: bool) -> PolarsResult<Column> {
         |e| e.localidade.clone(),
         |e| e.cep.clone(),
     ];
-    let colunas: Vec<Column> = CAMPOS_ENDERECO
+    let mut colunas: Vec<Column> = CAMPOS_ENDERECO
         .iter()
         .zip(extratores)
         .map(|(&nome, extrair)| {
@@ -239,6 +277,19 @@ fn expandir_endereco(col: Column, timing: bool) -> PolarsResult<Column> {
         })
         .collect();
 
+    if probabilidades {
+        let probabilidade: Vec<Option<f64>> = enderecos
+            .iter()
+            .map(|endereco| endereco.as_ref().and_then(|e| e.probabilidade))
+            .collect();
+        let confianca: Vec<Option<f64>> = enderecos
+            .iter()
+            .map(|endereco| endereco.as_ref().and_then(|e| e.confianca))
+            .collect();
+        colunas.push(Column::new(COLUNA_PROBABILIDADE.into(), probabilidade));
+        colunas.push(Column::new(COLUNA_CONFIANCA.into(), confianca));
+    }
+
     let df = DataFrame::new_infer_height(colunas)?;
     Ok(df.into_struct("endereco_processado".into()).into_column())
 }
@@ -247,19 +298,24 @@ fn segmentar_endereco_df(
     df: LazyFrame,
     campo_endereco: &str,
     timing: bool,
+    probabilidades: bool,
 ) -> PolarsResult<LazyFrame> {
-    // df.select([col(campo_endereco)])
+    let mut campos: Vec<&str> = CAMPOS_ENDERECO.to_vec();
+    if probabilidades {
+        campos.extend(CAMPOS_PROBABILIDADE);
+    }
+
     Ok(df
         .with_column(
             col(campo_endereco)
                 .map(
-                    move |coluna: Column| expandir_endereco(coluna, timing),
-                    |_, _| Ok(campo_endereco_processado()),
+                    move |coluna: Column| expandir_endereco(coluna, timing, probabilidades),
+                    move |_, _| Ok(campo_endereco_processado(probabilidades)),
                 )
                 .alias("endereco_processado"),
         )
         .with_columns(
-            CAMPOS_ENDERECO
+            campos
                 .iter()
                 .map(|&nome| col("endereco_processado").struct_().field_by_name(nome))
                 .collect::<Vec<_>>(),
@@ -349,12 +405,17 @@ fn executar(args: Args) -> Result<(), String> {
     colunas_finais.extend(args.campos.iter().map(|c| c.destino.to_string()));
 
     if let Some(campo_endereco) = args.endereco {
-        df = segmentar_endereco_df(df, &campo_endereco, timing)
+        df = segmentar_endereco_df(df, &campo_endereco, timing, args.probabilidades)
             .map_err(|erro| format!("não foi possível segmentar os endereços: {erro}"))?;
 
         CAMPOS_ENDERECO
             .iter()
             .for_each(|x| colunas_finais.push(x.to_string()));
+        if args.probabilidades {
+            CAMPOS_PROBABILIDADE
+                .iter()
+                .for_each(|x| colunas_finais.push(x.to_string()));
+        }
     }
 
     if !args.manter_todos {
@@ -410,4 +471,37 @@ fn executar(args: Args) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    fn nomes(campo: &Field) -> Vec<&str> {
+        let DataType::Struct(campos) = campo.dtype() else {
+            panic!("esperava uma struct, veio {:?}", campo.dtype());
+        };
+        campos.iter().map(|campo| campo.name().as_str()).collect()
+    }
+
+    #[test]
+    fn opcao_de_probabilidade_vira_pedido_ao_estruturar() {
+        assert!(opcoes_de_endereco(true).probabilidades);
+        assert!(!opcoes_de_endereco(false).probabilidades);
+        // A padronização não depende dessa opção.
+        assert!(opcoes_de_endereco(true).padronizar);
+        assert!(opcoes_de_endereco(false).padronizar);
+    }
+
+    #[test]
+    fn colunas_de_probabilidade_entram_so_com_a_opcao() {
+        let sem = campo_endereco_processado(false);
+        assert_eq!(nomes(&sem), CAMPOS_ENDERECO);
+
+        let com = campo_endereco_processado(true);
+        assert_eq!(
+            nomes(&com),
+            [CAMPOS_ENDERECO.as_slice(), &CAMPOS_PROBABILIDADE].concat()
+        );
+    }
 }

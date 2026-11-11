@@ -6,11 +6,11 @@ use std::{
 };
 /// Endereço de onde o modelo padrão é baixado.
 pub const MODEL_DOWNLOAD_PATH: &str =
-    "https://github.com/ipea/enderecobr_rs/releases/download/modelo-crf-v0.2.1/tagger.crf";
+    "https://github.com/ipea/enderecobr_rs/releases/download/modelo-crf-v0.2/tagger.crf";
 
 /// Versão do modelo padrão. É usado como subdiretório no cache para que
 /// versões diferentes não se sobrescrevam.
-pub const VERSAO_MODELO: pub const VERSAO_MODELO: &str = "modelo-crf-v0.2";str = "modelo-crf-v0.2.1";
+pub const VERSAO_MODELO: &str = "modelo-crf-v0.2";
 
 /// Nome do diretório da biblioteca dentro do cache do sistema.
 pub const NOME_DIRETORIO_CACHE: &str = "enderecobr_rs";
@@ -37,6 +37,23 @@ pub const VAR_AMBIENTE_SEM_DOWNLOAD: &str = "ENDERECOBR_MODELO_SEM_DOWNLOAD";
 ///    `~/Library/Caches` no macOS, `%LOCALAPPDATA%` no Windows), no caminho
 ///    `enderecobr_rs/<versão do modelo>/tagger.crf`.
 ///
+/// Caminho do modelo padrão no cache do sistema, sem passar pelas variáveis de
+/// ambiente — portanto nunca baixa nada.
+///
+/// Os testes que dependem do modelo pulam quando ele falta; com
+/// `TESTE_CRF_EXIGE_MODELO=1` eles falham.
+#[cfg(test)]
+pub(crate) fn obter_modelo_no_cache() -> Option<PathBuf> {
+    dirs::cache_dir()
+        .map(|cache| {
+            cache
+                .join(NOME_DIRETORIO_CACHE)
+                .join(VERSAO_MODELO)
+                .join(NOME_ARQUIVO_MODELO)
+        })
+        .filter(|caminho| caminho.is_file())
+}
+
 /// Se um diretório foi informado no argumento ou na variável de ambiente,
 /// a função irá criar um novo diretório para cada uma das versões do modelo.
 /// Caso seja um arquivo, ele será usado diretamente.

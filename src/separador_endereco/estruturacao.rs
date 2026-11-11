@@ -17,22 +17,11 @@ use crate::{
 /// };
 /// use enderecobr_rs::endereco::Endereco;
 ///
-/// let segmentado = EnderecoSegmentado {
-///     segmentos: vec![
-///         SegmentoEndereco {
-///             valor: "av atlantica".to_string(),
-///             tipo: TipoSegmento::Logradouro,
-///         },
-///         SegmentoEndereco {
-///             valor: "123".to_string(),
-///             tipo: TipoSegmento::Numero,
-///         },
-///         SegmentoEndereco {
-///             valor: "apt 203".to_string(),
-///             tipo: TipoSegmento::Complemento,
-///         },
-///     ],
-/// };
+/// let segmentado = EnderecoSegmentado::novo(vec![
+///     SegmentoEndereco::novo("av atlantica", TipoSegmento::Logradouro),
+///     SegmentoEndereco::novo("123", TipoSegmento::Numero),
+///     SegmentoEndereco::novo("apt 203", TipoSegmento::Complemento),
+/// ]);
 ///
 /// let resultado_esperado = Endereco {
 ///     logradouro: Some("AVENIDA ATLANTICA".to_string()),
@@ -80,6 +69,8 @@ pub fn estruturar_segmentos(segmentado: &EnderecoSegmentado, padronizar: bool) -
         padronizar_in_place(&mut res);
     }
 
+    res.probabilidade = segmentado.probabilidade;
+    res.confianca = segmentado.confianca;
     res
 }
 
@@ -127,15 +118,12 @@ mod tests {
 
     /// Constrói um segmento sem repetir a struct em cada teste.
     fn criar_segmento(valor: &str, tipo: TipoSegmento) -> SegmentoEndereco {
-        SegmentoEndereco {
-            valor: valor.to_string(),
-            tipo,
-        }
+        SegmentoEndereco::novo(valor, tipo)
     }
 
     /// Constrói uma segmentação a partir dos segmentos, na ordem em que aparecem.
     fn criar_segmentado(segmentos: Vec<SegmentoEndereco>) -> EnderecoSegmentado {
-        EnderecoSegmentado { segmentos }
+        EnderecoSegmentado::novo(segmentos)
     }
 
     #[test]
@@ -156,6 +144,7 @@ mod tests {
                 complemento: Some("APARTAMENTO 203".to_string()),
                 localidade: Some("COPACABANA".to_string()),
                 cep: Some("22000-000".to_string()),
+                ..Default::default()
             }
         );
     }
@@ -333,6 +322,7 @@ mod tests {
                 complemento: Some("apto 45 bloco b".to_string()),
                 localidade: None,
                 cep: None,
+                ..Default::default()
             }
         );
     }

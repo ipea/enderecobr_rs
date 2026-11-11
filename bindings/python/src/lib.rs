@@ -20,6 +20,15 @@ fn erro_de_modelo(erro: String) -> PyErr {
     PyRuntimeError::new_err(format!("Não foi possível obter o modelo: {erro}"))
 }
 
+/// Traduz a flag do Python nas opções de segmentação do crate.
+fn opcoes_de_segmentacao(com_probabilidade: bool) -> enderecobr_rs::OpcoesSegmentacao {
+    if com_probabilidade {
+        enderecobr_rs::OpcoesSegmentacao::com_probabilidades()
+    } else {
+        enderecobr_rs::OpcoesSegmentacao::sem_probabilidades()
+    }
+}
+
 /// Converte a falha de carga do modelo padrão em erro Python.
 fn erro_de_modelo_padrao(erro: String) -> PyErr {
     PyRuntimeError::new_err(format!("Não foi possível carregar o modelo padrão: {erro}"))
@@ -49,7 +58,9 @@ pub mod enderecobr {
     };
 
     #[pymodule_export]
-    use crate::segmento::{EnderecoSegmentado, SegmentoEndereco, TipoSegmento};
+    use crate::segmento::{
+        estruturar_segmentos, EnderecoSegmentado, SegmentoEndereco, TipoSegmento,
+    };
 
     #[pymodule_export]
     use crate::separador::{
@@ -104,7 +115,7 @@ mod testes {
         // Mesma quantidade, mesma ordem (a ordem vira o valor inteiro no Python)
         // e sem duas variantes do Rust caindo na mesma variante do Python.
         assert_eq!(TipoSegmento::NOMES.len(), TipoSegmentoRs::TODOS.len());
-        for (indice, tipo) in TipoSegmentoRs::TODOS.into_iter().enumerate() {
+        for (indice, tipo) in TipoSegmentoRs::TODOS.iter().copied().enumerate() {
             let espelho = TipoSegmento::from(tipo);
             assert_eq!(
                 espelho as isize, indice as isize,

@@ -157,8 +157,8 @@ impl TipoSegmento {
     fn todos() -> Vec<TipoSegmento> {
         // Fonte única: a lista do Rust, convertida pelo mesmo `From` do resto.
         enderecobr_rs::separador_endereco::TipoSegmento::TODOS
-            .into_iter()
-            .map(TipoSegmento::from)
+            .iter()
+            .map(|tipo| TipoSegmento::from(*tipo))
             .collect()
     }
 }
@@ -172,6 +172,7 @@ impl SegmentoEndereco {
             interno: enderecobr_rs::separador_endereco::SegmentoEndereco {
                 valor,
                 tipo: tipo.into(),
+                probabilidade: None,
             },
         }
     }
@@ -189,6 +190,15 @@ impl SegmentoEndereco {
     #[getter]
     fn valor(&self) -> String {
         self.interno.valor.clone()
+    }
+
+    /// Probabilidade de o trecho estar com o tipo previsto, entre 0 e 1.
+    ///
+    /// Só vem preenchida quando a segmentação pediu as probabilidades
+    /// (`com_probabilidade=True`); nos outros casos é `None`.
+    #[getter]
+    fn probabilidade(&self) -> Option<f64> {
+        self.interno.probabilidade
     }
 
     #[setter]
@@ -236,6 +246,26 @@ impl EnderecoSegmentado {
             .cloned()
             .map(SegmentoEndereco::from)
             .collect()
+    }
+
+    /// Probabilidade de a rotulagem inteira estar correta.
+    ///
+    /// Cai com o tamanho do endereço: para comparar endereços de tamanhos
+    /// diferentes, use `confianca`. `None` quando a segmentação não pediu as
+    /// probabilidades.
+    #[getter]
+    fn probabilidade(&self) -> Option<f64> {
+        self.interno.probabilidade
+    }
+
+    /// Certeza média por trecho, entre 0 e 1.
+    ///
+    /// É a média geométrica das probabilidades de cada token, então não cai com
+    /// o tamanho do endereço. `None` quando a segmentação não pediu as
+    /// probabilidades.
+    #[getter]
+    fn confianca(&self) -> Option<f64> {
+        self.interno.confianca
     }
 
     fn __repr__(&self) -> String {
@@ -360,4 +390,33 @@ impl From<enderecobr_rs::separador_endereco::EnderecoSegmentado> for EnderecoSeg
     fn from(interno: enderecobr_rs::separador_endereco::EnderecoSegmentado) -> Self {
         Self { interno }
     }
+}
+
+/// Junta um endereço já segmentado nos campos de `Endereco`, sem rodar o modelo
+/// de novo.
+///
+/// É o mesmo que `EnderecoSegmentado.como_endereco`, na forma de função — útil
+/// quando a segmentação vem de outro lugar e você só quer estruturá-la.
+///
+/// Parameters
+/// ----------
+/// segmentado : EnderecoSegmentado
+///     Resultado de `segmentar_endereco` ou `SeparadorEndereco.segmentar`.
+/// padronizar : bool, optional
+///     Se `True` (padrão), passa os campos pelas funções de padronização.
+///
+/// Returns
+/// -------
+/// Endereco
+///     Endereço com os campos encontrados.
+///
+/// Examples
+/// --------
+/// >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')  # doctest: +SKIP
+/// >>> enderecobr.estruturar_segmentos(seg).numero  # doctest: +SKIP
+/// '123'
+#[pyfunction]
+#[pyo3(signature = (segmentado, padronizar = true))]
+pub fn estruturar_segmentos(segmentado: &EnderecoSegmentado, padronizar: bool) -> Endereco {
+    segmentado.interno.como_endereco(padronizar).into()
 }

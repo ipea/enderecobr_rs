@@ -1,0 +1,33 @@
+# Testes que dependem do modelo treinado: baixam o arquivo apontado pelas
+# constantes do crate e rodam a inferência de verdade. Ficam fora do CI comum
+# porque custam download e tempo, e são a rede de segurança para trocar de
+# biblioteca de CRF ou publicar um modelo novo. Rode sob demanda.
+name: paridade-modelo
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  paridade-modelo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Baixa o modelo padrão para o cache
+        run: |
+          constantes=src/separador_endereco/modelo.rs
+          versao=$(grep -oP 'VERSAO_MODELO: &str = "\K[^"]+' $constantes)
+          url=$(grep -oP 'https://[^"]+tagger\.crf' $constantes)
+          destino="$HOME/.cache/enderecobr_rs/$versao/tagger.crf"
+          mkdir -p "$(dirname "$destino")"
+          curl -sfL "$url" -o "$destino"
+          test -s "$destino"
+      - name: Testes que exigem o modelo
+        env:
+          TESTE_CRF_EXIGE_MODELO: "1"
+        run: |
+          cargo test --lib
+          cargo test --test crf

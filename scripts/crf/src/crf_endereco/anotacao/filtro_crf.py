@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,16 +82,22 @@ def confianca_minima(
 def confianca_media(
     tags: Sequence[str], marginais: Sequence[Mapping[str, float]]
 ) -> float:
-    """Media das probabilidades marginais entre as tags previstas.
+    """Media geometrica das probabilidades marginais entre as tags previstas.
+
+    Normalizada pelo tamanho, como a `confianca` do Rust: nao cai com o numero
+    de tokens, mas um unico token em duvida puxa o valor inteiro para baixo.
 
     1.0 quando o endereco nao tem token: sem token nao ha tag em que o modelo
     possa estar em duvida.
     """
     if not tags:
         return 1.0
-    return sum(
+    probabilidades = [
         marginal.get(tag, 1.0) for tag, marginal in zip(tags, marginais, strict=True)
-    ) / len(tags)
+    ]
+    if any(probabilidade <= 0.0 for probabilidade in probabilidades):
+        return 0.0
+    return math.exp(math.fsum(math.log(p) for p in probabilidades) / len(probabilidades))
 
 
 def prever(linhas: Sequence[Pendente], modelo: Path = CAMINHO_TAGGER) -> list[Previsao]:
