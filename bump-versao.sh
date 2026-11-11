@@ -113,6 +113,8 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   echo
   echo "[dry-run] em Cargo.toml, bindings/python/pyproject.toml e bindings/python/Cargo.toml:"
   echo "  version -> $VERSAO"
+  echo "[dry-run] em README.md:"
+  echo "  exemplo de instalação -> enderecobr_rs = { version = \"$VERSAO\" }"
   if [[ -n "$TAG_MODELO" ]]; then
     echo "[dry-run] em $ARQUIVO_CONSTANTES:"
     echo "  MODEL_DOWNLOAD_PATH -> .../download/$TAG_MODELO/tagger.crf"
@@ -155,6 +157,24 @@ atualizar_constantes() {
   mv "$temporario" "$ARQUIVO_CONSTANTES"
 }
 
+# README: o exemplo de instalação repete a última versão publicada. Mesmo
+# cuidado do anterior: só substitui se o resultado esperado for único.
+atualizar_readme() {
+  local temporario
+  temporario="$(mktemp)"
+
+  sed -E "s#^(enderecobr_rs = \{ version = )\"[^\"]*\"#\1\"$VERSAO\"#" README.md >"$temporario"
+
+  if [[ "$(grep -c "^enderecobr_rs = { version = \"$VERSAO\" }$" "$temporario" || true)" -ne 1 ]]; then
+    echo "Erro: exemplo de instalação do README saiu errado; README.md não foi alterado" >&2
+    diff -u README.md "$temporario" >&2 || true
+    rm -f "$temporario"
+    exit 1
+  fi
+
+  mv "$temporario" README.md
+}
+
 # O asset sobe primeiro: se a release falhar, o repositório continua apontando
 # para um modelo que existe.
 if [[ -n "$TAG_MODELO" ]]; then
@@ -179,6 +199,8 @@ sed -i -E "0,/^version = .*/s/^version = \".*\"/version = \"$VERSAO\"/" Cargo.to
 sed -i -E "0,/^version = .*/s/^version = \".*\"/version = \"$VERSAO\"/" bindings/python/pyproject.toml
 sed -i -E "0,/^version = .*/s/^version = \".*\"/version = \"$VERSAO\"/" bindings/python/Cargo.toml
 
+atualizar_readme
+
 # Faz o bump de versão nos arquivos de lock
 cargo check
 cargo check --manifest-path bindings/python/Cargo.toml
@@ -186,7 +208,7 @@ uv sync --directory bindings/python
 
 # Commit único: versões, locks e, quando houver, o modelo novo.
 ARQUIVOS=(
-  Cargo.toml Cargo.lock
+  Cargo.toml Cargo.lock README.md
   bindings/python/pyproject.toml bindings/python/Cargo.toml
   bindings/python/Cargo.lock bindings/python/uv.lock
 )

@@ -175,3 +175,28 @@ def testa_endereco_repr():
         repr(endereco)
         == 'Endereco(logradouro="RUA A", numero="1", complemento=None, localidade=None, cep=None)'
     )
+
+
+def testa_segmento_repr_sem_probabilidade():
+    segmento = enderecobr.SegmentoEndereco("123", enderecobr.TipoSegmento.Numero)
+    assert repr(segmento) == "SegmentoEndereco(valor='123', tipo=TipoSegmento.Numero)"
+
+
+def testa_segmento_repr_escapa_aspas_simples():
+    segmento = enderecobr.SegmentoEndereco("d'agua", enderecobr.TipoSegmento.Logradouro)
+    assert repr(segmento) == "SegmentoEndereco(valor='d\\'agua', tipo=TipoSegmento.Logradouro)"
+
+
+def testa_segmento_repr_mostra_probabilidade():
+    segmentado = enderecobr.segmentar_endereco("av atlantica, 123", com_probabilidade=True)
+    assert "probabilidade=" in repr(segmentado.segmentos[0])
+
+
+def testa_endereco_segmentado_repr_mostra_as_metricas():
+    segmentado = enderecobr.segmentar_endereco("av atlantica, 123", com_probabilidade=True)
+    assert ", probabilidade=" in repr(segmentado) and ", confianca=" in repr(segmentado)
+
+
+def testa_endereco_segmentado_repr_esconde_metricas_ausentes():
+    segmentado = enderecobr.segmentar_endereco("av atlantica, 123")
+    assert "probabilidade" not in repr(segmentado)

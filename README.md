@@ -44,7 +44,7 @@ Ou adicionando em no seu `Cargo.toml`:
 
 ```toml
 [dependencies]
-enderecobr_rs = { version = "0.2.0" }
+enderecobr_rs = { version = "0.6.0" }
 ```
 
 ## Exemplo de uso

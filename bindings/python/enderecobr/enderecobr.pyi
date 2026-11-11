@@ -103,24 +103,24 @@ def romano_para_inteiro(valor: str) -> int: ...
 
 class TipoSegmento(IntEnum):
 
-    Logradouro: int
-    Numero: int
-    Complemento: int
-    Empreendimento: int
-    Parcela: int
-    QuilometragemVia: int
-    Referencia: int
-    PontoReferencia: int
-    Denominacao: int
-    Localidade: int
-    NucleoRural: int
-    RecursoNatural: int
-    Cep: int
-    Municipio: int
-    Uf: int
-    Cadastro: int
-    Ruido: int
-    Outro: int
+    Logradouro = 0
+    Numero = 1
+    Complemento = 2
+    Empreendimento = 3
+    Parcela = 4
+    QuilometragemVia = 5
+    Referencia = 6
+    PontoReferencia = 7
+    Denominacao = 8
+    Localidade = 9
+    NucleoRural = 10
+    RecursoNatural = 11
+    Cep = 12
+    Municipio = 13
+    Uf = 14
+    Cadastro = 15
+    Ruido = 16
+    Outro = 17
 
     @staticmethod
     def todos() -> list[TipoSegmento]: ...

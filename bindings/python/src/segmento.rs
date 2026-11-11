@@ -163,6 +163,41 @@ impl TipoSegmento {
     }
 }
 
+/// Texto entre aspas simples, do jeito que o Python mostra em `repr`.
+fn entre_aspas(texto: &str) -> String {
+    format!("'{}'", texto.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+/// Probabilidade com até quatro casas, sem zeros à direita.
+fn formatar_probabilidade(valor: f64) -> String {
+    let mut texto = format!("{valor:.4}");
+    while texto.ends_with('0') {
+        texto.pop();
+    }
+    if texto.ends_with('.') {
+        texto.push('0');
+    }
+    texto
+}
+
+/// `SegmentoEndereco(...)`, com a probabilidade só quando ela existe.
+fn repr_de_segmento(segmento: &enderecobr_rs::separador_endereco::SegmentoEndereco) -> String {
+    let tipo = TipoSegmento::from(segmento.tipo);
+    let mut repr = format!(
+        "SegmentoEndereco(valor={}, tipo=TipoSegmento.{}",
+        entre_aspas(&segmento.valor),
+        TipoSegmento::NOMES[tipo as usize]
+    );
+    if let Some(probabilidade) = segmento.probabilidade {
+        repr.push_str(&format!(
+            ", probabilidade={}",
+            formatar_probabilidade(probabilidade)
+        ));
+    }
+    repr.push(')');
+    repr
+}
+
 #[pymethods]
 impl SegmentoEndereco {
     #[new]
@@ -207,10 +242,7 @@ impl SegmentoEndereco {
     }
 
     fn __repr__(&self) -> String {
-        format!(
-            "SegmentoEndereco(valor={:?}, tipo={:?})",
-            self.interno.valor, self.interno.tipo
-        )
+        repr_de_segmento(&self.interno)
     }
 }
 
@@ -269,13 +301,34 @@ impl EnderecoSegmentado {
     }
 
     fn __repr__(&self) -> String {
-        let segmentos: Vec<String> = self
-            .interno
-            .segmentos
-            .iter()
-            .map(|segmento| format!("({:?}, {:?})", segmento.valor, segmento.tipo))
-            .collect();
-        format!("EnderecoSegmentado([{}])", segmentos.join(", "))
+        let mut repr = String::from("EnderecoSegmentado(segmentos=[");
+        for segmento in &self.interno.segmentos {
+            repr.push_str("\n    ");
+            repr.push_str(&repr_de_segmento(segmento));
+            repr.push(',');
+        }
+        repr.push(if self.interno.segmentos.is_empty() {
+            ']'
+        } else {
+            '\n'
+        });
+        if !self.interno.segmentos.is_empty() {
+            repr.push(']');
+        }
+        if let Some(probabilidade) = self.interno.probabilidade {
+            repr.push_str(&format!(
+                ", probabilidade={}",
+                formatar_probabilidade(probabilidade)
+            ));
+        }
+        if let Some(confianca) = self.interno.confianca {
+            repr.push_str(&format!(
+                ", confianca={}",
+                formatar_probabilidade(confianca)
+            ));
+        }
+        repr.push(')');
+        repr
     }
 
     /// Serializa os segmentos em JSON.
