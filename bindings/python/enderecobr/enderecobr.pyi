@@ -2,9 +2,12 @@
 # `src/*.rs` (é de lá que `help()` as lê); aqui ficam só as assinaturas, usadas
 # por verificadores estáticos, IDEs e pelo mkdocstrings.
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from enum import IntEnum
 from pathlib import Path
+
+# Interno: o pacote registra, no import, a função que resolve e baixa o modelo.
+def _registrar_garantia_de_modelo(funcao: Callable[[], Path]) -> None: ...
 
 def normalizar(valor: str) -> str: ...
 

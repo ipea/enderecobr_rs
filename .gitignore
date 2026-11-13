@@ -1,3 +1,4 @@
+site/
 target/
 *.parquet
 __pycache__/

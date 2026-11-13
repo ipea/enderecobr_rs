@@ -7,7 +7,7 @@ sync:
 	uv sync
 
 doc:
-	uv run --extra doc mkdocs serve
+	uv run --extra doc mkdocs serve -f ../../mkdocs.yml
 
 test:
 	uv run pytest --cov

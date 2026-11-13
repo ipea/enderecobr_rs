@@ -2,6 +2,7 @@ name: readthedocs
 
 on:
   push:
+    branches: ["main"]
     tags:
       - "[v]?[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
@@ -9,7 +10,8 @@ on:
 # O readthedocs só constrói tags que ele já conhece e a API não tem endpoint
 # para criar versão: `sync-versions` importa as tags do repositório e, depois
 # disso, o build é disparado por versão. A `stable` é gerenciada pelo próprio
-# readthedocs e passa a apontar para a tag nova sozinha.
+# readthedocs e passa a apontar para a tag nova sozinha. Em push para `main`
+# basta o build de `latest`, que é a versão padrão do site.
 
 jobs:
   build-docs:

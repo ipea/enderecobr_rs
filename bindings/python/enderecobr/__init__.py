@@ -21,18 +21,13 @@ VAR_AMBIENTE_SEM_DOWNLOAD : str
 from __future__ import annotations
 
 import os
-import shutil
-from collections.abc import Callable
-from functools import wraps
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import cast
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 import enderecobr.enderecobr as _extensao
-from enderecobr.enderecobr import *  # noqa: F403
-
-_F = TypeVar("_F", bound=Callable[..., Any])
+from enderecobr.enderecobr import *  # noqa: F403, RUF100
 
 
 def _variavel_ambiente_ativa(nome: str) -> bool:
@@ -90,16 +85,14 @@ def obter_modelo(path_modelo: str | Path | None = None) -> Path:
     if _variavel_ambiente_ativa(_extensao.VAR_AMBIENTE_SEM_DOWNLOAD):
         return caminho
 
+    url = _extensao.MODEL_DOWNLOAD_PATH
     caminho.parent.mkdir(parents=True, exist_ok=True)
     temporario = caminho.with_name(f"{caminho.name}.{os.getpid()}.tmp")
 
     try:
-        with (
-            urlopen(_extensao.MODEL_DOWNLOAD_PATH, timeout=60) as resposta,  # noqa: S310
-            temporario.open("wb") as arquivo,
-        ):
-            shutil.copyfileobj(resposta, arquivo)
-
+        with urlopen(url, timeout=60) as resposta:  # noqa: S310, RUF100
+            conteudo = cast("bytes", resposta.read())
+        _ = temporario.write_bytes(conteudo)
         _ = temporario.replace(caminho)
     except HTTPError as erro:
         raise RuntimeError(
@@ -107,8 +100,7 @@ def obter_modelo(path_modelo: str | Path | None = None) -> Path:
         ) from erro
     except URLError as erro:
         raise RuntimeError(
-            f"Não foi possível obter o modelo: falha ao baixar "
-            f"{_extensao.MODEL_DOWNLOAD_PATH}: {erro.reason}"
+            f"Não foi possível obter o modelo: falha ao baixar {url}: {erro.reason}"
         ) from erro
     finally:
         temporario.unlink(missing_ok=True)
@@ -116,19 +108,6 @@ def obter_modelo(path_modelo: str | Path | None = None) -> Path:
     return caminho
 
 
-def _com_modelo_baixado(func: _F) -> _F:
-    """Garante o modelo no disco antes de chamar uma função do modelo padrão."""
-
-    @wraps(func)
-    def envolvida(*args: Any, **kwargs: Any) -> Any:
-        _ = obter_modelo()
-        return func(*args, **kwargs)
-
-    return cast("_F", envolvida)
-
-
-# As funções de módulo usam o modelo padrão: a extensão sabe ler um caminho, não
-# baixá-lo, então o arquivo precisa existir antes da chamada.
-segmentar_endereco = _com_modelo_baixado(_extensao.segmentar_endereco)
-estruturar_endereco = _com_modelo_baixado(_extensao.estruturar_endereco)
-segmentar_enderecos = _com_modelo_baixado(_extensao.segmentar_enderecos)
+# A extensão só sabe ler um caminho: ela chama esta função antes de carregar o
+# separador padrão, e o arquivo passa a existir na primeira chamada.
+_ = _extensao._registrar_garantia_de_modelo(obter_modelo)

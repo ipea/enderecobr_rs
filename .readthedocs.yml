@@ -15,4 +15,4 @@ python:
         - doc
 
 mkdocs:
-  configuration: ./bindings/python/mkdocs.yml
+  configuration: ./mkdocs.yml

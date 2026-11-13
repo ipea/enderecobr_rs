@@ -14,6 +14,34 @@ mod texto;
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
+use std::sync::OnceLock;
+
+/// Função que o pacote registra para garantir o modelo em disco.
+static GARANTIA_DE_MODELO: OnceLock<Py<PyAny>> = OnceLock::new();
+
+/// Registra o que fazer quando o modelo ainda não está no disco.
+///
+/// A extensão não baixa nada: quem sabe resolver e baixar o arquivo é o pacote,
+/// que registra a própria função uma única vez, no import. Sem registro, a
+/// segmentação padrão exige o arquivo já presente e a mensagem de erro indica
+/// de onde baixá-lo.
+#[pyfunction]
+pub fn _registrar_garantia_de_modelo(funcao: Py<PyAny>) -> PyResult<()> {
+    GARANTIA_DE_MODELO
+        .set(funcao)
+        .map_err(|_| PyRuntimeError::new_err("garantia de modelo já registrada"))
+}
+
+/// Chama a garantia registrada, antes de carregar o separador padrão.
+pub(crate) fn garantir_modelo(py: Python<'_>) -> PyResult<()> {
+    match GARANTIA_DE_MODELO.get() {
+        Some(funcao) => {
+            let _ = funcao.call0(py)?;
+            Ok(())
+        }
+        None => Ok(()),
+    }
+}
 
 /// Converte as falhas de resolução do modelo em erro Python.
 fn erro_de_modelo(erro: String) -> PyErr {
@@ -67,6 +95,9 @@ pub mod enderecobr {
         estruturar_endereco, obter_caminho_modelo, segmentar_endereco, segmentar_enderecos,
         SeparadorEndereco,
     };
+
+    #[pymodule_export]
+    use crate::_registrar_garantia_de_modelo;
 
     #[pymodule_export]
     use crate::texto::{

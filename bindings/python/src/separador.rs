@@ -299,6 +299,7 @@ pub fn segmentar_endereco(
     endereco: &str,
     com_probabilidade: bool,
 ) -> PyResult<EnderecoSegmentado> {
+    crate::garantir_modelo(py)?;
     let opcoes = crate::opcoes_de_segmentacao(com_probabilidade);
     let segmentado = py
         .detach(|| enderecobr_rs::segmentar_endereco(endereco, &opcoes))
@@ -347,6 +348,7 @@ pub fn segmentar_enderecos(
     enderecos: Vec<String>,
     com_probabilidade: bool,
 ) -> PyResult<Vec<EnderecoSegmentado>> {
+    crate::garantir_modelo(py)?;
     let opcoes = crate::opcoes_de_segmentacao(com_probabilidade);
     let segmentados = py
         .detach(|| {
@@ -396,6 +398,7 @@ pub fn estruturar_endereco(
     padronizar: bool,
     com_probabilidade: bool,
 ) -> PyResult<Endereco> {
+    crate::garantir_modelo(py)?;
     let estruturado = py
         .detach(|| {
             let opcoes = enderecobr_rs::OpcoesEndereco {

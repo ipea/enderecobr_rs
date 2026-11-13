@@ -1,3 +1,4 @@
+docs_dir: bindings/python/docs
 site_name: enderecobr_py
 theme:
   name: readthedocs
@@ -7,8 +8,8 @@ plugins:
       handlers:
         python:
           options:
-            # Copiado de https://mkdocstrings.github.io/python/usage/#recommended-settings
-            # DOCSTRINGS -------------------------------------------------------------
+            # Copiado de mkdocstrings.github.io/python/usage
+            # DOCSTRINGS --------------------------------------------
             docstring_options:
               # Discard first line of `__init__` method docstrings,
               # useful when merging such docstrings into their parent class'.
@@ -19,8 +20,9 @@ plugins:
             # Tables are generally too large, lists will fix this.
             docstring_section_style: list
 
-            # CROSS-REFERENCES -------------------------------------------------------
-            # Enable relative crossrefs and scoped crossrefs, see Docstrings options.
+            # CROSS-REFERENCES ----------------------------------------
+            # Enable relative crossrefs and scoped crossrefs,
+            # see Docstrings options.
             # relative_crossrefs: true # Sponsors only!
             # scoped_crossrefs: true # Sponsors only!
 
@@ -30,7 +32,7 @@ plugins:
             # Unwrap actual types from `Annotated` type annotations.
             unwrap_annotated: true
 
-            # MEMBERS ----------------------------------------------------------------
+            # MEMBERS -----------------------------------------------
             # Only render public symbols: sem isso, `inherited_members` traz os
             # dunders de `object` (`__eq__`, `__module__`, `__doc__`...) das
             # classes inspecionadas da extensão em Rust.
@@ -61,7 +63,7 @@ plugins:
             # at the start of each symbol's documentation.
             summary: true
 
-            # HEADINGS ---------------------------------------------------------------
+            # HEADINGS ----------------------------------------------
             # For auto-generated pages, one module per page,
             # make the module heading be the H1 heading of the page.
             heading_level: 2
@@ -82,10 +84,11 @@ plugins:
             # Show the type of symbol (class, function, etc.) in the heading.
             # show_symbol_type_heading: true
 
-            # Show the type of symbol (class, function, etc.) in the table of contents.
+            # Show the type of symbol (class, function, etc.) in the
+            # table of contents.
             show_symbol_type_toc: true
 
-            # SIGNATURES -------------------------------------------------------------
+            # SIGNATURES --------------------------------------------
             # Format code to 80 + 10% margin (Black and Ruff defaults)
             # in signatures and attribute value code blocks.
             # Needs Black/Ruff installed.
@@ -105,7 +108,7 @@ plugins:
             # Show type parameters in signatures.
             show_signature_type_parameters: true
 
-            # OTHER ------------------------------------------------------------------
+            # OTHER -------------------------------------------------
             # Show backlinks to other documentation sections within each symbol.
             # backlinks: tree # Sponsors only!
 
