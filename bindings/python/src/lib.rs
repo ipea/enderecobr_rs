@@ -15,7 +15,7 @@ mod texto;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
-/// Converte as falhas de resolução/download do modelo em erro Python.
+/// Converte as falhas de resolução do modelo em erro Python.
 fn erro_de_modelo(erro: String) -> PyErr {
     PyRuntimeError::new_err(format!("Não foi possível obter o modelo: {erro}"))
 }
@@ -64,8 +64,8 @@ pub mod enderecobr {
 
     #[pymodule_export]
     use crate::separador::{
-        estruturar_endereco, obter_caminho_modelo, obter_modelo, segmentar_endereco,
-        segmentar_enderecos, SeparadorEndereco,
+        estruturar_endereco, obter_caminho_modelo, segmentar_endereco, segmentar_enderecos,
+        SeparadorEndereco,
     };
 
     #[pymodule_export]

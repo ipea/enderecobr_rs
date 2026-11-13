@@ -10,8 +10,9 @@ name = "enderecobr"
 crate-type = ["cdylib"]
 
 [dependencies]
-# Defaults são vazios; o binding expõe a segmentação e o download do modelo.
-enderecobr_rs = { path = "../..", features = ["separador", "download"] }
+# Defaults são vazios; o binding expõe a segmentação. O download do modelo é
+# feito do lado Python, então o wheel não carrega pilha TLS nem código C.
+enderecobr_rs = { path = "../..", features = ["separador"] }
 
 [dependencies.pyo3]
 version = "0.29.2"

@@ -1,0 +1,81 @@
+name: readthedocs
+
+on:
+  push:
+    tags:
+      - "[v]?[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+# O readthedocs só constrói tags que ele já conhece e a API não tem endpoint
+# para criar versão: `sync-versions` importa as tags do repositório e, depois
+# disso, o build é disparado por versão. A `stable` é gerenciada pelo próprio
+# readthedocs e passa a apontar para a tag nova sozinha.
+
+jobs:
+  build-docs:
+    name: Build readthedocs
+    runs-on: ubuntu-latest
+    env:
+      API: https://readthedocs.org/api/v3/projects/enderecobr-py
+      TOKEN: ${{ secrets.RTDS_API_TOKEN }}
+    steps:
+      - name: Conferir o token
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::falta o secret RTDS_API_TOKEN, sem ele não há build"
+            exit 1
+          fi
+
+      - name: Importar a tag como versão e construir
+        if: github.ref_type == 'tag'
+        run: |
+          set -eu
+          auth="Authorization: Token $TOKEN"
+          versao="$GITHUB_REF_NAME"
+
+          status() {
+            curl -s -o /dev/null -w '%{http_code}' -H "$auth" \
+              "$API/versions/$1/"
+          }
+
+          codigo="$(status "$versao")"
+          if [ "$codigo" = 401 ] || [ "$codigo" = 403 ]; then
+            echo "::error::o readthedocs recusou o token (HTTP $codigo)"
+            exit 1
+          fi
+
+          if [ "$codigo" = 404 ]; then
+            echo "importando $versao como versão do readthedocs"
+            sincronizacao="$(curl -s -o /dev/null -w '%{http_code}' \
+              -X POST -H "$auth" "$API/sync-versions/")"
+            case "$sincronizacao" in
+              200|202) ;;
+              *)
+                echo "::error::sincronização falhou (HTTP $sincronizacao)"
+                exit 1
+                ;;
+            esac
+
+            # A sincronização roda em segundo plano: esperar aparecer.
+            for _ in $(seq 12); do
+              if [ "$(status "$versao")" = 200 ]; then
+                break
+              fi
+              sleep 5
+            done
+          fi
+
+          if [ "$(status "$versao")" != 200 ]; then
+            echo "::error::a versão $versao não apareceu no readthedocs"
+            exit 1
+          fi
+
+          curl -sf -o /dev/null -X POST -H "$auth" \
+            "$API/versions/$versao/builds/"
+          echo "build de $versao disparado"
+
+      - name: Construir latest
+        run: |
+          curl -sf -o /dev/null -X POST \
+            -H "Authorization: Token $TOKEN" "$API/versions/latest/builds/"
+          echo "build de latest disparado"

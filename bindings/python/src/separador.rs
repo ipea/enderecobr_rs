@@ -205,51 +205,6 @@ fn abrir_modelo(
         .map_err(PyRuntimeError::new_err)
 }
 
-/// Resolve o caminho do modelo de padrão e garante que o arquivo exista,
-/// baixando-o na primeira chamada.
-///
-/// Usa a mesma ordem de prioridade de `obter_caminho_modelo` e só baixa o
-/// modelo quando o arquivo está ausente ou vazio. O download pode ser desativado
-/// com a variável de ambiente `ENDERECOBR_MODELO_SEM_DOWNLOAD=1` (útil em
-/// CI).
-///
-/// Parameters
-/// ----------
-/// path_modelo : str or pathlib.Path or None, optional
-///     Arquivo ou diretório do modelo. Informado, tem prioridade sobre a
-///     variável de ambiente e sobre o cache.
-///
-/// Returns
-/// -------
-/// pathlib.Path
-///     Caminho do arquivo `.crf`, já existente.
-///
-/// Raises
-/// ------
-/// RuntimeError
-///     Se o diretório de destino não puder ser criado, o download falhar ou o
-///     arquivo não puder ser gravado.
-///
-/// Examples
-/// --------
-/// >>> from enderecobr import SeparadorEndereco, obter_modelo
-/// >>> sep = SeparadorEndereco.carregar(obter_modelo())  # doctest: +SKIP
-/// >>> sep.segmentar('av n sra copacabana, 123').segmentos[0].tipo  # doctest: +SKIP
-/// 'logradouro'
-///
-/// Notes
-/// -----
-/// - Faz uma requisição HTTP (timeout de 60 s) apenas quando precisa baixar e
-///   libera o GIL durante a operação.
-/// - O caminho devolvido pode ser passado direto para `SeparadorEndereco.carregar`.
-#[pyfunction]
-#[pyo3(signature = (path_modelo = None))]
-pub fn obter_modelo(py: Python<'_>, path_modelo: Option<PathBuf>) -> PyResult<PathBuf> {
-    // O download é bloqueante (até 60 s): não segurar o GIL enquanto isso.
-    py.detach(|| enderecobr_rs::separador_endereco::obter_modelo(path_modelo.as_deref()))
-        .map_err(crate::erro_de_modelo)
-}
-
 /// Resolve o caminho do modelo sem gravar nada no disco.
 ///
 /// Segue esta ordem de prioridade:

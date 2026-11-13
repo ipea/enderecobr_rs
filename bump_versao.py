@@ -370,7 +370,7 @@ def main() -> None:
         + "\n"
         + f"""
 O push da tag dispara: publish-cargo (crates.io), maturin (PyPI), GH Release,
-atualizar-snapshot e trigger-readthedocs.
+readthedocs e atualizar-snapshot.
 
 Depois confira:
   gh run list --limit 6         # resultado de cada workflow

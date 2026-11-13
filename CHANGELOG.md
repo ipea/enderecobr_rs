@@ -22,6 +22,12 @@ versionamento é o [SemVer](https://semver.org/lang/pt-BR/). O que é anterior �
 
 ### Python
 
-- Mesma API e mesmo comportamento: o wheel é construído com `separador` e
-  `download`, então `estruturar_endereco` e `obter_modelo` seguem baixando o
-  modelo na primeira chamada.
+- O wheel passa a ser construído só com `separador`: `obter_modelo` foi para o
+  lado Python (`urllib`), então a extensão não carrega pilha TLS nem código C.
+  Com isso o wheel volta a ser construído para todas as plataformas — com
+  `download`, `aarch64` falhava e `armv7`, `ppc64le` e `s390x` nem eram
+  possíveis.
+- O download grava num arquivo temporário ao lado do destino antes de renomear,
+  então uma interrupção não deixa modelo truncado no lugar.
+- `segmentar_endereco`, `estruturar_endereco` e `segmentar_enderecos` seguem
+  baixando o modelo na primeira chamada, como antes.

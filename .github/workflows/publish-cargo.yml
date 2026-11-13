@@ -1,4 +1,4 @@
-# Baseado em https://github.com/rust-github/template/blob/main/template/.github/workflows/cd.yml
+# Baseado em github.com/rust-github/template (workflows/cd.yml)
 
 name: publish-cargo
 
@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
+  # yamllint disable rule:line-length
   # publish:
   #   name: Publishing for ${{ matrix.job.os-name }}-${{ matrix.job.architecture }}
   #   runs-on: ${{ matrix.job.os }}
@@ -82,7 +83,7 @@ jobs:
   #       with:
   #         files: release/*
   #       env:
-  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # yamllint enable rule:line-length
 
   publish-cargo:
     name: Publishing to Cargo
@@ -93,6 +94,21 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # Tag refeita (mesmo commit com correção em outro lugar) não é motivo para
+      # run vermelho: o crates.io não aceita a mesma versão duas vezes.
+      - name: Verificar se a versão já está publicada
+        id: versao
+        run: |
+          base=https://crates.io/api/v1/crates/enderecobr_rs
+          versao=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "enderecobr_rs") | .version')
+          if curl -sf -A enderecobr_rs-release "$base/$versao" >/dev/null; then
+            echo "publicado=true" >> "$GITHUB_OUTPUT"
+            echo "enderecobr_rs $versao já está no crates.io: publish pulado."
+          else
+            echo "publicado=false" >> "$GITHUB_OUTPUT"
+          fi
       - run: cargo publish --locked
+        if: steps.versao.outputs.publicado != 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

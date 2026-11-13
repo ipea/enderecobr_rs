@@ -147,6 +147,21 @@ def testa_separador_sem_modelo():
         _ = enderecobr.SeparadorEndereco.carregar("/nao/existe/tagger.crf")
 
 
+def testa_obter_modelo_com_arquivo_existente(tmp_path):
+    modelo = tmp_path / "modelo.crf"
+    _ = modelo.write_bytes(b"lCRF")
+    assert enderecobr.obter_modelo(modelo) == modelo
+
+
+def testa_obter_modelo_sem_download(monkeypatch, tmp_path):
+    monkeypatch.setenv("ENDERECOBR_MODELO_SEM_DOWNLOAD", "1")
+    # Arquivo vazio exigiria download, que a variável de ambiente impede.
+    modelo = tmp_path / "tagger.crf"
+    _ = modelo.write_bytes(b"")
+    assert enderecobr.obter_modelo(modelo) == modelo
+    assert modelo.stat().st_size == 0
+
+
 def testa_endereco_construtor_e_padronizar():
     endereco = enderecobr.Endereco(logradouro="r. gen glicerio", numero="001")
     assert endereco.complemento is None

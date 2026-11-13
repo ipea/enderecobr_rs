@@ -18,4 +18,117 @@ VAR_AMBIENTE_SEM_DOWNLOAD : str
     (`ENDERECOBR_MODELO_SEM_DOWNLOAD`).
 """
 
-from enderecobr.enderecobr import *
+from __future__ import annotations
+
+import os
+import shutil
+from collections.abc import Callable
+from functools import wraps
+from pathlib import Path
+from typing import Any, TypeVar, cast
+from urllib.error import HTTPError, URLError
+from urllib.request import urlopen
+
+import enderecobr.enderecobr as _extensao
+from enderecobr.enderecobr import *  # noqa: F403
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _variavel_ambiente_ativa(nome: str) -> bool:
+    """Variável definida com um valor considerado "ligado"."""
+    return os.environ.get(nome, "") not in ("", "0", "false")
+
+
+def obter_modelo(path_modelo: str | Path | None = None) -> Path:
+    """Resolve o caminho do modelo padrão e garante que o arquivo exista,
+    baixando-o na primeira chamada.
+
+    Usa a mesma ordem de prioridade de `obter_caminho_modelo` e só baixa o
+    modelo quando o arquivo está ausente ou vazio. O download pode ser desativado
+    com a variável de ambiente `ENDERECOBR_MODELO_SEM_DOWNLOAD=1` (útil em CI):
+    nesse caso o caminho é devolvido sem a garantia de existir.
+
+    Parameters
+    ----------
+    path_modelo : str or pathlib.Path or None, optional
+        Arquivo ou diretório do modelo. Informado, tem prioridade sobre a
+        variável de ambiente e sobre o cache.
+
+    Returns
+    -------
+    pathlib.Path
+        Caminho do arquivo `.crf`, baixado se necessário.
+
+    Raises
+    ------
+    RuntimeError
+        Se o download falhar (HTTP, rede ou timeout).
+    OSError
+        Se o diretório de destino não puder ser criado ou o arquivo não puder
+        ser gravado.
+
+    Examples
+    --------
+    >>> from enderecobr import SeparadorEndereco, obter_modelo
+    >>> sep = SeparadorEndereco.carregar(obter_modelo())  # doctest: +SKIP
+    >>> sep.segmentar('av n sra copacabana, 123').segmentos[0].tipo  # doctest: +SKIP
+    TipoSegmento.Logradouro
+
+    Notes
+    -----
+    - Faz uma requisição HTTP (timeout de 60 s) apenas quando precisa baixar e
+      grava num arquivo temporário ao lado do destino antes de renomear, então
+      um download interrompido não deixa modelo truncado no lugar.
+    - O caminho devolvido pode ser passado direto para `SeparadorEndereco.carregar`.
+    """
+    caminho = _extensao.obter_caminho_modelo(path_modelo)
+
+    if caminho.is_file() and caminho.stat().st_size > 0:
+        return caminho
+
+    if _variavel_ambiente_ativa(_extensao.VAR_AMBIENTE_SEM_DOWNLOAD):
+        return caminho
+
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    temporario = caminho.with_name(f"{caminho.name}.{os.getpid()}.tmp")
+
+    try:
+        with (
+            urlopen(_extensao.MODEL_DOWNLOAD_PATH, timeout=60) as resposta,  # noqa: S310
+            temporario.open("wb") as arquivo,
+        ):
+            shutil.copyfileobj(resposta, arquivo)
+
+        _ = temporario.replace(caminho)
+    except HTTPError as erro:
+        raise RuntimeError(
+            f"Não foi possível obter o modelo: o download falhou com HTTP {erro.code}"
+        ) from erro
+    except URLError as erro:
+        raise RuntimeError(
+            f"Não foi possível obter o modelo: falha ao baixar "
+            f"{_extensao.MODEL_DOWNLOAD_PATH}: {erro.reason}"
+        ) from erro
+    finally:
+        temporario.unlink(missing_ok=True)
+
+    return caminho
+
+
+def _com_modelo_baixado(func: _F) -> _F:
+    """Garante o modelo no disco antes de chamar uma função do modelo padrão."""
+
+    @wraps(func)
+    def envolvida(*args: Any, **kwargs: Any) -> Any:
+        _ = obter_modelo()
+        return func(*args, **kwargs)
+
+    return cast("_F", envolvida)
+
+
+# As funções de módulo usam o modelo padrão: a extensão sabe ler um caminho, não
+# baixá-lo, então o arquivo precisa existir antes da chamada.
+segmentar_endereco = _com_modelo_baixado(_extensao.segmentar_endereco)
+estruturar_endereco = _com_modelo_baixado(_extensao.estruturar_endereco)
+segmentar_enderecos = _com_modelo_baixado(_extensao.segmentar_enderecos)
