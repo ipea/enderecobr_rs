@@ -142,8 +142,6 @@ class EnderecoSegmentado:
     probabilidade: float | None
     confianca: float | None
 
-    def como_json(self) -> str: ...
-
     def como_endereco(self, padronizar: bool = True) -> Endereco: ...
 
 class Endereco:
@@ -170,8 +168,6 @@ class Endereco:
     def padronizar(self) -> None: ...
 
     def endereco_padronizado(self) -> Endereco: ...
-
-    def como_json(self) -> str: ...
 
 class SeparadorEndereco:
 

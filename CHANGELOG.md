@@ -9,6 +9,10 @@ versionamento é o [SemVer](https://semver.org/lang/pt-BR/). O que é anterior �
 
 ## [Não publicado]
 
+- **Breaking**: Simplificando mais ainda as dependências do pacote: agora serde só
+  é utilizado nos CLIs.
+- Remove a dependência da lib `dirs` que só servia para pegar a pasta de cache do sistema atual.
+
 ## [0.7.3] - 2026-11-13
 
 - Forçando novamente uma nova documentação para o Python.

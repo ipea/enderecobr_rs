@@ -39,9 +39,29 @@ pub const VAR_AMBIENTE_SEM_DOWNLOAD: &str = "ENDERECOBR_MODELO_SEM_DOWNLOAD";
 ///
 /// Os testes que dependem do modelo pulam quando ele falta; com
 /// `TESTE_CRF_EXIGE_MODELO=1` eles falham.
+/// Diretório de cache do sistema: `XDG_CACHE_HOME` (ou `~/.cache`) no
+/// Linux, `~/Library/Caches` no macOS e `%LOCALAPPDATA%` no Windows.
+fn diretorio_de_cache() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var_os("HOME").map(|home| Path::new(&home).join("Library").join("Caches"))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .filter(|caminho| caminho.is_absolute())
+            .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".cache")))
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn obter_modelo_no_cache() -> Option<PathBuf> {
-    dirs::cache_dir()
+    diretorio_de_cache()
         .map(|cache| {
             cache
                 .join(NOME_DIRETORIO_CACHE)
@@ -120,7 +140,7 @@ pub fn obter_caminho_modelo(path_modelo: Option<&Path>) -> Result<PathBuf, Strin
     // nome do arquivo são sempre anexados — o `is_dir` abaixo não serve
     // para este caso: num primeiro uso o diretório ainda não existe e o
     // modelo acabaria gravado no lugar do próprio diretório.
-    let path_default = dirs::cache_dir().map(|x| {
+    let path_default = diretorio_de_cache().map(|x| {
         x.join(NOME_DIRETORIO_CACHE)
             .join(VERSAO_MODELO)
             .join(NOME_ARQUIVO_MODELO)
@@ -254,7 +274,7 @@ mod tests {
 
         // Variável de ambiente vazia também é ignorada e cai no cache.
         std::env::set_var(VAR_AMBIENTE_MODELO, "");
-        let caminho_cache = dirs::cache_dir().map(|x| {
+        let caminho_cache = diretorio_de_cache().map(|x| {
             x.join(NOME_DIRETORIO_CACHE)
                 .join(VERSAO_MODELO)
                 .join(NOME_ARQUIVO_MODELO)

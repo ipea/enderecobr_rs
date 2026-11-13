@@ -196,27 +196,6 @@ impl Endereco {
     fn endereco_padronizado(&self) -> Endereco {
         self.interno.endereco_padronizado().into()
     }
-
-    /// Serializa o endereço em JSON.
-    ///
-    /// As chaves seguem a ordem dos campos e os campos ausentes saem como
-    /// `null` — o mesmo formato usado nos dumps de endereços estruturados.
-    ///
-    /// Returns
-    /// -------
-    /// str
-    ///     JSON com as chaves `logradouro`, `numero`, `complemento`,
-    ///     `localidade` e `cep`.
-    ///
-    /// Examples
-    /// --------
-    /// >>> end = Endereco(logradouro='r. gen glicerio', numero='1')
-    /// >>> end.como_json()
-    /// '{"logradouro":"r. gen glicerio","numero":"1","complemento":null,"localidade":null,"cep":null}'
-    fn como_json(&self) -> String {
-        self.interno.como_json()
-    }
-
     fn __str__(&self) -> String {
         self.interno.formatar()
     }

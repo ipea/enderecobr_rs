@@ -113,7 +113,6 @@ pub mod vocabulario;
 
 use std::{cell::RefCell, ops::Range, path::PathBuf, sync::LazyLock};
 
-use serde::Serialize;
 use strum::{Display, IntoStaticStr, VariantArray};
 
 use crate::separador_endereco::crf::Tagger;
@@ -253,10 +252,7 @@ impl OpcoesEndereco {
 /// assert_eq!(TipoSegmento::from("logradouro"), TipoSegmento::Logradouro);
 /// assert_eq!(TipoSegmento::from("novo_rotulo"), TipoSegmento::Outro);
 /// ```
-#[derive(
-    Serialize, Debug, PartialEq, Eq, Clone, Copy, Hash, Display, IntoStaticStr, VariantArray,
-)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Display, IntoStaticStr, VariantArray)]
 #[strum(serialize_all = "snake_case")]
 pub enum TipoSegmento {
     /// Tipo de via + título + nome: `R ALCIDES CARNEIRO LEAL`, `ROD BR-116`.
@@ -300,7 +296,6 @@ pub enum TipoSegmento {
     /// Conteúdo que não cabe em nenhum outro tipo — inclusive rótulo que ainda
     /// não tem variante própria.
     #[strum(serialize = "outros")]
-    #[serde(rename = "outros")]
     Outro,
 }
 
@@ -350,12 +345,11 @@ impl From<&str> for TipoSegmento {
 }
 
 /// Um trecho do endereço junto com o tipo de informação que ele representa.
-#[derive(Serialize, Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct SegmentoEndereco {
     pub valor: String,
     pub tipo: TipoSegmento,
     /// Probabilidade de a rotulagem deste trecho estar correta, quando pedida.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub probabilidade: Option<f64>,
 }
 
@@ -374,32 +368,29 @@ impl SegmentoEndereco {
 /// no texto original.
 ///
 /// ```
-/// use enderecobr_rs::separador_endereco::{
-///     segmento_como_json, EnderecoSegmentado, SegmentoEndereco, TipoSegmento,
-/// };
+/// use enderecobr_rs::separador_endereco::{EnderecoSegmentado, SegmentoEndereco, TipoSegmento};
 ///
 /// let segmentado = EnderecoSegmentado::novo(vec![
 ///     SegmentoEndereco::novo("av atlantica", TipoSegmento::Logradouro),
 ///     SegmentoEndereco::novo("123", TipoSegmento::Numero),
 /// ]);
 ///
+/// assert_eq!(segmentado.segmentos.len(), 2);
 /// assert_eq!(
-///     segmento_como_json(&segmentado),
-///     r#"{"segmentos":[{"valor":"av atlantica","tipo":"logradouro"},{"valor":"123","tipo":"numero"}]}"#
+///     segmentado.como_endereco(true).logradouro.as_deref(),
+///     Some("AVENIDA ATLANTICA")
 /// );
 /// ```
-#[derive(Serialize, Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub struct EnderecoSegmentado {
     /// Trechos identificados no endereço.
     pub segmentos: Vec<SegmentoEndereco>,
     /// Probabilidade de a rotulagem do endereço inteiro estar correta, quando
     /// pedida (vide [`OpcoesSegmentacao::com_probabilidades`]).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub probabilidade: Option<f64>,
     /// Certeza média por trecho, entre 0 e 1: a média geométrica das
     /// probabilidades de cada token, normalizada pelo tamanho do endereço —
     /// diferente do campo [`Self::probabilidade`], que cai com o tamanho.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub confianca: Option<f64>,
 }
 
@@ -640,12 +631,6 @@ impl EnderecoSegmentado {
             confianca: None,
         }
     }
-
-    /// Serializa os segmentos em JSON. Equivalente a [`segmento_como_json`].
-    pub fn como_json(&self) -> String {
-        segmento_como_json(self)
-    }
-
     /// Junta os segmentos em um [`Endereco`], padronizando os campos quando
     /// `padronizar` for verdadeiro. Vide [`estruturar_segmentos`].
     pub fn como_endereco(&self, padronizar: bool) -> Endereco {
@@ -693,28 +678,6 @@ pub fn estruturar_endereco(endereco: &str, opcoes: &OpcoesEndereco) -> Result<En
         .map(|segmentado| estruturar_segmentos(&segmentado, opcoes.padronizar))
 }
 
-/// Serializa os segmentos encontrados em JSON. Usando internamente no CLI.
-///
-/// O campo `tipo` sai como o rótulo do modelo em minúsculas.
-///
-/// ```
-/// use enderecobr_rs::separador_endereco::{EnderecoSegmentado, SegmentoEndereco, TipoSegmento,
-/// segmento_como_json};
-///
-/// let segmentado = EnderecoSegmentado::novo(vec![SegmentoEndereco::novo(
-///     "20000-000",
-///     TipoSegmento::Cep,
-/// )]);
-///
-/// assert_eq!(
-///     segmento_como_json(&segmentado),
-///     r#"{"segmentos":[{"valor":"20000-000","tipo":"cep"}]}"#
-/// );
-/// ```
-pub fn segmento_como_json(segmentado: &EnderecoSegmentado) -> String {
-    serde_json::to_string(segmentado).unwrap_or_else(|_| "[]".to_string())
-}
-
 #[cfg(test)]
 mod tests_tipo_segmento {
     use super::TipoSegmento;
@@ -740,24 +703,6 @@ mod tests_tipo_segmento {
     }
 
     #[test]
-    fn serde_usa_o_mesmo_rotulo_de_como_str() {
-        let json: Vec<String> = TipoSegmento::TODOS
-            .iter()
-            .map(|tipo| {
-                serde_json::to_value(tipo)
-                    .unwrap()
-                    .as_str()
-                    .unwrap()
-                    .to_string()
-            })
-            .collect();
-        let rotulos: Vec<String> = TipoSegmento::TODOS
-            .iter()
-            .map(|tipo| tipo.como_str().to_string())
-            .collect();
-        assert_eq!(json, rotulos);
-    }
-
     #[test]
     fn display_escreve_o_rotulo() {
         assert_eq!(TipoSegmento::Cep.to_string(), "cep");
@@ -807,22 +752,6 @@ mod tests {
         // O `Cargo.toml` existe, mas não é um modelo.
         assert!(SeparadorEndereco::carregar(PathBuf::from("Cargo.toml")).is_err());
     }
-
-    #[test]
-    fn como_json_serializa_os_segmentos() {
-        let segmentado = criar_segmentado(vec![criar_segmento("123", TipoSegmento::Numero)]);
-
-        assert_eq!(
-            segmentado.como_json(),
-            r#"{"segmentos":[{"valor":"123","tipo":"numero"}]}"#
-        );
-        assert_eq!(segmento_como_json(&segmentado), segmentado.como_json());
-        assert_eq!(
-            EnderecoSegmentado::default().como_json(),
-            r#"{"segmentos":[]}"#
-        );
-    }
-
     #[test]
     fn segmento_como_endereco_sem_padronizar_mantem_os_valores() {
         let segmentado = criar_segmentado(vec![

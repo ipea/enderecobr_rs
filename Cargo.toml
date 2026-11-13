@@ -40,16 +40,11 @@ required-features = ["separador"]
 # baixa o modelo quando ele falta no disco. Para ter as duas:
 # `features = ["separador", "download"]`.
 default = []
-separador = [
-  "dep:crfsuite-compliant-rs",
-  "dep:dirs",
-  "dep:serde",
-  "dep:serde_json",
-]
+separador = ["dep:crfsuite-compliant-rs"]
 # `download` baixa o modelo quando ele não está no disco e implica `separador`.
 # Quem já distribui o arquivo fica só com `separador`.
 download = ["separador", "dep:ureq"]
-cli = ["clap", "separador", "download"]
+cli = ["clap", "separador", "download", "dep:serde", "dep:serde_json"]
 polars_cli = ["clap", "polars", "separador", "download"]
 
 # docs.rs publica a documentação completa, independente das features padrão.
@@ -65,7 +60,6 @@ clap = { version = "4.6.7", features = ["derive"], optional = true }
 # patch upstream não pode mudar o numérico sem revisão explícita.
 crfsuite-compliant-rs = { version = "=0.4.2", default-features = false, optional = true }
 diacritics = "0.2.2"
-dirs = { version = "7.0.0", optional = true }
 itertools = "0.15.0"
 polars = { version = "0.55.2", features = ["lazy", "parquet"], optional = true }
 regex = "1.13.1"

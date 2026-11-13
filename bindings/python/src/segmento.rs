@@ -7,9 +7,8 @@ use crate::endereco::Endereco;
 /// Um trecho do endereço e o atributo a que ele corresponde.
 ///
 /// Em geral os objetos vêm prontos de `segmentar_endereco`, mas dá para
-/// montar um à mão — útil ao reidratar o resultado de
-/// `EnderecoSegmentado.como_json` ou ao testar
-/// código que só lê os segmentos.
+/// montar um à mão — útil ao testar código que só lê os
+/// segmentos.
 ///
 /// Parameters
 /// ----------
@@ -23,7 +22,7 @@ use crate::endereco::Endereco;
 /// valor : str
 ///     Trecho do endereço, sem os separadores originais.
 /// tipo : TipoSegmento
-///     Atributo do trecho. Em JSON/dump sai como o rótulo em minúsculas
+///     Atributo do trecho, identificado pelo rótulo em minúsculas
 ///     (`logradouro`, `numero`, `complemento` etc.).
 ///
 /// Examples
@@ -330,33 +329,11 @@ impl EnderecoSegmentado {
         repr.push(')');
         repr
     }
-
-    /// Serializa os segmentos em JSON.
-    ///
-    /// Cada segmento vira `{"valor": ..., "tipo": ...}`, com o tipo como
-    /// rótulo em minúsculas (`logradouro`, `numero`, `complemento` etc.).
-    /// É o formato indicado para guardar o resultado da segmentação: é compacto
-    /// e independente do texto original.
-    ///
-    /// Returns
-    /// -------
-    /// str
-    ///     JSON no formato `{"segmentos": [...]}`.
-    ///
-    /// Examples
-    /// --------
-    /// >>> seg = enderecobr.segmentar_endereco('av n sra copacabana, 123')  # doctest: +SKIP
-    /// >>> seg.como_json()  # doctest: +SKIP
-    /// '{"segmentos":[{"valor":"av n sra copacabana","tipo":"logradouro"},{"valor":"123","tipo":"numero"}]}'
-    fn como_json(&self) -> String {
-        self.interno.como_json()
-    }
-
     /// Agrupa os segmentos nos campos de um `Endereco`.
     ///
     /// É a segunda metade do que `estruturar_endereco` faz: cada trecho vai
     /// para o campo que o seu tipo indica, na ordem em que aparece. Serve para
-    /// quem quer guardar os segmentos (ver `como_json`) e só depois montar o
+    /// quem quer guardar os segmentos à parte e só depois montar o
     /// endereço, ou para trocar um segmento antes de agrupar.
     ///
     /// Parameters

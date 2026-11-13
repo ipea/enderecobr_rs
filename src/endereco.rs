@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use serde::Serialize;
 
 use crate::{
     padronizar_bairros, padronizar_cep_leniente, padronizar_complementos, padronizar_logradouros,
@@ -10,7 +9,7 @@ use crate::{
 ///
 /// Vide [`OpcoesSegmentacao`](crate::separador_endereco::OpcoesSegmentacao)
 /// para preencher as probabilidades.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Endereco {
     /// Nome do logradouro (rua, avenida, travessa etc.).
     pub logradouro: Option<String>,
@@ -28,21 +27,13 @@ pub struct Endereco {
     /// diferentes, use [`Self::confianca`]. Fica vazia quando a segmentação não
     /// pediu as probabilidades (vide
     /// [`OpcoesSegmentacao`](crate::separador_endereco::OpcoesSegmentacao)).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub probabilidade: Option<f64>,
     /// Certeza média por trecho, entre 0 e 1: a média geométrica das
     /// probabilidades de cada token, que não cai com o tamanho do endereço.
     ///
     /// Fica vazia quando a segmentação não pediu as probabilidades.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub confianca: Option<f64>,
 }
-
-/// Serializa o endereço em JSON.
-pub fn endereco_como_json(endereco: &Endereco) -> String {
-    serde_json::to_string(endereco).unwrap_or_else(|_| "{}".to_string())
-}
-
 /// Padroniza todos os campos do endereço no próprio objeto, sem criar outro: cada campo
 /// recebe a função adequada — [`padronizar_logradouros`] para o logradouro,
 /// [`padronizar_numeros`] para o número, [`padronizar_complementos`] para o complemento,
@@ -106,12 +97,6 @@ impl Endereco {
             ..Default::default()
         }
     }
-
-    /// Serializa o endereço em JSON. Equivalente a [`endereco_como_json`].
-    pub fn como_json(&self) -> String {
-        endereco_como_json(self)
-    }
-
     /// Padroniza todos os campos deste endereço, modificando-o. Equivalente a
     /// [`padronizar_in_place`].
     pub fn padronizar(&mut self) {
@@ -182,21 +167,5 @@ mod tests {
 
         // Invariante
         assert_eq!(formatar(&end), format!("{}", end));
-    }
-
-    #[test]
-    fn test_criar_json_endereco() {
-        let end = Endereco {
-            logradouro: Some("r gen. glicerio".to_string()),
-            ..Default::default()
-        };
-
-        assert_eq!(
-            endereco_como_json(&end),
-            r#"{"logradouro":"r gen. glicerio","numero":null,"complemento":null,"localidade":null,"cep":null}"#.to_string()
-        );
-        //
-        // Invariante
-        assert_eq!(end.como_json(), endereco_como_json(&end));
     }
 }
