@@ -1,9 +1,6 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process,
-    time::Duration,
-};
+use std::path::{Path, PathBuf};
+#[cfg(feature = "download")]
+use std::{fs, process, time::Duration};
 /// Endereço de onde o modelo padrão é baixado.
 pub const MODEL_DOWNLOAD_PATH: &str =
     "https://github.com/ipea/enderecobr_rs/releases/download/modelo-crf-v0.2.1/tagger.crf";
@@ -64,6 +61,7 @@ pub(crate) fn obter_modelo_no_cache() -> Option<PathBuf> {
 /// A função retorna `Err` quando não consegue criar o diretório de destino,
 /// fazer o download, ou gravar o modelo no local.
 ///
+#[cfg(feature = "download")]
 #[cfg_attr(coverage_nightly, coverage(off))] // Chama funções que acessam o disco.
 pub fn obter_modelo(path_modelo: Option<&Path>) -> Result<PathBuf, String> {
     let caminho = obter_caminho_modelo(path_modelo)?;
@@ -82,10 +80,34 @@ pub fn obter_modelo(path_modelo: Option<&Path>) -> Result<PathBuf, String> {
     Ok(caminho)
 }
 
+/// Caminho do modelo que o crate usa por padrão, conforme a feature `download`:
+/// com ela, baixa o arquivo quando falta; sem ela, exige que já exista no disco
+/// e aponta de onde baixá-lo quando não está lá.
+pub(crate) fn obter_modelo_padrao(path_modelo: Option<&Path>) -> Result<PathBuf, String> {
+    #[cfg(feature = "download")]
+    return obter_modelo(path_modelo);
+
+    #[cfg(not(feature = "download"))]
+    {
+        let caminho = obter_caminho_modelo(path_modelo)?;
+
+        if caminho.is_file() {
+            return Ok(caminho);
+        }
+
+        Err(format!(
+            "modelo não encontrado em {}. Baixe-o de {} ou aponte {} para um arquivo existente.",
+            caminho.display(),
+            MODEL_DOWNLOAD_PATH,
+            VAR_AMBIENTE_MODELO
+        ))
+    }
+}
+
 /// Resolve onde o modelo deve ficar, aplicando a ordem de prioridade
 /// parâmetro > variável de ambiente > cache. Adiciona um subdiretório de versão
 /// se o resultado for um diretório.
-/// Usado em [`obter_modelo`].
+/// Usado em `obter_modelo` e em `obter_modelo_padrao`.
 pub fn obter_caminho_modelo(path_modelo: Option<&Path>) -> Result<PathBuf, String> {
     let path_param = path_modelo
         .filter(|x| !x.as_os_str().is_empty())
@@ -119,6 +141,7 @@ pub fn obter_caminho_modelo(path_modelo: Option<&Path>) -> Result<PathBuf, Strin
 }
 
 // Acessa disco e rede; fica fora do alvo de cobertura.
+#[cfg(feature = "download")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn baixar_modelo(destino: &Path) -> Result<(), String> {
     if let Some(diretorio) = destino.parent().filter(|dir| !dir.as_os_str().is_empty()) {
@@ -155,38 +178,40 @@ fn baixar_modelo(destino: &Path) -> Result<(), String> {
 }
 
 // Baixa o conteúdo do modelo, validando o status HTTP antes de aceitar o corpo.
+#[cfg(feature = "download")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn obter_bytes_modelo() -> Result<Vec<u8>, String> {
-    let cliente = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(60))
+    let agente = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(60)))
         .user_agent(concat!(
             env!("CARGO_PKG_NAME"),
             "/",
             env!("CARGO_PKG_VERSION")
         ))
         .build()
-        .map_err(|erro| format!("Não foi possível criar o cliente HTTP: {erro}"))?;
+        .new_agent();
 
-    let resposta = cliente
+    // O `ureq` devolve `Err` tanto para falha de transporte quanto para status
+    // de erro: separar os dois evita que um 404 vire "falha ao baixar" genérica.
+    let mut resposta = agente
         .get(MODEL_DOWNLOAD_PATH)
-        .send()
-        .map_err(|erro| format!("Falha ao baixar o modelo: {erro}"))?;
-
-    // O `reqwest` só devolve `Err` para falhas de transporte: um 404 ou 500 chega
-    // como `Ok` e, sem esta checagem, o HTML do erro viraria o arquivo do modelo.
-    let status = resposta.status();
-    if !status.is_success() {
-        return Err(format!("O download do modelo falhou com HTTP {status}"));
-    }
+        .call()
+        .map_err(|erro| match erro {
+            ureq::Error::StatusCode(codigo) => {
+                format!("O download do modelo falhou com HTTP {codigo}")
+            }
+            outro => format!("Falha ao baixar o modelo: {outro}"),
+        })?;
 
     resposta
-        .bytes()
-        .map(|bytes| bytes.to_vec())
+        .body_mut()
+        .read_to_vec()
         .map_err(|erro| format!("Falha ao ler o corpo do download do modelo: {erro}"))
 }
 
 /// Variável de ambiente definida com um valor considerado "ligado"
 /// (presente, não vazia e diferente de `0`/`false`).
+#[cfg(feature = "download")]
 fn variavel_ambiente_ativa(nome: &str) -> bool {
     std::env::var_os(nome)
         .is_some_and(|valor| !valor.is_empty() && valor != "0" && valor != "false")
@@ -242,6 +267,29 @@ mod tests {
     }
 
     #[test]
+    fn test_obter_modelo_padrao_aceita_arquivo() {
+        assert_eq!(
+            obter_modelo_padrao(Some(Path::new("Cargo.toml"))),
+            Ok(PathBuf::from("Cargo.toml"))
+        );
+    }
+
+    // Sem `download` não há rede para buscar o arquivo, então a ausência vira erro.
+    // Com a feature ligada este caso baixaria de verdade e não serve de teste.
+    #[test]
+    #[cfg(not(feature = "download"))]
+    fn test_obter_modelo_padrao_recusa_ausente() {
+        // Um caminho abaixo de um arquivo nunca existe, e não depende do estado
+        // do diretório temporário compartilhado entre execuções.
+        let caminho = Path::new("Cargo.toml/modelo_ausente.crf");
+        assert!(matches!(
+            obter_modelo_padrao(Some(caminho)),
+            Err(ref erro) if erro.contains("modelo não encontrado")
+        ));
+    }
+
+    #[test]
+    #[cfg(feature = "download")]
     fn test_obter_modelo_sem_download_nao_baixa() {
         // Com o download desativado, o caminho é devolvido mesmo sem existir.
         std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "1");
@@ -251,6 +299,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "download")]
     fn test_obter_modelo_arquivo_existente_nao_baixa() {
         // O `Cargo.toml` existe e não é vazio: é devolvido sem download,
         // mesmo com o download ativado.
@@ -263,6 +312,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "download")]
     fn test_variavel_ambiente_ativa() {
         std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "true");
         assert!(variavel_ambiente_ativa(VAR_AMBIENTE_SEM_DOWNLOAD));

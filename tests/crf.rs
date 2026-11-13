@@ -3,7 +3,7 @@
 //! Precisam do modelo treinado, então ficam fora do crate e usam só a API
 //! pública. Nada aqui baixa o modelo: quando ele não está no cache, como no CI
 //! comum, os testes pulam. Com `TESTE_CRF_EXIGE_MODELO=1` a ausência do modelo
-//! vira falha — é assim que o `bump-versao-modelo.sh` reprova um modelo ruim.
+//! vira falha — é o que reprova um modelo novo antes de publicá-lo.
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -15,8 +15,8 @@ use enderecobr_rs::separador_endereco::{
 };
 use enderecobr_rs::{estruturar_endereco, segmentar_endereco, segmentar_enderecos, Endereco};
 
-/// Quando definida, a ausência do modelo vira falha em vez de teste pulado. É o
-/// que o `bump-versao-modelo.sh` usa para não publicar um modelo quebrado.
+/// Quando definida, a ausência do modelo vira falha em vez de teste pulado, para
+/// não publicar um modelo quebrado.
 const VAR_AMBIENTE_EXIGE_MODELO: &str = "TESTE_CRF_EXIGE_MODELO";
 
 /// Caminho do modelo padrão, quando ele já está no cache.
@@ -250,7 +250,7 @@ fn estruturar_endereco_preenche_localidade_e_cep() {
 }
 
 /// Casos de sanidade: invariantes que o modelo novo não pode quebrar. São os
-/// mesmos que o `bump-versao-modelo.sh` roda antes de publicar uma versão.
+/// mesmos que rodam antes de publicar uma versão.
 #[test]
 fn estruturacao_de_casos_de_sanidade() {
     if !preparar_modelo_padrao() {

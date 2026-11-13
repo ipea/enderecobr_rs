@@ -31,13 +31,18 @@ linguagens de programação, por favor abrir uma Issue ou Pull request neste rep
 - [R](https://ipea.github.io/enderecobr/)
 - [Rust](https://docs.rs/enderecobr_rs/)
 - [Python](https://enderecobr-py.readthedocs.io)
+- [Changelog](https://github.com/ipea/enderecobr_rs/blob/main/CHANGELOG.md)
 
 ## Instalação
 
 A última versão pode ser baixada do crates com o comando:
 
 ```bash
+# só as padronizações
 cargo add enderecobr_rs
+
+# com segmentação de endereços e download do modelo
+cargo add enderecobr_rs --features separador,download
 ```
 
 Ou adicionando em no seu `Cargo.toml`:
@@ -47,26 +52,60 @@ Ou adicionando em no seu `Cargo.toml`:
 enderecobr_rs = { version = "0.6.1" }
 ```
 
+## Funcionalidades opcionais
+
+| feature     | ligada por padrão | o que traz                                                                                              |
+| ----------- | ----------------- | ------------------------------------------------------------------------------------------------------- |
+| `separador` | não               | segmentação e estruturação de endereços (modelo CRF)                                                    |
+| `download`  | não               | baixa o modelo `.crf` na primeira segmentação, quando ele ainda não está no disco (implica `separador`) |
+
+As padronizações (`padronizar_logradouros`, `padronizar_ceps`, `padronizar_estados`
+etc.) não dependem de nenhuma delas. Para ter também a segmentação, baixando o
+modelo sob demanda:
+
+```toml
+[dependencies]
+enderecobr_rs = { version = "0.6.1", features = ["separador", "download"] }
+```
+
+Para manter a segmentação porém baixando o modelo por fora — útil em ambiente sem
+rede, ou quando o arquivo já é distribuído com a sua aplicação:
+
+```toml
+[dependencies]
+enderecobr_rs = { version = "0.6.1", features = ["separador"] }
+```
+
+Nesse caso o modelo precisa existir no disco: aponte `ENDERECOBR_MODELO` para o
+arquivo e, se ele faltar, o erro indica onde encontrá-lo. Com o `download`
+ligado, `ENDERECOBR_MODELO_SEM_DOWNLOAD=1` impede a tentativa de download.
+
 ## Exemplo de uso
 
 ### Rust:
 
-```rust
-use enderecobr_rs::{
-    padronizar_complementos, padronizar_logradouros, estruturar_endereco, Endereco, OpcoesEndereco,
-};
+```rust,no_run
+use enderecobr_rs::{padronizar_complementos, padronizar_logradouros};
 assert_eq!(padronizar_logradouros("r. gen.. glicério"), "RUA GENERAL GLICERIO");
 assert_eq!(padronizar_complementos("QD1 LT2 CS3"), "QUADRA 1 LOTE 2 CASA 3");
-assert_eq!(
-    estruturar_endereco("av Atlantica, 123, apt 123", &OpcoesEndereco::default())
-        .unwrap(),
-    Endereco {
-        logradouro: Some("AVENIDA ATLANTICA".to_string()),
-        numero: Some("123".to_string()),
-        complemento: Some("APARTAMENTO 123".to_string()),
-        ..Default::default()
-    }
-);
+```
+
+```rust,no_run
+// requer a feature `separador`
+#[cfg(feature = "separador")]
+fn estruturar() {
+    use enderecobr_rs::{estruturar_endereco, Endereco, OpcoesEndereco};
+    assert_eq!(
+        estruturar_endereco("av Atlantica, 123, apt 123", &OpcoesEndereco::default())
+            .unwrap(),
+        Endereco {
+            logradouro: Some("AVENIDA ATLANTICA".to_string()),
+            numero: Some("123".to_string()),
+            complemento: Some("APARTAMENTO 123".to_string()),
+            ..Default::default()
+        }
+    );
+}
 ```
 
 ### Python:
@@ -82,22 +121,23 @@ assert enderecobr.estruturar_endereco("av atlantica, 123, apt 123") == enderecob
 
 ```bash
 # Utilitário que altera a versão nos arquivos necessários (Cargo.toml e
-# pyproject.toml), faz o commit deles e cria a tag no git.
-./bump-versao.sh 0.2.0
+# pyproject.toml), promove a seção [Não publicado] do CHANGELOG, faz o commit,
+# cria a tag e faz o push do commit e da tag.
+./bump_versao.py 0.2.0
 
-# A mesma chamada sobe também um modelo CRF novo, no mesmo commit: roda os
-# testes de integração com ele, publica o asset da release e aponta o código.
-# ./bump-versao.sh 0.6.0 0.3.0 ~/modelos/tagger_novo.crf
+# Na mesma chamada sobe também um modelo novo, no mesmo commit: roda os
+# testes de integração com ele, publica o asset da release e troca a URL no código.
+# ./bump_versao.py 0.6.0 0.3.0 ~/modelos/tagger_novo.crf
 
-# Faz o push do commit e da tag para o repositório principal.
-# O Github CI deve fazer o restante das checagens, compilações e gatilhos necessários.
-git push origin
-git push origin v0.2.0
+# Mostra o que seria alterado, sem tocar em nada.
+./bump_versao.py --dry-run 0.2.0
 
-## Em caso de erro, antes de fazer o push, é possível reverter o commit e apagar a tag
-# git reset HEAD^
-# git tag -d v0.2.0
+# Termina no commit e na tag, sem dar o push.
+./bump_versao.py --sem-push 0.2.0
 ```
+
+O push da tag dispara as publicações e os gatilhos do repositório; o Github CI faz
+as checagens, compilações e o restante.
 
 ## Nota <a href="https://www.ipea.gov.br"><img src="./assets/ipea_logo.png" alt="Ipea" align="right" width="300"/></a>
 

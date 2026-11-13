@@ -15,14 +15,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Build
-        run: cargo build --verbose
-      - name: Run tests
-        run: cargo test --verbose
+      - name: Build (com todas as features de biblioteca)
+        run: cargo build --verbose --features separador,download
+      - name: Run tests (com todas as features de biblioteca)
+        run: cargo test --verbose --features separador,download
       - name: Run docs
-        run: cargo doc --no-deps --lib
+        run: cargo doc --no-deps --lib --features separador,download
       - name: Run publish dry-run
-        run: cargo publish --dry-run --allow-dirty
+        # Valida o empacotamento com as features de biblioteca; sem elas o
+        # `--dry-run` testaria só a configuração mínima, que ninguém consome.
+        run: cargo publish --dry-run --allow-dirty --features separador,download
   rustfmt:
     runs-on: ubuntu-latest
     steps:

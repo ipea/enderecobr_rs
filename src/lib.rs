@@ -2,6 +2,9 @@
 // Habilita `#[coverage(off)]` quando o cargo-llvm-cov roda com toolchain nightly.
 // Em stable o cfg não existe e o atributo desaparece por completo.
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+// Marca na documentação os itens que só existem com certa feature. O docs.rs
+// compila em nightly com `--cfg docsrs`, então o atributo some nas outras builds.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::borrow::Cow;
 use unicode_normalization::UnicodeNormalization;
@@ -12,6 +15,8 @@ pub mod bairro;
 pub mod cep;
 pub mod complemento;
 pub mod dado_faltante;
+#[cfg(feature = "separador")]
+#[cfg_attr(docsrs, doc(cfg(feature = "separador")))]
 pub mod endereco;
 pub mod estado;
 pub mod logradouro;
@@ -19,6 +24,8 @@ pub mod metaphone;
 pub mod municipio;
 pub mod numero;
 pub mod numero_extenso;
+#[cfg(feature = "separador")]
+#[cfg_attr(docsrs, doc(cfg(feature = "separador")))]
 pub mod separador_endereco;
 pub mod tipo_logradouro;
 
@@ -65,7 +72,7 @@ impl Padronizador {
     ///
     /// O método [`preparar`](Self::preparar) é chamado automaticamente no término da execução.
     ///
-    /// Este método é projetado para interoperabilidade com linguagens dinâmicas (ex: Python),
+    /// Este método é projetado para interoperabilidade com linguagens dinâmicas,
     /// onde estruturas heterogêneas são comuns.
     pub fn adicionar_pares(&mut self, pares: &[&[Option<&str>]]) {
         for p in pares {
@@ -337,6 +344,7 @@ pub use cep::padronizar_cep_leniente;
 pub use cep::padronizar_cep_numerico;
 pub use complemento::padronizar_complementos;
 pub use dado_faltante::is_dado_faltante;
+#[cfg(feature = "separador")]
 pub use endereco::Endereco;
 pub use estado::padronizar_estados_para_codigo;
 pub use estado::padronizar_estados_para_nome;
@@ -348,13 +356,18 @@ pub use numero::padronizar_numeros_para_int;
 pub use numero::padronizar_numeros_para_string;
 pub use tipo_logradouro::padronizar_tipo_logradouro;
 
+#[cfg(feature = "separador")]
 pub use separador_endereco::estruturar_endereco;
-pub use separador_endereco::segmentar_endereco;
-pub use separador_endereco::segmentar_enderecos;
-pub use separador_endereco::OpcoesEndereco;
-pub use separador_endereco::OpcoesSegmentacao;
-
+#[cfg(feature = "separador")]
 pub use separador_endereco::estruturar_segmentos;
+#[cfg(feature = "separador")]
+pub use separador_endereco::segmentar_endereco;
+#[cfg(feature = "separador")]
+pub use separador_endereco::segmentar_enderecos;
+#[cfg(feature = "separador")]
+pub use separador_endereco::OpcoesEndereco;
+#[cfg(feature = "separador")]
+pub use separador_endereco::OpcoesSegmentacao;
 
 /// Função utilitária utilizada nas ferramentas de CLI para selecionar um padronizador facilmente
 /// via uma string descritiva.
@@ -374,18 +387,21 @@ pub fn obter_padronizador_por_tipo(tipo: &str) -> Result<fn(&str) -> String, &st
         "metaphone" => Ok(metaphone::metaphone),
         "dado_faltante" => Ok(|x| is_dado_faltante(x).to_string()),
 
+        #[cfg(feature = "separador")]
         "segmentacao" => Ok(|val| {
             segmentar_endereco(val, &OpcoesSegmentacao::sem_probabilidades())
                 .expect("Não foi possível segmentar o endereço")
                 .como_json()
         }),
 
+        #[cfg(feature = "separador")]
         "estruturacao" => Ok(|val| {
             estruturar_endereco(val, &OpcoesEndereco::default())
                 .expect("Não foi possível estruturar o endereço")
                 .como_json()
         }),
 
+        #[cfg(feature = "separador")]
         "formatacao" => Ok(|val| {
             estruturar_endereco(val, &OpcoesEndereco::default())
                 .expect("Não foi possível estruturar o endereço")
@@ -476,6 +492,7 @@ mod tests {
         assert_eq!(pad.obter_pares(), vec![("X", "", None), ("Y", "", None)]);
     }
 
+    #[cfg(feature = "separador")]
     #[test]
     fn test_endereco_campos_padronizados() {
         let endereco = Endereco {
@@ -498,6 +515,7 @@ mod tests {
         assert_eq!(endereco.endereco_padronizado(), esperado);
     }
 
+    #[cfg(feature = "separador")]
     #[test]
     fn test_endereco_padronizado_completo() {
         let endereco = Endereco {
@@ -520,6 +538,7 @@ mod tests {
         assert_eq!(endereco.endereco_padronizado(), esperado);
     }
 
+    #[cfg(feature = "separador")]
     #[test]
     fn test_endereco_padronizado_campos_none() {
         // Campos `None` permanecem `None` após padronização.
@@ -537,6 +556,7 @@ mod tests {
         assert_eq!(endereco_parcial.endereco_padronizado(), esperado);
     }
 
+    #[cfg(feature = "separador")]
     #[test]
     fn test_endereco_formatar() {
         // Campos None são omitidos; campos com texto são retrimados.
@@ -551,6 +571,7 @@ mod tests {
         assert_eq!(endereco.formatar(), "RUA A, 123, CENTRO");
     }
 
+    #[cfg(feature = "separador")]
     #[test]
     fn test_endereco_formatar_com_cep() {
         // O CEP entra no fim do texto formatado.
@@ -565,6 +586,7 @@ mod tests {
         assert_eq!(endereco.formatar(), "RUA A, 123, CENTRO, 20040-020");
     }
 
+    #[cfg(feature = "separador")]
     #[test]
     fn test_endereco_formatar_vazio() {
         assert_eq!(Endereco::default().formatar(), "");

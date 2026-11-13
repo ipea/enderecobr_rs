@@ -30,26 +30,49 @@ name = "padronizacao-lote"
 path = "src/bin/padronizacao-lote.rs"
 required-features = ["polars_cli"]
 
-[features] 
+[[test]]
+name = "crf"
+required-features = ["separador"]
+
+[features]
+# Nenhuma feature vem ligada por padrão: cada consumidor declara o que usa.
+# `separador` compila a segmentação e a estruturação (modelo CRF); `download`
+# baixa o modelo quando ele falta no disco. Para ter as duas:
+# `features = ["separador", "download"]`.
 default = []
-cli = ["clap"]
-polars_cli = ["clap", "polars"]
+separador = [
+  "dep:crfsuite-compliant-rs",
+  "dep:dirs",
+  "dep:serde",
+  "dep:serde_json",
+]
+# `download` baixa o modelo quando ele não está no disco e implica `separador`.
+# Quem já distribui o arquivo fica só com `separador`.
+download = ["separador", "dep:ureq"]
+cli = ["clap", "separador", "download"]
+polars_cli = ["clap", "polars", "separador", "download"]
+
+# docs.rs publica a documentação completa, independente das features padrão.
+# Lista explícita em vez de `all-features`, que traria polars/clap via os bins.
+[package.metadata.docs.rs]
+features = ["separador", "download"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 aho-corasick = "1.1.4"
 clap = { version = "4.6.7", features = ["derive"], optional = true }
 # Pin exato: a paridade com o python-crfsuite é verificada por teste, então um
 # patch upstream não pode mudar o numérico sem revisão explícita.
-crfsuite-compliant-rs = { version = "=0.4.2", default-features = false }
+crfsuite-compliant-rs = { version = "=0.4.2", default-features = false, optional = true }
 diacritics = "0.2.2"
-dirs = "7.0.0"
+dirs = { version = "7.0.0", optional = true }
 itertools = "0.15.0"
 polars = { version = "0.55.2", features = ["lazy", "parquet"], optional = true }
 regex = "1.13.1"
-reqwest = { version = "0.13.3", features = ["blocking"]}
+ureq = { version = "3", optional = true }
 rustc-hash = "2.1.3"
-serde = { version = "1.0", features = ["derive"] }
-serde_json =  { version = "1.0" }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
 strum = { version = "0.28", features = ["derive"] }
 unicode-normalization = "0.1.25"
 
@@ -160,3 +183,4 @@ harness = false
 [[bench]]
 name = "separador_bench"
 harness = false
+required-features = ["separador"]

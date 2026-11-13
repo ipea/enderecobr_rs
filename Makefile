@@ -7,7 +7,7 @@ DIR_SNAPSHOT = ./datasets/dados/snapshot_test
 # ==== Utilitários ====
 
 build:
-	cargo build --release
+	cargo build --release --features separador,download
 
 build-lto:
 	cargo build --profile release-lto --all-features
@@ -16,10 +16,10 @@ doc:
 	cargo doc --no-deps --lib --release --all-features
 
 test:
-	cargo test
+	cargo test --features separador
 
 coverage:
-	cargo llvm-cov --show-missing-lines
+	cargo llvm-cov --features separador --show-missing-lines
 
 # ==== Utilitários para os testes de Snapshot ====
 

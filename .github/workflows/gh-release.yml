@@ -15,14 +15,24 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+      - name: Extrair a seção da versão do CHANGELOG
+        run: python3 bump_versao.py --notas "${GITHUB_REF_NAME#v}" >notas.md
       - name: Create GitHub Release
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "Release $GITHUB_REF_NAME já existe, nada a fazer."
             exit 0
           fi
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes
+          if [[ -s notas.md ]]; then
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file notas.md
+          else
+            echo "Sem seção para $GITHUB_REF_NAME no CHANGELOG.md;" \
+              "usando as notas geradas." >&2
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

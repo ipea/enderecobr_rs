@@ -29,5 +29,5 @@ jobs:
         env:
           TESTE_CRF_EXIGE_MODELO: "1"
         run: |
-          cargo test --lib
-          cargo test --test crf
+          cargo test --lib --features separador,download
+          cargo test --test crf --features separador,download

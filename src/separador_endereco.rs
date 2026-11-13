@@ -119,7 +119,9 @@ use strum::{Display, IntoStaticStr, VariantArray};
 use crate::separador_endereco::crf::Tagger;
 
 pub use crate::separador_endereco::estruturacao::estruturar_segmentos;
-pub use crate::separador_endereco::modelo::{obter_caminho_modelo, obter_modelo};
+pub use crate::separador_endereco::modelo::obter_caminho_modelo;
+#[cfg(feature = "download")]
+pub use crate::separador_endereco::modelo::obter_modelo;
 
 use crate::{endereco::Endereco, separador_endereco::features::ExtratorFeature};
 
@@ -548,7 +550,7 @@ impl SeparadorEndereco {
 // O `Result` guarda a falha (modelo indisponível) para que ela vire um erro comum em
 // vez de um panic na primeira chamada.
 static SEPARADOR: LazyLock<Result<SeparadorEndereco, String>> =
-    LazyLock::new(|| SeparadorEndereco::carregar(obter_modelo(None)?));
+    LazyLock::new(|| SeparadorEndereco::carregar(modelo::obter_modelo_padrao(None)?));
 
 /// Devolve o separador padrão, carregado na primeira chamada.
 fn separador_padrao() -> Result<&'static SeparadorEndereco, String> {
@@ -579,13 +581,12 @@ fn com_tagger<R>(
 ///
 /// ```
 /// use enderecobr_rs::separador_endereco::{
-///     modelo::{obter_modelo, VAR_AMBIENTE_SEM_DOWNLOAD},
+///     modelo::obter_caminho_modelo,
 ///     segmentar_endereco, EnderecoSegmentado, OpcoesSegmentacao, SegmentoEndereco, TipoSegmento,
 /// };
 ///
-/// // Evitando problemas no CI
-/// std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "true");
-/// let modelo_existe = obter_modelo(None).map(|x| x.exists()).unwrap_or(false);
+/// // O exemplo só roda quando o modelo já está no cache: nada de rede aqui.
+/// let modelo_existe = obter_caminho_modelo(None).map(|x| x.is_file()).unwrap_or(false);
 /// if !modelo_existe {
 ///     return;
 /// }
@@ -662,14 +663,13 @@ impl EnderecoSegmentado {
 ///
 /// ```
 /// use enderecobr_rs::separador_endereco::{
-///     modelo::{obter_modelo, VAR_AMBIENTE_SEM_DOWNLOAD},
+///     modelo::obter_caminho_modelo,
 ///     estruturar_endereco, OpcoesEndereco
 /// };
 /// use enderecobr_rs::endereco::Endereco;
 ///
-/// // Evitando problemas no CI
-/// std::env::set_var(VAR_AMBIENTE_SEM_DOWNLOAD, "true");
-/// let modelo_existe = obter_modelo(None).map(|x| x.exists()).unwrap_or(false);
+/// // O exemplo só roda quando o modelo já está no cache: nada de rede aqui.
+/// let modelo_existe = obter_caminho_modelo(None).map(|x| x.is_file()).unwrap_or(false);
 /// if !modelo_existe {
 ///     return;
 /// }

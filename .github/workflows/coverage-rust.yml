@@ -22,7 +22,9 @@ jobs:
       - name: Generate code coverage
         # Não estou verificando o coverage de todas as features por enquanto.
         # Tem que setar a flag --all-features para isso
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: >
+          cargo llvm-cov --workspace --lcov --output-path lcov.info
+          --features separador,download
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6.0.1
         with:
