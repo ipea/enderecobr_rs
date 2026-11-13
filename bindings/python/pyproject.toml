@@ -49,9 +49,9 @@ doc = [
 ]
 
 [tool.pytest.ini_options]
-# O pacote (`enderecobr/__init__.py`) é o ponto de entrada testado: é ele que
-# garante o modelo antes de chamar a extensão compilada.
-pythonpath = ["."]
+# Sem `pythonpath`: os testes rodam contra o pacote instalado (editable ou wheel),
+# que é o que o usuário recebe. Apontar para o diretório local faria ele sombrear
+# a instalação sem o `.so` compilado.
 # As docstrings (e seus exemplos) ficam no Rust: `test_docstrings.py` as roda
 # contra o módulo em execução.
 addopts = ["--doctest-glob=*.py"]
