@@ -9,6 +9,8 @@ versionamento é o [SemVer](https://semver.org/lang/pt-BR/). O que é anterior �
 
 ## [Não publicado]
 
+## [0.7.0] - 2026-11-13
+
 ### Rust
 
 - **Breaking:** nenhuma feature vem ligada por padrão (`default = []`). Quem usava
