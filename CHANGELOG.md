@@ -9,6 +9,8 @@ versionamento é o [SemVer](https://semver.org/lang/pt-BR/). O que é anterior �
 
 ## [Não publicado]
 
+## [0.7.4] - 2026-11-13
+
 - **Breaking**: Simplificando mais ainda as dependências do pacote: agora serde só
   é utilizado nos CLIs.
 - Remove a dependência da lib `dirs` que só servia para pegar a pasta de cache do sistema atual.

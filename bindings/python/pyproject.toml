@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "enderecobr"
 requires-python = ">=3.9"
-version = "0.7.3"
+version = "0.7.4"
 authors = [
   {name = "Daniel Herszenhut Meirelles Santos", email =  "daniel.santos@ipea.gov.br"}, 
   {name = "Gabriel Garcia de Almeida",  email ="gabriel.almeida@ipea.gov.br"}, 
