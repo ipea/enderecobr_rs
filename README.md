@@ -49,7 +49,7 @@ Ou adicionando em no seu `Cargo.toml`:
 
 ```toml
 [dependencies]
-enderecobr_rs = { version = "0.7.1" }
+enderecobr_rs = { version = "0.7.3" }
 ```
 
 ## Funcionalidades opcionais
@@ -65,7 +65,7 @@ modelo sob demanda:
 
 ```toml
 [dependencies]
-enderecobr_rs = { version = "0.7.1", features = ["separador", "download"] }
+enderecobr_rs = { version = "0.7.3", features = ["separador", "download"] }
 ```
 
 Para manter a segmentação porém baixando o modelo por fora — útil em ambiente sem
@@ -73,7 +73,7 @@ rede, ou quando o arquivo já é distribuído com a sua aplicação:
 
 ```toml
 [dependencies]
-enderecobr_rs = { version = "0.7.1", features = ["separador"] }
+enderecobr_rs = { version = "0.7.3", features = ["separador"] }
 ```
 
 Nesse caso o modelo precisa existir no disco: aponte `ENDERECOBR_MODELO` para o

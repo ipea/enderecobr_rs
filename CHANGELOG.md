@@ -9,6 +9,10 @@ versionamento é o [SemVer](https://semver.org/lang/pt-BR/). O que é anterior �
 
 ## [Não publicado]
 
+## [0.7.3] - 2026-11-13
+
+- Forçando novamente uma nova documentação para o Python.
+
 ## [0.7.1] - 2026-11-13
 
 - Forçando reenvio para o Pypi após erro de build.
