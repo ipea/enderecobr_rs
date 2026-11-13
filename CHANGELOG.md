@@ -9,6 +9,10 @@ versionamento é o [SemVer](https://semver.org/lang/pt-BR/). O que é anterior �
 
 ## [Não publicado]
 
+## [0.7.1] - 2026-11-13
+
+- Forçando reenvio para o Pypi após erro de build.
+
 ## [0.7.0] - 2026-11-13
 
 ### Rust
