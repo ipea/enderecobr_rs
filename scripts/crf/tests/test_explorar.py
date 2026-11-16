@@ -68,6 +68,7 @@ def detalhe(
         recorte="tagger_v13/treino",
         llm="llm",
         segmentos=tuple(segmentos["segmentos"]) if segmentos else (),
+        comentario=None,
         erro=None,
         revisoes=revisoes,
         revisado_por="tagger_v13" if revisoes else None,

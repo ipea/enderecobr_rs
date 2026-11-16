@@ -47,6 +47,7 @@ class Detalhe:
     recorte: str
     llm: str | None
     segmentos: tuple[dict[str, str], ...]
+    comentario: str | None
     erro: str | None
     revisoes: tuple[dict[str, Any], ...]
     revisado_por: str | None
@@ -330,6 +331,7 @@ def carregar_detalhes(
             segmentos=tuple(
                 cast("list[dict[str, str]]", resposta.get("segmentos")) or ()
             ),
+            comentario=resposta.get("comentario"),
             erro=resposta.get("erro"),
             revisoes=tuple(cast("list[dict[str, Any]]", meta.get("revisoes")) or ()),
             revisado_por=revisado.get("modelo"),

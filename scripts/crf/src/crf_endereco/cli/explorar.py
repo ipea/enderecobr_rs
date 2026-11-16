@@ -497,7 +497,7 @@ def _rival(marginal: Mapping[str, float], previsto: str) -> tuple[str, float]:
 
 
 def _alvo(detalhe: Detalhe) -> None:
-    """O que a LLM diz hoje do endereço, trecho a trecho."""
+    """O que a LLM diz hoje do endereço: trecho a trecho e o comentário dela."""
     if detalhe.erro:
         console.print(f"[red]erro guardado na linha: {detalhe.erro}[/red]")
     if not detalhe.segmentos:
@@ -507,3 +507,5 @@ def _alvo(detalhe: Detalhe) -> None:
         tipo = segmento.get("tipo", "")
         estilo = estilo_tipo(tipo)
         console.print(f"  [{estilo}]{tipo:<18}[/{estilo}] {segmento.get('valor', '')}")
+    if detalhe.comentario:
+        console.print(f"[dim italic]{detalhe.comentario}[/dim italic]")
