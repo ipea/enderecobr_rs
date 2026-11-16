@@ -14,6 +14,7 @@ from crf_endereco.dataset import carregar_anotados
 from crf_endereco.features import ExtratorFeature
 from crf_endereco.modelo import crf as modelo_crf
 from crf_endereco.modelo import relatorio
+from crf_endereco.modelo.estresse import rodar as rodar_estresse
 from crf_endereco.segmentador_rust import rodar_segmentacao
 
 OpcaoDataset = Annotated[Path, typer.Option(help="banco de anotacao")]
@@ -96,7 +97,10 @@ def tunar(
     fracao_validacao: Annotated[
         float,
         typer.Option(
-            "--fracao-validacao", min=0.0, max=1.0, help="Fracao separada para validacao."
+            "--fracao-validacao",
+            min=0.0,
+            max=1.0,
+            help="Fracao separada para validacao.",
         ),
     ] = modelo_crf.FRACAO_VALIDACAO_TUNING,
     verboso: Annotated[
@@ -129,20 +133,19 @@ def tunar(
 def avaliar(
     dataset: OpcaoDataset = CAMINHO_DATASET,
     tagger: OpcaoTagger = CAMINHO_TAGGER,
-    fracao_teste: Annotated[
-        float, typer.Option(help="mesma fracao de teste usada no treino")
-    ] = 0.1,
-    estratificar_por: OpcaoEstratificar = "origem",
-    semente: Annotated[
-        int, typer.Option("--semente", help="mesma semente de split usada no treino")
-    ] = modelo_crf.SEMENTE_SPLIT,
+    estresse: Annotated[
+        bool,
+        typer.Option(
+            "--estresse", help="mede tambem as perturbacoes fixas (typo, abreviacao)."
+        ),
+    ] = False,
 ) -> None:
-    """Avalia o CRF no recorte de teste do treino, nunca no dataset inteiro."""
-    exemplos = modelo_crf.carregar_exemplos(dataset)
-    _, teste = modelo_crf.dividir(
-        exemplos, fracao_teste, semente, estratificar_por=estratificar_por
-    )
-    relatorio.avaliar(teste.x, teste.y, teste.categorias, teste.tokens, tagger)
+    """Avalia o CRF no recorte gravado pelo treino, nunca no dataset inteiro."""
+    treino, teste = modelo_crf.recorte_gravado(tagger, dataset)
+    crf = modelo_crf.carregar_tagger(tagger)
+    relatorio.avaliar(teste, crf, treino, tagger.name)
+    if estresse:
+        rodar_estresse(crf, teste)
 
 
 def segmentar(tagger: OpcaoTagger = CAMINHO_TAGGER) -> None:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,10 +25,6 @@ SCHEMA_CNEFE = DIR_PROMPT / "cnefe_schema.md"
 # (inclui NBSP, por exemplo); o conjunto explicito mantem as implementacoes
 # equivalentes.
 ESPACOS_ASCII = frozenset(" \t\n\x0c\r")
-
-
-class ErroSegmentacao(RuntimeError):
-    """Nao foi possivel obter uma segmentacao valida."""
 
 
 @dataclass(frozen=True)
@@ -50,6 +48,22 @@ class Resposta:
 
     segmentos: list[Segmento]
     comentario: str | None = None
+
+
+@dataclass(frozen=True)
+class Pedido:
+    """Um dos enderecos de um lote: o texto e o contexto que a LLM ve dele."""
+
+    endereco: str
+    extras: str = ""
+
+
+@dataclass(frozen=True)
+class Resultado:
+    """O que o lote rendeu: a resposta valida de cada indice e a falha de cada resto."""
+
+    aceitas: dict[int, Resposta]
+    falhas: dict[int, str]
 
 
 @dataclass(frozen=True)
@@ -104,37 +118,57 @@ def prompt_sistema(config: Config) -> str:
     )
 
 
-def prompt_usuario(endereco: str, extras: str, n_rodadas: int) -> str:
-    return f"""Extra info (context only; it does NOT populate segments):
-{extras}
+def prompt_usuario(pedidos: Sequence[Pedido], n_rodadas: int) -> str:
+    """Um bloco numerado por endereco: o numero e o `indice` da resposta."""
+    blocos = "\n\n".join(
+        f"""[{i}]
+Extra info (context only; it does NOT populate segments):
+{pedido.extras or "(none)"}
 
 Raw address:
-{endereco}
+{pedido.endereco}"""
+        for i, pedido in enumerate(pedidos, start=1)
+    )
+    return f"""{len(pedidos)} address(es) to segment.
 
+{blocos}
+
+Answer all of them in one `responder` call: one entry per bracket number, `indice` set to that number.
 You have {n_rodadas} rounds.
 """
 
 
 def segmentar(
     agente: Agente,
-    endereco: str,
-    extras: str = "",
+    pedidos: Sequence[Pedido],
     *,
     n_iter: int = 10,
     tolerancia_erro: int = 2,
-) -> Resposta:
-    """Roda o loop reAct ate obter uma segmentacao valida."""
+) -> Resultado:
+    """Roda o loop reAct ate cada pedido do lote ter uma segmentacao valida.
+
+    A conversa e uma so: o pedido de sistema e as ferramentas sao amortizados
+    entre todos os enderecos do lote. A validacao, porem, e por indice — o
+    endereco que sai errado volta sozinho para a LLM, e o que ja estava certo
+    nao e pedido de novo.
+    """
     console = agente.console
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": prompt_sistema(agente.config)},
-        {"role": "user", "content": prompt_usuario(endereco, extras, n_iter)},
+        {"role": "user", "content": prompt_usuario(pedidos, n_iter)},
     ]
-    erros_consecutivos = 0
+    aceitas: dict[int, Resposta] = {}
+    problemas: dict[int, list[str]] = {}
+    falhas: dict[int, str] = {}
+    erros_seguidos: Counter[int] = Counter()
+    pendentes = list(range(len(pedidos)))
 
-    console.print(f"\nEndereço: {endereco}\n", style="blue")
+    console.print(f"\nLote de {len(pedidos)} endereco(s):\n", style="blue")
+    for i, pedido in enumerate(pedidos, start=1):
+        console.print(f"  [{i}] {pedido.endereco}", style="blue")
 
-    for i in range(n_iter):
-        console.rule(f"Iteração {i + 1}/{n_iter}")
+    for rodada in range(n_iter):
+        console.rule(f"Iteração {rodada + 1}/{n_iter}")
 
         message = _requisitar(agente, messages)
         messages.append(message)
@@ -146,25 +180,38 @@ def segmentar(
         chamadas = _chamadas(message)
         final = next((c for c in chamadas if c.nome == "responder"), None)
         if final is not None:
-            resposta = _resposta_final(final)
-            console.print(_visualizacao(endereco, resposta))
-            problemas = _problemas(endereco, resposta)
-            if not problemas:
-                return resposta
+            for indice, resposta in _respostas(final, len(pedidos)).items():
+                if indice in aceitas:
+                    continue
+                problemas_do_indice = _problemas(pedidos[indice].endereco, resposta)
+                if problemas_do_indice:
+                    problemas[indice] = problemas_do_indice
+                    erros_seguidos[indice] += 1
+                    continue
+                console.print(_visualizacao(pedidos[indice].endereco, resposta))
+                aceitas[indice] = resposta
+                problemas.pop(indice, None)
 
-            erros_consecutivos += 1
-            if erros_consecutivos > tolerancia_erro:
-                raise ErroSegmentacao(
-                    f"Validação falhou {erros_consecutivos} vezes seguidas:\n"
-                    + "\n".join(problemas)
-                )
+            for indice in pendentes:
+                if indice in aceitas:
+                    continue
+                if erros_seguidos[indice] > tolerancia_erro:
+                    falhas[indice] = (
+                        f"validacao falhou {erros_seguidos[indice]} vezes: "
+                        + "; ".join(problemas.get(indice, []))
+                    )
+            pendentes = [
+                indice
+                for indice in pendentes
+                if indice not in aceitas and indice not in falhas
+            ]
+            if not pendentes:
+                return Resultado(aceitas, falhas)
+
             messages.append(
                 {
                     "role": "user",
-                    "content": (
-                        "An error occurred while validating your segmentation. "
-                        "Fix it and submit again.\n" + "\n".join(problemas)
-                    ),
+                    "content": _correcao(pedidos, pendentes, problemas),
                 }
             )
             continue
@@ -177,16 +224,35 @@ def segmentar(
                 {"role": "tool", "tool_call_id": chamada.id, "content": saida}
             )
 
-        if i == n_iter - 1:
+        if rodada == n_iter - 1:
             console.print("[bold red]Última iteração[/bold red]")
             messages.append(
                 {
                     "role": "user",
-                    "content": "Final round - Give your answer now or abstain",
+                    "content": "Final round - Give your answers now or abstain",
                 }
             )
 
-    raise ErroSegmentacao(f"Sem resposta final após {n_iter} iterações.")
+    for indice in pendentes:
+        falhas.setdefault(indice, f"sem resposta final apos {n_iter} iteracoes")
+    return Resultado(aceitas, falhas)
+
+
+def _correcao(
+    pedidos: Sequence[Pedido],
+    pendentes: Sequence[int],
+    problemas: dict[int, list[str]],
+) -> str:
+    """Pede de volta so os indices que faltam ou nao passaram na validacao."""
+    linhas = [
+        f"[{i + 1}] {pedidos[i].endereco}\n"
+        + ("\n".join(problemas[i]) if i in problemas else "No answer yet.")
+        for i in pendentes
+    ]
+    return (
+        "These addresses still lack a valid answer. Fix them and submit again "
+        "with `responder` (same `indice`):\n" + "\n".join(linhas)
+    )
 
 
 def _requisitar(agente: Agente, messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -244,12 +310,35 @@ def _segmentos(argumentos: dict[str, Any]) -> list[Segmento]:
     ]
 
 
-def _resposta_final(chamada: Chamada) -> Resposta:
-    """Converte a chamada `responder` na resposta final estruturada."""
-    segmentos = _segmentos(chamada.argumentos)
-    return Resposta(
-        segmentos=segmentos, comentario=chamada.argumentos.get("comentario")
-    )
+def _respostas(chamada: Chamada, total: int) -> dict[int, Resposta]:
+    """Converte a chamada `responder` nas respostas, por indice de pedido (0-based).
+
+    Indice fora do lote e repetido ficam de fora: o que vale e a primeira
+    resposta de cada endereco, e o que faltar volta no pedido de correcao.
+    """
+    bruto = chamada.argumentos.get("respostas") or []
+    if isinstance(bruto, str):
+        try:
+            bruto = json.loads(bruto)
+        except json.JSONDecodeError:
+            return {}
+    if not isinstance(bruto, list):
+        return {}
+
+    respostas: dict[int, Resposta] = {}
+    for item in bruto:
+        if not isinstance(item, dict):
+            continue
+        try:
+            indice = int(item.get("indice", 0)) - 1
+        except (TypeError, ValueError):
+            continue
+        if not 0 <= indice < total or indice in respostas:
+            continue
+        respostas[indice] = Resposta(
+            segmentos=_segmentos(item), comentario=item.get("comentario")
+        )
+    return respostas
 
 
 def _problemas(endereco: str, resposta: Resposta) -> list[str]:

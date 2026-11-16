@@ -49,7 +49,9 @@ def carregar_ambiguidade(caminho: Path = AMBIGUIDADE_MUNICIPIOS) -> dict[str, in
         for linha in csv.DictReader(arquivo):
             chave = " ".join(chave_nome(linha["municipio"] or ""))
             if chave:
-                contagem[chave] = max(contagem.get(chave, 0), int(linha["n_localidades"]))
+                contagem[chave] = max(
+                    contagem.get(chave, 0), int(linha["n_localidades"])
+                )
     return contagem
 
 

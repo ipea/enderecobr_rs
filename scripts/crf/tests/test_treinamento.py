@@ -42,21 +42,21 @@ def test_mergear_endereco_sem_segmento_fica_todo_em_o():
     assert labels == ["O", "O", "O", "O"]
 
 
-def test_matriz_confusao_conta_pares_e_coloca_o_primeiro():
+def test_matriz_confusao_conta_pares_em_ordem_alfabetica():
     rotulos, matriz = matriz_confusao(
         [["B_LOGRADOURO", "O", "B_NUMERO"]],
         [["B_LOGRADOURO", "O", "O"]],
     )
 
-    assert rotulos == ["O", "B_LOGRADOURO", "B_NUMERO"]
-    assert matriz == [[1, 0, 0], [0, 1, 0], [1, 0, 0]]
+    assert rotulos == ["B_LOGRADOURO", "B_NUMERO", "O"]
+    assert matriz == [[1, 0, 0], [0, 0, 1], [0, 0, 1]]
 
 
 def test_matriz_confusao_inclui_rotulo_so_previsto():
     rotulos, matriz = matriz_confusao([["O"]], [["B_CEP"]])
 
-    assert rotulos == ["O", "B_CEP"]
-    assert matriz == [[0, 1], [0, 0]]
+    assert rotulos == ["B_CEP", "O"]
+    assert matriz == [[0, 0], [1, 0]]
 
 
 def test_sem_pontuacao_remove_pontuacao_entre_trechos_de_tipos_diferentes():

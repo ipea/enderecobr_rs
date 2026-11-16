@@ -6,10 +6,11 @@ import hashlib
 import json
 import sqlite3
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import typer
 
@@ -25,6 +26,30 @@ class Exemplo:
     resposta: str
     origem: str
     uf: str
+
+
+@dataclass(frozen=True)
+class Detalhe:
+    """Uma linha do dataset com tudo o que o `explorar` precisa ver junto.
+
+    `segmentos` e o alvo atual (vazio quando a linha nunca foi etiquetada) e
+    `revisoes` guarda cada resposta trocada, da mais antiga para a mais nova:
+    juntos, sao o historico do rotulo que o modelo aprendeu.
+    """
+
+    id: int
+    endereco: str
+    extras: str
+    uf: str
+    municipio: str
+    origem: str
+    lote: str
+    recorte: str
+    llm: str | None
+    segmentos: tuple[dict[str, str], ...]
+    erro: str | None
+    revisoes: tuple[dict[str, Any], ...]
+    revisado_por: str | None
 
 
 @dataclass(frozen=True)
@@ -63,10 +88,24 @@ def criar_banco(conn: sqlite3.Connection) -> None:
             hash_endereco TEXT NOT NULL UNIQUE,
             data_criacao TEXT NOT NULL,
             data_processamento TEXT,
-            llm TEXT
+            llm TEXT,
+            recorte TEXT NOT NULL DEFAULT ''
         );
         """
     )
+    # Bancos criados antes da coluna `recorte`: sem ela nao ha como saber o que
+    # o tagger viu.
+    garantir_recorte(conn)
+
+
+def garantir_recorte(conn: sqlite3.Connection) -> None:
+    """Adiciona a coluna `recorte` num banco criado antes dela."""
+    colunas = {linha[1] for linha in conn.execute("PRAGMA table_info(enderecos)")}
+    if "recorte" not in colunas:
+        _ = conn.execute(
+            "ALTER TABLE enderecos ADD COLUMN recorte TEXT NOT NULL DEFAULT ''"
+        )
+    conn.commit()
 
 
 def contar_registros(conn: sqlite3.Connection) -> int:
@@ -144,17 +183,90 @@ def gravar_resposta(
     id_linha: int,
     resposta_llm: str,
     llm: str,
+    *,
+    revisado_por: str | None = None,
 ) -> None:
-    """Grava o resultado de uma linha e commita (progresso persistido)."""
+    """Grava o resultado de uma linha e commita (progresso persistido).
+
+    Com `revisado_por`, a resposta que esta sendo trocada vai para
+    `meta.revisoes` e o modelo fica marcado em `meta.revisado.modelo`:
+    reetiquetar apaga o rotulo que treinou o modelo, e sem esse rastro nao daria
+    nem para auditar a troca nem para saber que a linha ja foi revista.
+    """
+    agora = datetime.now(UTC).isoformat()
+    if revisado_por is None:
+        _ = conn.execute(
+            """
+            UPDATE enderecos
+            SET resposta_llm = ?, data_processamento = ?, llm = ?
+            WHERE id = ?
+            """,
+            (resposta_llm, agora, llm, id_linha),
+        )
+        conn.commit()
+        return
+
+    # No UPDATE o lado direito le a linha antiga: `resposta_llm`,
+    # `data_processamento` e `llm` aqui sao os da anotacao sendo substituida.
     _ = conn.execute(
         """
         UPDATE enderecos
-        SET resposta_llm = ?, data_processamento = ?, llm = ?
+        SET resposta_llm = ?, data_processamento = ?, llm = ?,
+            meta = json_set(
+                meta,
+                '$.revisoes',
+                json_insert(
+                    coalesce(json_extract(meta, '$.revisoes'), json_array()),
+                    '$[#]',
+                    json_object(
+                        'data', data_processamento,
+                        'llm', llm,
+                        'resposta', json(resposta_llm)
+                    )
+                ),
+                '$.revisado',
+                json_object('modelo', ?, 'data', ?)
+            )
         WHERE id = ?
         """,
-        (resposta_llm, datetime.now(UTC).isoformat(), llm, id_linha),
+        (resposta_llm, agora, llm, revisado_por, agora, id_linha),
     )
     conn.commit()
+
+
+def gravar_recorte(
+    conn: sqlite3.Connection,
+    modelo: str,
+    treino: Iterable[str],
+    teste: Iterable[str],
+) -> None:
+    """Marca no banco o papel de cada endereco no recorte de um modelo.
+
+    E o que permite `avaliar` medir no que o modelo nunca viu: o split deixa de
+    ser presumido a partir das opcoes de linha de comando.
+    """
+    garantir_recorte(conn)
+    for papel, hashes in (("treino", treino), ("teste", teste)):
+        _ = conn.executemany(
+            "UPDATE enderecos SET recorte = ? WHERE hash_endereco = ?",
+            [(f"{modelo}/{papel}", hash_) for hash_ in hashes],
+        )
+    conn.commit()
+
+
+def ler_recorte(conn: sqlite3.Connection, modelo: str) -> dict[str, set[str]]:
+    """Hashes de treino e teste gravados para o modelo (vazios se nao houver)."""
+    garantir_recorte(conn)
+    recorte: dict[str, set[str]] = {}
+    for papel in ("treino", "teste"):
+        recorte[papel] = {
+            str(linha[0])
+            for linha in conn.execute(
+                "SELECT hash_endereco FROM enderecos WHERE recorte = ?",
+                (f"{modelo}/{papel}",),
+            )
+        }
+    return recorte
 
 
 def carregar_anotados(caminho: Path = CAMINHO_DATASET) -> list[Exemplo]:
@@ -180,6 +292,66 @@ def carregar_anotados(caminho: Path = CAMINHO_DATASET) -> list[Exemplo]:
         )
         for linha in linhas
     ]
+
+
+def carregar_detalhes(
+    conn: sqlite3.Connection, ids: Sequence[int]
+) -> dict[int, Detalhe]:
+    """Linhas do dataset por id, com resposta e historico de revisao decodificados."""
+    if not ids:
+        return {}
+    linhas = conn.execute(
+        """
+        SELECT id, endereco, extras, coalesce(uf, '') AS uf,
+               coalesce(municipio, '') AS municipio,
+               coalesce(origem, '') AS origem, lote, recorte, llm,
+               resposta_llm, meta
+        FROM enderecos
+        WHERE id IN (SELECT value FROM json_each(?))
+        """,
+        (json.dumps(sorted(ids)),),
+    ).fetchall()
+
+    detalhes: dict[int, Detalhe] = {}
+    for linha in linhas:
+        resposta = _decodificar(linha["resposta_llm"], "resposta")
+        meta = _decodificar(linha["meta"], "meta")
+        revisado = meta.get("revisado") or {}
+        detalhes[int(linha["id"])] = Detalhe(
+            id=int(linha["id"]),
+            endereco=str(linha["endereco"]),
+            extras=str(linha["extras"]),
+            uf=str(linha["uf"]),
+            municipio=str(linha["municipio"]),
+            origem=str(linha["origem"]),
+            lote=str(linha["lote"]),
+            recorte=str(linha["recorte"]),
+            llm=linha["llm"],
+            segmentos=tuple(
+                cast("list[dict[str, str]]", resposta.get("segmentos")) or ()
+            ),
+            erro=resposta.get("erro"),
+            revisoes=tuple(cast("list[dict[str, Any]]", meta.get("revisoes")) or ()),
+            revisado_por=revisado.get("modelo"),
+        )
+    return detalhes
+
+
+def _decodificar(texto: str | None, rotulo: str) -> dict[str, Any]:
+    """JSON de uma coluna (`{}` quando a linha nao tem valor).
+
+    Invalido vira erro explicito: mostrar a linha como se nao tivesse resposta
+    esconderia um banco corrompido.
+    """
+    if not texto:
+        return {}
+    try:
+        dados = json.loads(texto)
+    except json.JSONDecodeError as erro:
+        raise RuntimeError(f"{rotulo} inválida no banco: {erro}") from erro
+    if not isinstance(dados, dict):
+        raise TypeError(f"{rotulo} do banco não é um objeto JSON: {texto[:60]!r}")
+    return dados
 
 
 def segmentos_de(exemplo: Exemplo) -> list[dict[str, str]]:

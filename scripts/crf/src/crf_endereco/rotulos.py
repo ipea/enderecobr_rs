@@ -1,6 +1,7 @@
 """Alinhamento dos segmentos da LLM com os tokens do CRF (BIO)."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 # Tradução tipo da anotação -> rótulo do treino. Ausente do mapa = treina com o
 # próprio tipo; `None` = não treina (o token vira `O`).
@@ -9,6 +10,53 @@ mapa_tipo_segmento: dict[str, str | None] = {
     "ruido": None,
     "outros": None,
 }
+
+# Veredito de uma reetiquetacao: o que a resposta nova fez com a divergencia.
+CONCORDA_COM_O_CRF = "concorda com o CRF"
+ROTULO_MANTIDO = "rótulo mantido"
+ROTULO_NOVO = "rótulo novo"
+
+
+@dataclass(frozen=True)
+class Mudanca:
+    """Um token em que as tres etiquetas de um endereco nao batem.
+
+    `antes` e a etiqueta anterior a reetiquetacao, `previsto` a do CRF e
+    `agora` a da resposta mais recente da LLM.
+    """
+
+    token: str
+    antes: str
+    previsto: str
+    agora: str
+
+
+def comparar(
+    tokens: Sequence[str],
+    antes: Sequence[str],
+    previsto: Sequence[str],
+    agora: Sequence[str],
+) -> tuple[list[Mudanca], str]:
+    """Tokens em que as tres etiquetas nao batem, e o veredito do endereco.
+
+    O veredito le o que a etiqueta nova fez com o caso: repetiu a de antes (quem
+    carrega o erro e o modelo), passou a concordar com o CRF (a de antes era o
+    problema) ou inventou uma terceira.
+    """
+    mudancas = [
+        Mudanca(token, anterior, crf, novo)
+        for token, anterior, crf, novo in zip(
+            tokens, antes, previsto, agora, strict=True
+        )
+        if not anterior == crf == novo
+    ]
+    if not mudancas:
+        return [], CONCORDA_COM_O_CRF
+    if all(mudanca.antes == mudanca.agora for mudanca in mudancas):
+        return mudancas, ROTULO_MANTIDO
+    if all(mudanca.previsto == mudanca.agora for mudanca in mudancas):
+        return mudancas, CONCORDA_COM_O_CRF
+    return mudancas, ROTULO_NOVO
 
 
 def mergear(

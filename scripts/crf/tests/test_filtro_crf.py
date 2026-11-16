@@ -1,21 +1,27 @@
+import json
 import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 import pytest
+import sklearn_crfsuite
 from typer import BadParameter
 
 from crf_endereco.anotacao.filtro_crf import (
     Previsao,
     confianca_media,
     confianca_minima,
+    divergencias,
     filtrar_por_confianca,
     filtrar_por_tipos,
+    parse_faixa,
     tipos_das_tags,
     validar_tipos,
 )
 from crf_endereco.anotacao.pendentes import Filtros, padrao_busca, pendentes
 from crf_endereco.dataset import criar_banco
+from crf_endereco.modelo.crf import Exemplos
 from crf_endereco.segmentador_rust import comando_segmentacao
 
 
@@ -27,11 +33,17 @@ def previsao(
     media: float = 1.0,
 ) -> Previsao:
     """Previsao do CRF como o modelo a devolveria para um endereco."""
+    # Nome do endereco e do token menos confiavel; nao sao segredo nenhum (o
+    # bandit acha que `pior_token=` com literal e senha e reclama).
+    endereco, pior = "RUA", tipos[0].upper() if tipos else None
     return Previsao(
         id=identificador,
+        tags=tuple(f"B_{tipo.upper()}" for tipo in tipos),
         tipos=frozenset(tipos),
         menor_confianca=menor,
         media_confianca=media,
+        pior_token=endereco,
+        pior_tag=f"B_{pior}" if pior else "O",
     )
 
 
@@ -55,6 +67,45 @@ def banco_com(linhas: list[tuple[str, str, int]]) -> sqlite3.Connection:
             )
     conn.commit()
     return conn
+
+
+def anotar(
+    conn: sqlite3.Connection, id_linha: int, revisado_por: str | None = None
+) -> None:
+    """Marca a linha como anotada com sucesso (e revisada por um modelo)."""
+    # Revisado vem sempre com histórico: é o par que `gravar_resposta` grava.
+    meta = (
+        json.dumps(
+            {"revisado": {"modelo": revisado_por}, "revisoes": [{"resposta": {}}]}
+        )
+        if revisado_por
+        else "{}"
+    )
+    _ = conn.execute(
+        "UPDATE enderecos SET resposta_llm = '{\"segmentos\": []}', meta = ? WHERE id = ?",
+        (meta, id_linha),
+    )
+    conn.commit()
+
+
+class CrfFake:
+    """CRF que devolve uma previsao pronta em vez de prever."""
+
+    def __init__(self, previsto: list[list[str]]) -> None:
+        self.previsto = previsto
+
+    def predict(self, _x: object) -> list[list[str]]:
+        return self.previsto
+
+
+def exemplos_com(hashes: list[str], rotulos: list[list[str]]) -> Exemplos:
+    return Exemplos(
+        x=[[{"bias": 1.0}] for _ in hashes],
+        y=rotulos,
+        tokens=[["RUA"] for _ in hashes],
+        categorias=[["origem", "SP"] for _ in hashes],
+        hashes=hashes,
+    )
 
 
 # --- tipos_das_tags --------------------------------------------------------
@@ -122,7 +173,7 @@ def test_filtrar_por_tipos_seleciona_so_quem_tem_o_tipo():
 def test_filtrar_por_confianca_usa_o_token_menos_confiavel():
     previsoes = [previsao(1, menor=0.95), previsao(2, menor=0.40, media=0.90)]
 
-    assert filtrar_por_confianca(previsoes, 0.6) == {2}
+    assert filtrar_por_confianca(previsoes, (0.0, 0.6)) == {2}
 
 
 def test_filtrar_por_confianca_media_olha_todos_os_tokens():
@@ -131,15 +182,50 @@ def test_filtrar_por_confianca_media_olha_todos_os_tokens():
         previsao(2, menor=0.4, media=0.55),
     ]
 
-    assert filtrar_por_confianca(previsoes, 0.6, media=True) == {2}
+    assert filtrar_por_confianca(previsoes, (0.0, 0.6), media=True) == {2}
 
 
 def test_filtrar_por_confianca_empate_no_limiar_nao_marca():
-    assert filtrar_por_confianca([previsao(1, menor=0.6, media=0.6)], 0.6) == set()
     assert (
-        filtrar_por_confianca([previsao(1, menor=0.6, media=0.6)], 0.6, media=True)
+        filtrar_por_confianca([previsao(1, menor=0.6, media=0.6)], (0.0, 0.6)) == set()
+    )
+    assert (
+        filtrar_por_confianca(
+            [previsao(1, menor=0.6, media=0.6)], (0.0, 0.6), media=True
+        )
         == set()
     )
+
+
+def test_filtrar_por_confianca_respeita_o_minimo_da_faixa():
+    previsoes = [
+        previsao(1, menor=0.20, media=0.20),
+        previsao(2, menor=0.55, media=0.55),
+        previsao(3, menor=0.85, media=0.85),
+    ]
+
+    # Faixa [0.4, 0.8): nem o caso perdido nem o caso facil entram.
+    assert filtrar_por_confianca(previsoes, (0.4, 0.8), media=True) == {2}
+
+
+def test_parse_faixa_aceita_valor_unico_e_faixa():
+    assert parse_faixa(None, "--incertos") is None
+    assert parse_faixa("0.8", "--incertos") == (0.0, 0.8)
+    assert parse_faixa(" 0.6 , 0.8 ", "--incertos") == (0.6, 0.8)
+
+
+def test_parse_faixa_recusa_faixa_invertida_ou_fora_de_zero_um():
+    for valor in (
+        "0.8,0.6",
+        "0.8,0.8",
+        "-0.1,0.5",
+        "0.5,1.5",
+        "0.5,0.6,0.7",
+        "",
+        "a,b",
+    ):
+        with pytest.raises(BadParameter):
+            _ = parse_faixa(valor, "--incertos")
 
 
 # --- validar_tipos ---------------------------------------------------------
@@ -199,6 +285,66 @@ def test_filtro_nao_inclui_linhas_ja_etiquetadas():
     aprovados = Filtros(ids=frozenset({1, 2}))
 
     assert {linha.id for linha in pendentes(conn, aprovados)} == {2}
+
+
+def test_anotados_troca_os_pendentes_pelas_linhas_ja_etiquetadas():
+    conn = banco_com([("A", "SP", 2)])
+    anotar(conn, 1)
+
+    assert {linha.id for linha in pendentes(conn, Filtros(anotados=True))} == {1}
+
+
+def test_filtro_por_hash_recorta_um_conjunto_de_linhas():
+    conn = banco_com([("A", "SP", 3)])
+
+    linhas = pendentes(conn, Filtros(hashes=frozenset({"h2", "h3"})))
+
+    assert {linha.hash for linha in linhas} == {"h2", "h3"}
+
+
+def test_linha_ja_revisada_pelo_modelo_fica_de_fora():
+    conn = banco_com([("A", "SP", 2)])
+    anotar(conn, 1, revisado_por="tagger_v13")
+    anotar(conn, 2, revisado_por="tagger_v12")
+
+    ficam = pendentes(conn, Filtros(anotados=True, pular_revisados_por="tagger_v13"))
+
+    # a revisao de outro modelo nao tira a linha da fila deste
+    assert {linha.id for linha in ficam} == {2}
+
+
+def test_revisados_pega_so_quem_tem_historico_de_reetiquetacao():
+    conn = banco_com([("A", "SP", 3)])
+    anotar(conn, 1, revisado_por="tagger_v13")
+    anotar(conn, 2)
+
+    linhas = pendentes(conn, Filtros(anotados=True, revisados=True))
+
+    assert {linha.id for linha in linhas} == {1}
+
+
+# --- divergencia entre previsao e rotulo -----------------------------------
+
+
+def test_divergencias_pega_so_onde_o_modelo_erra_o_proprio_rotulo():
+    exemplos = exemplos_com(["h1", "h2"], [["B_NUMERO", "O"], ["B_NUMERO", "O"]])
+    crf = cast(
+        sklearn_crfsuite.CRF,
+        cast(object, CrfFake([["B_NUMERO", "O"], ["B_NUMERO", "B_NUMERO"]])),
+    )
+
+    achados = divergencias(crf, exemplos)
+
+    assert [(achado.hash, achado.pares) for achado in achados] == [
+        ("h2", (("O", "B_NUMERO"),))
+    ]
+
+
+def test_divergencias_sem_erro_nao_devolve_nada():
+    exemplos = exemplos_com(["h1"], [["O"]])
+    crf = cast(sklearn_crfsuite.CRF, cast(object, CrfFake([["O"]])))
+
+    assert divergencias(crf, exemplos) == []
 
 
 # --- comando do segmentador ------------------------------------------------

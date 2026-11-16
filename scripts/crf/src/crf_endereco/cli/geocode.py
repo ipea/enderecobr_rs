@@ -20,7 +20,9 @@ app = typer.Typer(no_args_is_help=True, add_completion=False)
 def comparar(
     base: Annotated[
         Path,
-        typer.Argument(help="parquet (ou diretorio/glob) de entrada, ou sqlite com a tabela enderecos"),
+        typer.Argument(
+            help="parquet (ou diretorio/glob) de entrada, ou sqlite com a tabela enderecos"
+        ),
     ],
     binario: Annotated[Path, typer.Option(help="caminho do binario padronizacao-lote")],
     estado: Annotated[str, typer.Option(help="coluna do estado (UF ou nome)")],
@@ -114,9 +116,7 @@ def comparar(
     estagio = Path(temporaria.name) / "estagio.parquet"
     try:
         with comparacao.cronometrar("estagio", silencioso):
-            comparacao.montar_estagio(
-                con, estagio, campos, endereco, chave, limite
-            )
+            comparacao.montar_estagio(con, estagio, campos, endereco, chave, limite)
 
         if reusar and segmentado.exists():
             avisar(f"segmentacao reutilizada: {segmentado}")

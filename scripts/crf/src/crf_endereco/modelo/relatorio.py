@@ -1,39 +1,292 @@
-"""Metricas e relatorio de avaliacao do CRF."""
+"""Metricas e relatorio de avaliacao do CRF.
+
+O relatorio sempre le o recorte gravado pelo treino e mostra o teste ao lado do
+treino: acuracia alta no treino e baixa no teste e o unico sinal honesto de
+generalizacao, e a diferenca entre os dois e a primeira coisa da saida.
+"""
 
 from __future__ import annotations
 
-import random
 from collections import Counter, defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 from math import ceil
-from pathlib import Path
-from pprint import pprint
+from typing import TYPE_CHECKING
 
+import sklearn_crfsuite
 from rich.table import Table
 from rich.text import Text
-from sklearn_crfsuite import metrics
 
-from crf_endereco.config import CAMINHO_TAGGER
-from crf_endereco.ui import console
+from crf_endereco.ui import console, estilo_rotulo
+
+if TYPE_CHECKING:
+    from crf_endereco.modelo.crf import Exemplos
 
 Features = list[list[dict[str, float]]]
 Rotulos = list[list[str]]
 
+# Mesma ordem em que `carregar_exemplos` monta `Exemplos.categorias`.
+NOMES_CATEGORIAS = ("origem", "uf")
 
-def erros_mais_comuns_feature(
-    x: Features, y_true: Rotulos, y_pred: Rotulos, n: int = 20
-) -> list[tuple[tuple[str, str, str], int]]:
-    """Pares (feature, rotulo real, rotulo previsto) mais frequentes nos erros."""
-    errors: Counter[tuple[str, str, str]] = Counter()
-    for feats, true, pred in zip(x, y_true, y_pred, strict=False):
-        for i, (t, p) in enumerate(zip(true, pred, strict=False)):
-            if t != p:
-                errors[(str(feats[i]), f"true={t}", f"pred={p}")] += 1
-    return errors.most_common(n)
+# Abaixo desta queda de acuracia entre treino e teste (em pontos percentuais de
+# token) o modelo aprendeu o que estava sendo avaliado: um CRF com alguns
+# milhares de exemplos nao generaliza tao bem.
+QUEDA_MINIMA_TOKEN = 0.5
+
+# Quanto o relatorio detalha.
+TOP_TOKENS = 12
+
+
+@dataclass(frozen=True)
+class Desempenho:
+    """Acerto de um recorte inteiro, por token e por endereco."""
+
+    token: float
+    perfeitos: int
+    enderecos: int
+    proporcional: float
+
+    @property
+    def fracao_perfeita(self) -> float:
+        return self.perfeitos / self.enderecos if self.enderecos else 0.0
+
+
+def medir(y: Rotulos, previsto: Rotulos) -> Desempenho:
+    """Acerto de token, de endereco inteiro e a media por endereco.
+
+    `perfeitos` conta o endereco em que **todos** os rotulos sairam certos: e a
+    metrica que o uso real cobra, porque um endereco com um token trocado sai
+    errado do segmentador tanto quanto um errado por inteiro.
+    """
+    if not y:
+        return Desempenho(0.0, 0, 0, 0.0)
+
+    acertos = [
+        sum(1 for t, p in zip(linha, prev, strict=True) if t == p)
+        for linha, prev in zip(y, previsto, strict=True)
+    ]
+    tokens = sum(len(linha) for linha in y)
+    return Desempenho(
+        token=sum(acertos) / tokens if tokens else 0.0,
+        perfeitos=sum(
+            1 for linha, n in zip(y, acertos, strict=True) if n == len(linha)
+        ),
+        enderecos=len(y),
+        proporcional=sum(n / len(linha) for linha, n in zip(y, acertos, strict=True))
+        / len(y),
+    )
+
+
+def _prever(crf: sklearn_crfsuite.CRF, x: Features) -> Rotulos:
+    return [[str(tag) for tag in linha] for linha in crf.predict(x)]
+
+
+def pct(valor: float) -> str:
+    """Fracao em porcentagem, que e como o relatorio inteiro le acerto."""
+    return f"{100 * valor:.2f}%"
+
+
+def estilo_fracao(valor: float, bom: float = 0.99, medio: float = 0.95) -> str:
+    """Cor da fracao: verde no bom, amarelo no meio, vermelho abaixo."""
+    if valor >= bom:
+        return "green"
+    if valor >= medio:
+        return "yellow"
+    return "bold red"
+
+
+def _queda(diferenca: float) -> Text:
+    """Diferenca de acerto entre treino e teste, em pontos percentuais.
+
+    Queda pequena e o esperado; queda quase nula levanta a suspeita contraria,
+    a de que o treino decorou o teste, e por isso sai em vermelho.
+    """
+    pontos = 100 * diferenca
+    estilo = "red" if pontos > QUEDA_MINIMA_TOKEN else "green"
+    return Text(f"{pontos:+.2f}pp", style=estilo)
+
+
+def _cabecalho(treino: Desempenho | None, teste: Desempenho) -> None:
+    """Tamanho do recorte e resumo de acerto, com o treino como referencia."""
+    plural = "" if teste.enderecos == 1 else "s"
+    recorte = f"{teste.enderecos} endereco{plural} no teste"
+    if treino is not None:
+        recorte = f"{treino.enderecos} no treino | {recorte}"
+    console.print(f"[dim]Recorte:[/dim] {recorte}")
+
+    tabela = Table(box=None, pad_edge=False, padding=(0, 2, 0, 0))
+    tabela.add_column("", style="dim")
+    tabela.add_column("treino", justify="right")
+    tabela.add_column("teste", justify="right")
+    tabela.add_column("queda", justify="right")
+
+    referencias = [
+        ("token", None if treino is None else treino.token, teste.token),
+        (
+            "endereco perfeito",
+            None if treino is None else treino.fracao_perfeita,
+            teste.fracao_perfeita,
+        ),
+        (
+            # Media, por endereco, da fracao de tokens certos: um endereco
+            # de 30 tokens nao pesa 15x mais que um de 2, e um endereco
+            # quase certo ainda soma.
+            "token certo por endereco",
+            None if treino is None else treino.proporcional,
+            teste.proporcional,
+        ),
+    ]
+    for nome, valor_treino, valor_teste in referencias:
+        tabela.add_row(
+            nome,
+            "-" if valor_treino is None else pct(valor_treino),
+            pct(valor_teste),
+            "-" if valor_treino is None else _queda(valor_treino - valor_teste),
+        )
+
+    console.print(tabela)
+    perfeitos = f"{teste.perfeitos}/{teste.enderecos} no teste"
+    if treino is not None:
+        perfeitos += f" e {treino.perfeitos}/{treino.enderecos} no treino"
+    console.print(f"[dim]Enderecos com todos os rotulos certos: {perfeitos}.[/dim]")
+
+    if treino is not None and 100 * (treino.token - teste.token) < QUEDA_MINIMA_TOKEN:
+        console.print(
+            "[bold red]Suspeita de vazamento:[/bold red] o teste acerta tanto quanto "
+            + "o treino. Este tagger provavelmente foi treinado com os enderecos "
+            + "que estao sendo avaliados."
+        )
+
+
+def contagens_por_rotulo(
+    y: Rotulos, previsto: Rotulos
+) -> list[tuple[str, int, int, int]]:
+    """(rotulo, acertos, falsos positivos, falsos negativos), pior primeiro."""
+    acertos: Counter[str] = Counter()
+    positivos: Counter[str] = Counter()
+    previstos: Counter[str] = Counter()
+    for true, pred in zip(y, previsto, strict=True):
+        for t, p in zip(true, pred, strict=True):
+            positivos[t] += 1
+            previstos[p] += 1
+            if t == p:
+                acertos[t] += 1
+
+    # O rotulo pode existir so na previsao (falso positivo puro): a tabela tem
+    # que mostrar o par real x previsto inteiro, nao so o que aparece no dado.
+    linhas = [
+        (
+            rotulo,
+            acertos[rotulo],
+            previstos[rotulo] - acertos[rotulo],
+            positivos[rotulo] - acertos[rotulo],
+        )
+        for rotulo in set(positivos) | set(previstos)
+    ]
+    linhas.sort(key=lambda linha: linha[0])
+    linhas.sort(key=lambda linha: linha[3] + linha[2], reverse=True)
+    return linhas
+
+
+def _por_rotulo(y: Rotulos, previsto: Rotulos) -> None:
+    console.rule("[bold]Por rotulo[/bold]")
+    tabela = Table(box=None, pad_edge=False, padding=(0, 2, 0, 0))
+    tabela.add_column("rotulo")
+    tabela.add_column("tokens", justify="right", style="dim")
+    tabela.add_column("precisao", justify="right")
+    tabela.add_column("revocacao", justify="right")
+    tabela.add_column("f1", justify="right")
+    tabela.add_column("erros", justify="right")
+
+    total_acertos = total_positivos = total_previstos = 0
+    for rotulo, tp, fp, fn in contagens_por_rotulo(y, previsto):
+        precisao = tp / (tp + fp) if tp + fp else 0.0
+        revocacao = tp / (tp + fn) if tp + fn else 0.0
+        f1 = (
+            2 * precisao * revocacao / (precisao + revocacao)
+            if precisao + revocacao
+            else 0.0
+        )
+        total_acertos += tp
+        total_positivos += tp + fn
+        total_previstos += tp + fp
+        tabela.add_row(
+            Text(rotulo, style=estilo_rotulo(rotulo)),
+            str(tp + fn),
+            pct(precisao),
+            pct(revocacao),
+            Text(pct(f1), style=estilo_fracao(f1)),
+            str(fp + fn),
+        )
+
+    precisao_geral = total_acertos / total_previstos if total_previstos else 0.0
+    revocacao_geral = total_acertos / total_positivos if total_positivos else 0.0
+    f1_geral = (
+        2 * precisao_geral * revocacao_geral / (precisao_geral + revocacao_geral)
+        if precisao_geral + revocacao_geral
+        else 0.0
+    )
+    tabela.add_section()
+    tabela.add_row(
+        Text("micro", style="bold"),
+        str(total_positivos),
+        pct(precisao_geral),
+        pct(revocacao_geral),
+        Text(pct(f1_geral), style="bold"),
+        str(total_previstos - total_acertos + total_positivos - total_acertos),
+    )
+    console.print(tabela)
+    console.print(
+        "[dim]Ordenado por erros (falsos positivos + falsos negativos): o rotulo "
+        + "do topo e o que mais custa hoje. Precisao baixa = o modelo etiqueta "
+        + "demais aquele trecho; revocacao baixa = deixa passar.[/dim]"
+    )
+
+
+def _por_categoria(teste: Exemplos, previsto: Rotulos) -> None:
+    console.rule("[bold]Por categoria[/bold]")
+    for pos, nome in enumerate(NOMES_CATEGORIAS):
+        if pos >= len(teste.categorias[0]):
+            break
+        grupos: dict[str, list[int]] = defaultdict(list)
+        for i, categoria in enumerate(teste.categorias):
+            grupos[categoria[pos]].append(i)
+
+        tabela = Table(box=None, pad_edge=False, padding=(0, 2, 0, 0))
+        tabela.add_column(nome)
+        tabela.add_column("enderecos", justify="right", style="dim")
+        tabela.add_column("endereco perfeito", justify="right")
+        tabela.add_column("token", justify="right")
+
+        desempenhos = [
+            (
+                valor,
+                medir([teste.y[i] for i in indices], [previsto[i] for i in indices]),
+            )
+            for valor, indices in grupos.items()
+        ]
+        for valor, desempenho in sorted(
+            desempenhos, key=lambda par: (par[1].fracao_perfeita, par[1].token)
+        ):
+            tabela.add_row(
+                valor,
+                str(desempenho.enderecos),
+                Text(
+                    pct(desempenho.fracao_perfeita),
+                    style=estilo_fracao(desempenho.fracao_perfeita),
+                ),
+                Text(pct(desempenho.token), style=estilo_fracao(desempenho.token)),
+            )
+        console.print(tabela)
+        console.print()
+    console.print(
+        "[dim]Ordenado pelo endereco perfeito, pior primeiro: o topo e a "
+        + "categoria que mais custa hoje.[/dim]"
+    )
 
 
 def erros_mais_comuns_token(
-    x: Features, y_true: Rotulos, y_pred: Rotulos, n: int = 20
+    x: Features, y_true: Rotulos, y_pred: Rotulos, n: int = TOP_TOKENS
 ) -> list[tuple[tuple[str, str, str], int]]:
     """Tokens que mais aparecem mal classificados."""
     errors: Counter[tuple[str, str, str]] = Counter()
@@ -46,114 +299,51 @@ def erros_mais_comuns_token(
     return errors.most_common(n)
 
 
-def amostra_erros(
-    tokens: Rotulos,
-    y_true: Rotulos,
-    y_pred: Rotulos,
-    n: int = 10,
-    classes: Sequence[str] = (),
-) -> list[tuple[list[str], list[str], list[str]]]:
-    """Trechos com ao menos um erro (opcionalmente so das `classes` dadas)."""
-    erros: list[tuple[list[str], list[str], list[str]]] = []
-    for toks, true, pred in zip(tokens, y_true, y_pred, strict=False):
-        for t, p in zip(true, pred, strict=False):
-            if t != p and (not classes or t in classes or p in classes):
-                erros.append((toks, true, pred))
-                break
-    random.shuffle(erros)
-    return erros[:n]
+def _tokens_mais_errados(x: Features, y: Rotulos, previsto: Rotulos) -> None:
+    console.rule("[bold]Tokens mais errados[/bold]")
+    erros = erros_mais_comuns_token(x, y, previsto)
+    if not erros:
+        console.print("[green]Nenhum token errado.[/green]")
+        return
 
-
-def acuracia_labels(
-    y_true: Rotulos, y_pred: Rotulos, labels: Sequence[str]
-) -> tuple[int, int]:
-    """Acertos e total restritos aos rotulos de `labels`."""
-    total = 0
-    acertos = 0
-    for true, pred in zip(y_true, y_pred, strict=False):
-        for t, p in zip(true, pred, strict=False):
-            if t not in labels and p not in labels:
-                continue
-            total += 1
-            acertos += int(t == p)
-    return acertos, total
-
-
-def acuracia_proporcional(y_true: Rotulos, y_pred: Rotulos) -> float:
-    """Media, por trecho, da fracao de tokens corretos."""
-    proporcoes = []
-    for true, pred in zip(y_true, y_pred, strict=False):
-        acertos = sum(1 for t, p in zip(true, pred, strict=False) if t == p)
-        proporcoes.append(acertos / len(true))
-    return sum(proporcoes) / len(proporcoes)
-
-
-def erros_mais_comuns_por_categoria(
-    x: Features, y_true: Rotulos, y_pred: Rotulos, categorias: Rotulos, n: int = 20
-) -> list[tuple[tuple[tuple[str, str], str], int]]:
-    """Trocas de rotulo (real, previsto) mais frequentes por categoria."""
-    errors: Counter[tuple[tuple[str, str], str]] = Counter()
-    for _feats, true, pred, cats in zip(x, y_true, y_pred, categorias, strict=False):
-        dif_tags = {(t, p) for t, p in zip(true, pred, strict=False) if t != p}
-        for dif in dif_tags:
-            for c in cats:
-                errors[(dif, c)] += 1
-    return errors.most_common(n)
-
-
-def acuracia_completa_por_categoria(
-    y_true: Rotulos, y_pred: Rotulos, categorias: Rotulos
-) -> None:
-    """Acuracia de trecho inteiro, quebrada por cada coluna de `categorias`."""
-    for categoria_pos in range(len(categorias[0])):
-        cat_dict: dict[str, tuple[Rotulos, Rotulos]] = defaultdict(lambda: ([], []))
-
-        for y_t, y_p, cs in zip(y_true, y_pred, categorias, strict=False):
-            categoria = cs[categoria_pos]
-            cat_dict[categoria][0].append(y_t)
-            cat_dict[categoria][1].append(y_p)
-
-        resultado = [
-            (
-                categoria,
-                metrics.sequence_accuracy_score(dados[0], dados[1]),
-                acuracia_proporcional(dados[0], dados[1]),
-            )
-            for categoria, dados in cat_dict.items()
-        ]
-        resultado.sort(key=lambda item: item[1], reverse=True)
-
-        for cat, acc_total, acc_prop in resultado:
-            print(f"{cat:<15} | {100.0 * acc_total:.2f} | {100.0 * acc_prop:.2f}")
-        print()
+    tabela = Table(box=None, pad_edge=False, padding=(0, 2, 0, 0))
+    tabela.add_column("token", style="bold")
+    tabela.add_column("esperado")
+    tabela.add_column("previsto")
+    tabela.add_column("vezes", justify="right", style="dim")
+    for (token, esperado, previsto_), contagem in erros:
+        tabela.add_row(
+            token,
+            Text(esperado.removeprefix("true="), style="yellow"),
+            Text(
+                previsto_.removeprefix("pred="),
+                style=estilo_rotulo(previsto_.removeprefix("pred=")),
+            ),
+            str(contagem),
+        )
+    console.print(tabela)
 
 
 def show(sent: Sequence[str], y_true: Sequence[str], y_pred: Sequence[str]) -> None:
-    """Imprime um trecho com o rotulo real e o previsto lado a lado."""
+    """Imprime um trecho com o rotulo real e o previsto lado a lado.
+
+    O que saiu certo fica apagado; so o token errado aparece com o real em
+    amarelo e o previsto na cor do rotulo, para achar a troca de relance.
+    """
     if len(sent) == 0:
         return
-    max_len = max(len(token) for token in sent) + 2
-    print(f"{'String':<{max_len}} {'Target':<10} {'Predito':<10}")
-    print("----------------------------------")
-    for s, t, p in zip(sent, y_true, y_pred, strict=False):
-        print(f"{s:<{max_len}} {t:<10} {p:<10}")
-    print("################################")
-
-
-def pares_de_rotulos(y: Rotulos) -> list[tuple[str, ...]]:
-    """Agrupa os rotulos por tipo (`B_logradouro`/`I_logradouro` -> um par)."""
-    pares: dict[str, set[str]] = defaultdict(set)
-    for y_i in y:
-        for y_token in y_i:
-            if "_" in y_token:
-                pos_bio, tipo = y_token.split("_", 1)
-                pares[tipo].add(pos_bio)
-            else:
-                pares[y_token] = set()
-    return [
-        (tipo,) if not bios else tuple(sorted(f"{bio}_{tipo}" for bio in bios))
-        for tipo, bios in pares.items()
-    ]
+    tabela = Table(box=None, pad_edge=False, padding=(0, 1, 0, 0), header_style="dim")
+    tabela.add_column("token", style="bold")
+    tabela.add_column("esperado")
+    tabela.add_column("previsto")
+    for token, esperado, previsto in zip(sent, y_true, y_pred, strict=False):
+        certo = esperado == previsto
+        tabela.add_row(
+            token,
+            Text(esperado, style="dim" if certo else "yellow"),
+            Text(previsto, style="dim" if certo else estilo_rotulo(previsto)),
+        )
+    console.print(tabela)
 
 
 # Tons de cinza do xterm (233 = escuro, 249 = claro): o fundo segue a
@@ -165,10 +355,9 @@ TONS_CONFUSAO = (233, 237, 240, 244, 248)
 def matriz_confusao(
     y_true: Rotulos, y_pred: Rotulos
 ) -> tuple[list[str], list[list[int]]]:
-    """Contagens token a token (real x previsto), com `O` na primeira posição."""
+    """Contagens token a token (real x previsto), em ordem alfabetica."""
     rotulos = sorted(
-        {r for linha in y_true for r in linha} | {r for linha in y_pred for r in linha},
-        key=lambda r: (r != "O", r),
+        {r for linha in y_true for r in linha} | {r for linha in y_pred for r in linha}
     )
     indice = {rotulo: i for i, rotulo in enumerate(rotulos)}
     matriz = [[0] * len(rotulos) for _ in rotulos]
@@ -178,9 +367,7 @@ def matriz_confusao(
     return rotulos, matriz
 
 
-def matriz_erros(
-    y_true: Rotulos, y_pred: Rotulos
-) -> tuple[list[str], list[list[int]]]:
+def matriz_erros(y_true: Rotulos, y_pred: Rotulos) -> tuple[list[str], list[list[int]]]:
     """Contagens real x previsto sem a diagonal, só dos rótulos que erram.
 
     Acerto não é erro de ninguém: a diagonal sai da matriz e o rótulo que nunca
@@ -190,8 +377,7 @@ def matriz_erros(
     tamanho = len(matriz)
     erros_linha = [sum(linha) - linha[i] for i, linha in enumerate(matriz)]
     erros_coluna = [
-        sum(matriz[i][j] for i in range(tamanho)) - matriz[j][j]
-        for j in range(tamanho)
+        sum(matriz[i][j] for i in range(tamanho)) - matriz[j][j] for j in range(tamanho)
     ]
     mantidos = [i for i in range(tamanho) if erros_linha[i] or erros_coluna[i]]
     return (
@@ -272,49 +458,25 @@ def imprimir_erros_por_rotulo(y_true: Rotulos, y_pred: Rotulos) -> None:
 
 
 def avaliar(
-    x: Features,
-    y: Rotulos,
-    categorias: Rotulos,
-    tokens: Rotulos,
-    tagger: Path = CAMINHO_TAGGER,
+    teste: Exemplos,
+    crf: sklearn_crfsuite.CRF,
+    treino: Exemplos | None = None,
+    nome: str | None = None,
 ) -> None:
-    """Relatorio completo: token, classe, categoria e amostras de erro."""
-    # Import local: `crf.py` consome este módulo (heatmap de erros), então o
-    # import no topo fecharia o ciclo.
-    from crf_endereco.modelo.crf import carregar_tagger
+    """Relatorio completo do recorte de teste, com o treino como referencia."""
+    desempenho_treino = None
+    if treino is None:
+        console.print("[dim]Prevendo o recorte de teste...[/dim]")
+    else:
+        console.print("[dim]Prevendo os recortes de treino e teste...[/dim]")
+        desempenho_treino = medir(treino.y, _prever(crf, treino.x))
+    previsto = _prever(crf, teste.x)
 
-    print("Executando modelo...")
-    crf = carregar_tagger(tagger)
-    # predict() devolve ndarray de rotulos; a conversao abaixo e so o
-    # recorte para a estrutura que o relatorio consome.
-    y_pred: Rotulos = [[str(tag) for tag in linha] for linha in crf.predict(x)]
+    titulo = "Avaliacao do CRF" if nome is None else f"Avaliacao do CRF — {nome}"
+    console.rule(f"[bold]{titulo}[/bold]")
+    _cabecalho(desempenho_treino, medir(teste.y, previsto))
 
-    print(metrics.flat_classification_report(y, y_pred, zero_division=0.0))
-    print(f"Acurácia no trecho completo: {metrics.sequence_accuracy_score(y, y_pred)}")
-    print(f"Acurácia proporcional: {acuracia_proporcional(y, y_pred)}")
-    print()
-
-    rotulos = pares_de_rotulos(y)
-    for rotulo in rotulos:
-        acertos, total = acuracia_labels(y, y_pred, rotulo)
-        print(f"Acurácia de {rotulo}: {acertos}/{total} = {acertos / total:.2}")
-
-    print()
-    print("Acurácia Completa por categorias:")
-    acuracia_completa_por_categoria(y, y_pred, categorias)
-
-    print()
-    print("Erros Token:")
-    pprint(erros_mais_comuns_token(x, y, y_pred))
-    print()
-    print("Erros Features:")
-    pprint(erros_mais_comuns_feature(x, y, y_pred))
-    print()
-    print("Erros Categorias:")
-    pprint(erros_mais_comuns_por_categoria(x, y, y_pred, categorias))
-
-    print()
-    for rotulo in rotulos:
-        print(f"Amostra de Erros de {rotulo!s}")
-        for caso in amostra_erros(tokens, y, y_pred, n=5, classes=list(rotulo)):
-            show(*caso)
+    _por_rotulo(teste.y, previsto)
+    _por_categoria(teste, previsto)
+    imprimir_erros_por_rotulo(teste.y, previsto)
+    _tokens_mais_errados(teste.x, teste.y, previsto)

@@ -1,4 +1,4 @@
-.PHONY: test popular etiquetar treinar tunar avaliar segmentar explicar diferencial geocode otimizar instalar
+.PHONY: test popular etiquetar treinar tunar avaliar estressar segmentar explicar diferencial geocode otimizar instalar
 
 DIR_DADOS = ./data
 N ?= 5000
@@ -23,6 +23,9 @@ tunar:
 
 avaliar: treinar
 	uv run crf avaliar
+
+estressar: treinar
+	uv run crf avaliar --estresse
 
 segmentar:
 	uv run crf segmentar

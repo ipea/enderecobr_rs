@@ -11,10 +11,17 @@ import sklearn_crfsuite
 import typer
 from sklearn.metrics import make_scorer
 from sklearn.model_selection import GridSearchCV, train_test_split
-from sklearn_crfsuite.metrics import flat_accuracy_score, flat_classification_report
+from sklearn_crfsuite.metrics import flat_accuracy_score
 
 from crf_endereco.config import CAMINHO_DATASET, CAMINHO_TAGGER
-from crf_endereco.dataset import carregar_anotados, segmentos_de
+from crf_endereco.dataset import (
+    abrir_banco,
+    calcular_hash,
+    carregar_anotados,
+    gravar_recorte,
+    ler_recorte,
+    segmentos_de,
+)
 from crf_endereco.features import (
     ExtratorFeature,
     is_pontuacao,
@@ -23,6 +30,7 @@ from crf_endereco.features import (
 )
 from crf_endereco.modelo import relatorio
 from crf_endereco.rotulos import mergear
+from crf_endereco.ui import console
 
 # `str.isspace()` e mais amplo que o `u8::is_ascii_whitespace` usado pelo Rust
 # (inclui NBSP, por exemplo); o conjunto explicito mantem as duas
@@ -50,18 +58,24 @@ C2_TREINO = 0.2
 MAX_ITERACOES_TREINO = 5_000
 MIN_FREQ_TREINO = 2
 VERBOSE_TREINO = True
-# Semente do split treino/teste: `treinar` e `avaliar` precisam da mesma.
+# Semente do split treino/teste: o `tunar` usa a mesma para que o score da busca
+# seja comparavel ao do modelo final.
 SEMENTE_SPLIT = 42
 
 
 @dataclass(frozen=True)
 class Exemplos:
-    """Dataset pronto para o CRF: features, rotulos, tokens e categorias."""
+    """Dataset pronto para o CRF: features, rotulos, tokens e categorias.
+
+    `hashes` e a chave do endereco no banco (`hash_endereco`): e por ela que o
+    recorte gravado no treino identifica cada linha.
+    """
 
     x: list[list[dict[str, float]]]
     y: list[list[str]]
     tokens: list[list[str]]
     categorias: list[list[str]]
+    hashes: list[str]
 
 
 def carregar_exemplos(caminho: Path = CAMINHO_DATASET) -> Exemplos:
@@ -75,16 +89,18 @@ def carregar_exemplos(caminho: Path = CAMINHO_DATASET) -> Exemplos:
     y: list[list[str]] = []
     tokens: list[list[str]] = []
     categorias: list[list[str]] = []
+    hashes: list[str] = []
 
-    print("Preprocessando dados...")
+    console.print("[dim]Preprocessando dados...[/dim]")
     for exemplo in carregar_anotados(caminho):
         toks, labels = mergear(exemplo.endereco, segmentos_de(exemplo), tokenize)
         x.append(extrator.tokens2features(toks))
         y.append(labels)
         tokens.append(toks)
         categorias.append([exemplo.origem, exemplo.uf])
+        hashes.append(calcular_hash(exemplo.endereco))
 
-    return Exemplos(x=x, y=y, tokens=tokens, categorias=categorias)
+    return Exemplos(x=x, y=y, tokens=tokens, categorias=categorias, hashes=hashes)
 
 
 def _chaves_estratificacao(exemplos: Exemplos, por: str) -> list[str] | None:
@@ -106,6 +122,7 @@ def _recortar(exemplos: Exemplos, indices: Sequence[int]) -> Exemplos:
         y=[exemplos.y[i] for i in ordenados],
         tokens=[exemplos.tokens[i] for i in ordenados],
         categorias=[exemplos.categorias[i] for i in ordenados],
+        hashes=[exemplos.hashes[i] for i in ordenados],
     )
 
 
@@ -137,11 +154,6 @@ def dividir(
     """
     treino, teste = _indices_split(exemplos, fracao_teste, semente, estratificar_por)
     return _recortar(exemplos, treino), _recortar(exemplos, teste)
-
-
-def _composicao(exemplos: Exemplos) -> Counter[tuple[str, str]]:
-    """Quantos exemplos por celula (origem, uf)."""
-    return Counter((c[0], c[1]) for c in exemplos.categorias)
 
 
 def _sem_pontuacao(
@@ -194,9 +206,10 @@ def aumentar(exemplos: Exemplos) -> Exemplos:
     y = list(exemplos.y)
     tokens = list(exemplos.tokens)
     categorias = list(exemplos.categorias)
+    hashes = list(exemplos.hashes)
 
-    for toks, labels, categoria in zip(
-        exemplos.tokens, exemplos.y, exemplos.categorias, strict=True
+    for toks, labels, categoria, hash_ in zip(
+        exemplos.tokens, exemplos.y, exemplos.categorias, exemplos.hashes, strict=True
     ):
         sem_pontuacao = _sem_pontuacao(toks, labels)
         if sem_pontuacao is None:
@@ -206,8 +219,54 @@ def aumentar(exemplos: Exemplos) -> Exemplos:
         y.append(labels_sem)
         tokens.append(toks_sem)
         categorias.append(categoria)
+        hashes.append(hash_)
 
-    return Exemplos(x=x, y=y, tokens=tokens, categorias=categorias)
+    return Exemplos(x=x, y=y, tokens=tokens, categorias=categorias, hashes=hashes)
+
+
+def nome_do_modelo(tagger: Path) -> str:
+    """Nome com que o banco identifica o recorte de um tagger."""
+    return tagger.stem
+
+
+def separar_por_recorte(
+    exemplos: Exemplos, recorte: dict[str, set[str]]
+) -> tuple[Exemplos, Exemplos]:
+    """Treino e teste de `exemplos` conforme os hashes gravados no banco."""
+    treino = [
+        i for i, hash_ in enumerate(exemplos.hashes) if hash_ in recorte["treino"]
+    ]
+    teste = [i for i, hash_ in enumerate(exemplos.hashes) if hash_ in recorte["teste"]]
+    return _recortar(exemplos, treino), _recortar(exemplos, teste)
+
+
+def recorte_gravado(
+    tagger: Path = CAMINHO_TAGGER, dataset: Path = CAMINHO_DATASET
+) -> tuple[Exemplos, Exemplos]:
+    """Treino e teste conforme o recorte que o `treinar` gravou no banco.
+
+    O split nao e recalculado: sem saber quais enderecos o modelo viu, medir no
+    dataset inteiro viraria vazamento disfarcado de acuracia.
+    """
+    exemplos = carregar_exemplos(dataset)
+    conn = abrir_banco(dataset)
+    try:
+        recorte = ler_recorte(conn, nome_do_modelo(tagger))
+    finally:
+        conn.close()
+
+    if not recorte["treino"] or not recorte["teste"]:
+        raise typer.BadParameter(
+            f"recorte nao gravado para {tagger.name}: treine com `crf treinar`.\n"
+            + "Sem o recorte nao da para saber o que o modelo ja viu."
+        )
+
+    treino, teste = separar_por_recorte(exemplos, recorte)
+    if not teste.y:
+        raise typer.BadParameter(
+            f"nenhum endereco do recorte de teste de {tagger.name} esta no banco."
+        )
+    return treino, teste
 
 
 def treinar(
@@ -228,19 +287,30 @@ def treinar(
     treino, teste = dividir(
         exemplos, fracao_teste, semente, estratificar_por=estratificar_por
     )
+    # Gravado antes do aumento: as variantes sem pontuacao nao sao enderecos do
+    # banco e nao podem virar elo entre treino e teste.
+    conn = abrir_banco(dataset)
+    try:
+        gravar_recorte(conn, nome_do_modelo(saida), treino.hashes, teste.hashes)
+    finally:
+        conn.close()
     if com_aumento:
         # Só o treino aumenta: a variante de um exemplo no teste vazaria a
         # resposta dele para o modelo.
         original = len(treino.y)
         treino = aumentar(treino)
-        print(f"Aumento: {len(treino.y) - original} exemplos com pontuacao removida")
-    print(
-        f"Treino: {len(treino.y)} | teste: {len(teste.y)} "
-        + f"(estratificado por {estratificar_por})"
+        console.print(
+            f"[dim]Aumento: {len(treino.y) - original} exemplos com pontuacao "
+            + "removida[/dim]"
+        )
+    composicao = Counter(categoria[0] for categoria in teste.categorias)
+    console.print(
+        f"[dim]Treino: {len(treino.y)} | teste: {len(teste.y)} "
+        + f"(estratificado por {estratificar_por}) "
+        + f"| teste por origem: {dict(composicao.most_common())}[/dim]"
     )
-    print(f"Composicao do teste: {dict(_composicao(teste).most_common())}")
 
-    print(f"Realizando treinamento (n={len(treino.y)})...")
+    console.print(f"[dim]Treinando (n={len(treino.y)})...[/dim]")
     saida.parent.mkdir(parents=True, exist_ok=True)
     crf = sklearn_crfsuite.CRF(
         algorithm="lbfgs",
@@ -249,19 +319,14 @@ def treinar(
         verbose=verboso,
         max_iterations=max_iteracoes,
         all_possible_transitions=False,
+        all_possible_states=True,
         min_freq=min_freq,
         model_filename=str(saida),
     )
     modelo = crf.fit(treino.x, treino.y)
-    # `predict` devolve ndarray; a conversao abaixo e so o recorte para as
-    # estruturas tipadas que o relatorio e a matriz de confusao consomem.
-    y_pred: list[list[str]] = [
-        [str(tag) for tag in linha] for linha in modelo.predict(teste.x)
-    ]
-
-    print(f"Acurácia: {flat_accuracy_score(teste.y, y_pred):.2f}")
-    print(flat_classification_report(teste.y, y_pred, zero_division=0.0))
-    relatorio.imprimir_erros_por_rotulo(teste.y, y_pred)
+    # O treino acabou de ver estes exemplos: o relatorio aqui so mede o teste,
+    # e a comparacao treino x teste fica para o `crf avaliar`.
+    relatorio.avaliar(teste, modelo, nome=saida.name)
 
 
 def tunar(
@@ -294,7 +359,8 @@ def tunar(
     crf = sklearn_crfsuite.CRF(
         algorithm="lbfgs",
         max_iterations=max_iteracoes,
-        all_possible_transitions=False,
+        all_possible_transitions=True,
+        all_possible_states=True,
         min_freq=min_freq,
         verbose=False,
     )
@@ -309,9 +375,10 @@ def tunar(
     )
     _ = busca.fit(exemplos.x, exemplos.y)
 
-    print("best params:", busca.best_params_)
-    print("best CV score:", busca.best_score_)
-    print(f"model size: {busca.best_estimator_.size_ / 1_000_000:0.2f}M")
+    tamanho = busca.best_estimator_.size_ / 1_000_000
+    console.print(f"melhores parametros: {busca.best_params_}")
+    console.print(f"[dim]score da busca: {busca.best_score_}[/dim]")
+    console.print(f"[dim]tamanho do modelo: {tamanho:0.2f}M[/dim]")
 
 
 def carregar_tagger(caminho: Path = CAMINHO_TAGGER) -> sklearn_crfsuite.CRF:

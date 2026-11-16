@@ -88,22 +88,45 @@ def criar_ferramentas(config: Config) -> list[dict[str, Any]]:
             "responder",
             "Submit the final answer to the request",
             {
-                "segmentos": {
+                "respostas": {
                     "type": "array",
+                    "description": (
+                        "One entry per address of the request, each with the "
+                        "number in brackets as `indice`."
+                    ),
                     "items": {
                         "type": "object",
                         "properties": {
-                            "valor": {"type": "string"},
-                            "tipo": {"type": "string", "enum": TIPOS_SEGMENTO},
+                            "indice": {
+                                "type": "integer",
+                                "description": "1-based index of the address",
+                                "minimum": 1,
+                            },
+                            "segmentos": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "valor": {"type": "string"},
+                                        "tipo": {
+                                            "type": "string",
+                                            "enum": TIPOS_SEGMENTO,
+                                        },
+                                    },
+                                    "required": ["valor", "tipo"],
+                                    "additionalProperties": False,
+                                },
+                                "minItems": 1,
+                            },
+                            "comentario": {"type": "string"},
                         },
-                        "required": ["valor", "tipo"],
+                        "required": ["indice", "segmentos"],
                         "additionalProperties": False,
                     },
                     "minItems": 1,
                 },
-                "comentario": {"type": "string"},
             },
-            ["segmentos"],
+            ["respostas"],
             estrita=estrita,
         ),
         _criar_json_schema_funcao(
@@ -156,9 +179,7 @@ class Ferramentas:
         if config.com_cnefe:
             self.conn = duckdb.connect()
             self.conn.register("cnefe", self.conn.read_parquet(config.cnefe))
-            self.conn.register(
-                "municipio", self.conn.read_csv(str(config.municipios))
-            )
+            self.conn.register("municipio", self.conn.read_csv(str(config.municipios)))
             # Derivado do CNEFE: quantos municipios tem localidade com cada
             # nome de municipio (`BOA VISTA` 1492 x `ANAPOLIS` 2).
             self.conn.register(

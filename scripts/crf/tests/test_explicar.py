@@ -1,13 +1,13 @@
 from crf_endereco.cli.explicar import (
     _concorrente,
     _estilo_peso,
-    _estilo_tipo,
     _formatar,
     _texto_tag,
     campos_preferidos,
     estruturar_segmentos,
     features_com_pesos,
 )
+from crf_endereco.ui import estilo_tipo
 
 
 def test_features_com_pesos_ordena_e_marca_sem_peso():
@@ -39,8 +39,8 @@ def test_concorrente_ignora_a_tag_vencedora():
 
 
 def test_estilo_tipo_fixa_distinto_e_estavel_para_desconhecido():
-    assert _estilo_tipo("complemento") != _estilo_tipo("recurso_natural")
-    assert _estilo_tipo("desconhecido") == _estilo_tipo("desconhecido")
+    assert estilo_tipo("complemento") != estilo_tipo("recurso_natural")
+    assert estilo_tipo("desconhecido") == estilo_tipo("desconhecido")
 
 
 def test_texto_tag_estilo_b_io_e_o():

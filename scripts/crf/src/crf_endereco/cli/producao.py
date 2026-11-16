@@ -5,25 +5,57 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from dataclasses import asdict, replace
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict
+from functools import partial
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.padding import Padding
 from rich.pretty import pprint
+from rich.table import Table
+from rich.text import Text
 
-from crf_endereco.anotacao.agente import criar_agente, fechar_agente, segmentar
+from crf_endereco.anotacao.agente import Pedido, criar_agente, fechar_agente, segmentar
 from crf_endereco.anotacao.filtro_crf import (
-    filtrar_por_confianca,
-    filtrar_por_tipos,
-    prever,
+    Divergencia,
+    Previsao,
+    parse_faixa,
     validar_tipos,
 )
-from crf_endereco.anotacao.lote import Opcoes, dividir_filtros, executar_lote
-from crf_endereco.anotacao.pendentes import Filtros, pendentes
+from crf_endereco.anotacao.lote import (
+    Gravacao,
+    Opcoes,
+    compor_lotes,
+    dividir_filtros,
+    executar_lote,
+)
+from crf_endereco.anotacao.pendentes import Pendente, pendentes
 from crf_endereco.anotacao.populacao import carregar_fonte
 from crf_endereco.anotacao.populacao.amostragem import amostrar_diverso
+from crf_endereco.cli.filtros import (
+    ESTILO_VEREDITO,
+    OpcaoApenasTipos,
+    OpcaoBalancear,
+    OpcaoBusca,
+    OpcaoIncertos,
+    OpcaoIncertosMedia,
+    OpcaoIncluirRevisados,
+    OpcaoLimite,
+    OpcaoLote,
+    OpcaoModelo,
+    OpcaoMunicipio,
+    OpcaoOrigem,
+    OpcaoUf,
+    filtrar_por_previsao,
+    montar_filtros,
+    pares_abreviados,
+    precisa_do_crf,
+    prever_recorte,
+    recortar_divergentes,
+)
 from crf_endereco.config import CAMINHO_TAGGER, carregar_config
 from crf_endereco.dataset import (
     abrir_banco,
@@ -33,7 +65,10 @@ from crf_endereco.dataset import (
     ler_enderecos_existentes,
     montar_lote,
 )
-from crf_endereco.ui import console
+from crf_endereco.features import tokenize
+from crf_endereco.modelo.crf import nome_do_modelo
+from crf_endereco.rotulos import Mudanca, comparar, mergear
+from crf_endereco.ui import console, estilo_rotulo
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
@@ -84,20 +119,27 @@ def avulso(
     agente = criar_agente(carregar_config(env, com_cnefe=com_cnefe), console)
     try:
         resultado = segmentar(
-            agente, endereco, extras, n_iter=iteracoes, tolerancia_erro=tolerancia_erro
+            agente,
+            [Pedido(endereco, extras)],
+            n_iter=iteracoes,
+            tolerancia_erro=tolerancia_erro,
         )
     finally:
         fechar_agente(agente)
 
+    resposta = resultado.aceitas.get(0)
+    if resposta is None:
+        raise typer.BadParameter(resultado.falhas.get(0, "sem resposta"))
+
     console.rule("Resultado final")
-    pprint(resultado)
+    pprint(resposta)
 
     texto = json.dumps(
         {
             "endereco": endereco,
             "extras": extras,
-            "segmentos": [asdict(segmento) for segmento in resultado.segmentos],
-            "comentario": resultado.comentario,
+            "segmentos": [asdict(segmento) for segmento in resposta.segmentos],
+            "comentario": resposta.comentario,
         },
         ensure_ascii=False,
         indent=2,
@@ -115,37 +157,24 @@ def lote(
     env: OpcaoEnv = Path(".env"),
     iteracoes: OpcaoIteracoes = 10,
     tolerancia_erro: OpcaoTolerancia = 2,
-    limite: Annotated[
-        int | None,
-        typer.Option("--limite", "-l", min=1, help="Processa no máximo N pendentes."),
-    ] = None,
-    lote_id: Annotated[
-        str | None,
-        typer.Option("--lote", help="Filtra as linhas por lote (coluna `lote`)."),
-    ] = None,
-    uf: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--uf", help="Filtra o lote por UF (repita ou separe por vírgula)."
-        ),
-    ] = None,
-    municipio: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--municipio",
-            help="Filtra o lote por município (repita ou separe por vírgula).",
-        ),
-    ] = None,
-    origem: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--origem", help="Filtra o lote por origem (repita ou separe por vírgula)."
-        ),
-    ] = None,
+    limite: OpcaoLimite = None,
+    lote_id: OpcaoLote = None,
+    uf: OpcaoUf = None,
+    municipio: OpcaoMunicipio = None,
+    origem: OpcaoOrigem = None,
     concorrencia: Annotated[
         int,
         typer.Option("--concorrencia", "-c", min=1, help="Chamadas simultâneas à LLM."),
     ] = 1,
+    tamanho_lote: Annotated[
+        int,
+        typer.Option(
+            "--tamanho-lote",
+            "-b",
+            min=1,
+            help="Endereços por conversa; 1 etiqueta um endereço por chamada.",
+        ),
+    ] = 5,
     retentar_erros: Annotated[
         bool,
         typer.Option(
@@ -160,6 +189,18 @@ def lote(
             help="Processa SOMENTE linhas com erro anterior (não os nunca-anotados).",
         ),
     ] = False,
+    divergentes: Annotated[
+        bool,
+        typer.Option(
+            "--divergentes",
+            help=(
+                "Reetiqueta os endereços do recorte de treino do modelo em que ele "
+                "erra o próprio rótulo: ali ele já viu o exemplo, então o erro "
+                "aponta rótulo suspeito. O rótulo trocado fica em meta.revisoes."
+            ),
+        ),
+    ] = False,
+    incluir_revisados: OpcaoIncluirRevisados = False,
     com_cnefe: Annotated[
         bool,
         typer.Option(
@@ -168,68 +209,12 @@ def lote(
             "use --no-com-cnefe para desligar).",
         ),
     ] = True,
-    balancear: Annotated[
-        bool,
-        typer.Option(
-            "--balancear/--sem-balancear",
-            help="Sorteia o lote alternando entre células (UF, origem) e priorizando "
-            "as menos anotadas.",
-        ),
-    ] = True,
-    apenas_tipos: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--apenas-tipos",
-            help=(
-                "Processa só endereços em que o CRF prevê ao menos um destes tipos "
-                "(repita ou separe por vírgula). O modelo roda em todos os pendentes "
-                "(não só em --limite) antes de etiquetar."
-            ),
-        ),
-    ] = None,
-    incertos: Annotated[
-        float | None,
-        typer.Option(
-            "--incertos",
-            min=0.0,
-            max=1.0,
-            help=(
-                "Processa só endereços em que o CRF está em dúvida: algum token com "
-                "probabilidade prevista abaixo deste limiar (0–1). O modelo roda em "
-                "todos os pendentes (não só em --limite) antes de etiquetar."
-            ),
-        ),
-    ] = None,
-    incertos_media: Annotated[
-        float | None,
-        typer.Option(
-            "--incertos-media",
-            min=0.0,
-            max=1.0,
-            help=(
-                "Como --incertos, mas pela média: endereço cuja média "
-                "geométrica das probabilidades previstas, token a token, fica "
-                "abaixo deste limiar (0–1)."
-            ),
-        ),
-    ] = None,
-    busca: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--busca",
-            help=(
-                "Processa só endereços que contêm algum destes trechos (LIKE "
-                "'%trecho%', ignorando caixa e acentos; repita para unir em OU)."
-            ),
-        ),
-    ] = None,
-    modelo: Annotated[
-        Path,
-        typer.Option(
-            "--modelo",
-            help="CRF usado nos filtros de previsão (padrão: o tagger treinado).",
-        ),
-    ] = CAMINHO_TAGGER,
+    balancear: OpcaoBalancear = True,
+    apenas_tipos: OpcaoApenasTipos = None,
+    incertos: OpcaoIncertos = None,
+    incertos_media: OpcaoIncertosMedia = None,
+    busca: OpcaoBusca = None,
+    modelo: OpcaoModelo = CAMINHO_TAGGER,
     verboso: Annotated[
         bool,
         typer.Option(
@@ -238,19 +223,24 @@ def lote(
     ] = False,
 ) -> None:
     """Processa em lote os endereços pendentes do dataset de etiquetagem."""
-    filtros = Filtros(
+    filtros = montar_filtros(
         lote=lote_id,
+        uf=uf,
+        municipio=municipio,
+        origem=origem,
+        busca=busca,
+        balancear=balancear,
         incluir_erros=retentar_erros or apenas_erros,
         apenas_erros=apenas_erros,
-        busca=busca,
-        ufs=dividir_filtros(uf),
-        origens=dividir_filtros(origem),
-        municipios=dividir_filtros(municipio),
     )
     # Valida os argumentos antes de tocar no ambiente (falha rápida, sem .env).
     tipos = validar_tipos(dividir_filtros(apenas_tipos))
-    usar_crf = bool(tipos) or incertos is not None or incertos_media is not None
-    if usar_crf and not modelo.is_file():
+    faixa_incertos = parse_faixa(incertos, "--incertos")
+    faixa_media = parse_faixa(incertos_media, "--incertos-media")
+    if (
+        precisa_do_crf(tipos, faixa_incertos, faixa_media, divergentes=divergentes)
+        and not modelo.is_file()
+    ):
         raise typer.BadParameter(f"Modelo CRF não encontrado: {modelo}")
 
     config = carregar_config(env, com_cnefe=com_cnefe)
@@ -259,57 +249,63 @@ def lote(
     # Valida o ambiente (CNEFE, municipios) uma vez, antes de começar o lote.
     fechar_agente(criar_agente(config, console))
 
+    previsoes: list[Previsao] = []
+    divergencias_por_hash: dict[str, Divergencia] = {}
     conn = abrir_banco(banco)
     try:
-        if usar_crf:
-            candidatos = pendentes(conn, filtros)
-            console.print(
-                f"[dim]Prevendo {len(candidatos)} pendente(s) com o CRF "
-                f"{modelo.name} para filtrar…[/dim]"
+        if divergentes:
+            # Antes dos filtros de confiança: assim eles recortam os divergentes.
+            filtros, divergencias_por_hash = recortar_divergentes(
+                conn, filtros, banco, modelo, incluir_revisados=incluir_revisados
             )
-            previsoes = prever(candidatos, modelo)
-            aprovados = frozenset(previsao.id for previsao in previsoes)
-            if tipos:
-                por_tipo = filtrar_por_tipos(previsoes, tipos)
-                aprovados &= por_tipo
-                console.print(
-                    f"[dim]Filtro por tipo: {len(por_tipo)} de {len(candidatos)} "
-                    "endereço(s) com ao menos um tipo previsto.[/dim]"
-                )
-            if incertos is not None:
-                por_menor = filtrar_por_confianca(previsoes, incertos)
-                aprovados &= por_menor
-                console.print(
-                    f"[dim]Filtro por incerteza: {len(por_menor)} de "
-                    f"{len(candidatos)} endereço(s) com algum token abaixo de "
-                    f"{incertos:.2f}.[/dim]"
-                )
-            if incertos_media is not None:
-                por_media = filtrar_por_confianca(previsoes, incertos_media, media=True)
-                aprovados &= por_media
-                console.print(
-                    f"[dim]Filtro por incerteza média: {len(por_media)} de "
-                    f"{len(candidatos)} endereço(s) com média abaixo de "
-                    f"{incertos_media:.2f}.[/dim]"
-                )
-            filtros = replace(filtros, ids=aprovados)
+        if precisa_do_crf(tipos, faixa_incertos, faixa_media):
+            previsoes = prever_recorte(pendentes(conn, filtros), modelo)
+            filtros = filtrar_por_previsao(
+                filtros,
+                previsoes,
+                tipos=tipos,
+                faixa_incertos=faixa_incertos,
+                faixa_media=faixa_media,
+            )
 
-        linhas = pendentes(conn, filtros, limite if balancear else None)
+        grupos = compor_lotes(pendentes(conn, filtros), tamanho_lote, limite)
+        linhas = [linha for grupo in grupos for linha in grupo]
         if not linhas:
             console.print("[yellow]Nenhum endereço pendente para processar.[/yellow]")
             return
 
         console.print(
-            f"[bold]{len(linhas)}[/bold] endereço(s) a processar — modelo "
+            f"[bold]{len(linhas)}[/bold] endereço(s) em "
+            f"[bold]{len(grupos)}[/bold] lote(s) de até {tamanho_lote} — modelo "
             f"[bold]{config.api_model}[/bold], concorrência {concorrencia}."
         )
+        if previsoes or divergencias_por_hash:
+            # Cada lote anuncia a própria dificuldade quando sai da fila: no
+            # início, a lista inteira ocupava a tela antes de qualquer chamada.
+            anunciar = partial(
+                _anunciar_lote,
+                confiancas={previsao.id: previsao for previsao in previsoes},
+                divergentes=divergencias_por_hash,
+            )
+        else:
+            anunciar = None
+        # Depois da gravação de cada lote: o que a reetiquetação mudou.
+        mostrar = (
+            partial(_mostrar_mudancas, divergentes=divergencias_por_hash)
+            if divergencias_por_hash
+            else None
+        )
+
         inicio = time.perf_counter()
         resumo = executar_lote(
             conn,
             config,
-            linhas,
+            grupos,
             Opcoes(iteracoes, tolerancia_erro, concorrencia),
             console_llm=console_llm,
+            revisado_por=nome_do_modelo(modelo) if divergentes else None,
+            ao_iniciar_lote=anunciar,
+            ao_gravar_lote=mostrar,
         )
         duracao = time.perf_counter() - inicio
     finally:
@@ -318,11 +314,112 @@ def lote(
     console.rule("Resumo")
     console.print(f"Sucesso: [green]{resumo.sucesso}[/green]")
     if resumo.erro:
+        dica = (
+            "(a linha que falha numa revisão não é gravada: rode de novo)"
+            if divergentes
+            else "(use --retentar-erros para reprocessar)"
+        )
+        console.print(f"Erros: [yellow]{resumo.erro}[/yellow] {dica}")
+    if resumo.interrompido:
+        restantes = resumo.total - resumo.sucesso - resumo.erro
         console.print(
-            f"Erros: [yellow]{resumo.erro}[/yellow] "
-            "(use --retentar-erros para reprocessar)"
+            f"Interrompido: [yellow]{restantes}[/yellow] endereço(s) não processados."
         )
     console.print(f"Total: [bold]{resumo.total}[/bold] em {duracao:.1f}s")
+
+
+def _anunciar_lote(
+    numero: int,
+    total: int,
+    grupo: Sequence[Pendente],
+    *,
+    confiancas: Mapping[int, Previsao],
+    divergentes: Mapping[str, Divergencia],
+) -> None:
+    """Dificuldade do lote na hora em que ele começa.
+
+    Endereço a endereço: média geométrica das probabilidades dos tokens e a do
+    token menos confiável (do CRF), mais o que o modelo troca onde diverge.
+    """
+    visiveis = [confiancas[linha.id] for linha in grupo if linha.id in confiancas]
+    cabeca = f"[dim]lote {numero}/{total}[/dim]"
+    if visiveis:
+        media = sum(previsao.media_confianca for previsao in visiveis) / len(visiveis)
+        minima = min(previsao.menor_confianca for previsao in visiveis)
+        cabeca += f" · média {media:.2f} · mínima {minima:.2f}"
+    no_lote = sum(1 for linha in grupo if linha.hash in divergentes)
+    if no_lote:
+        cabeca += f" · [yellow]{no_lote} divergente(s)[/yellow]"
+    console.print(cabeca)
+
+    for linha in grupo:
+        previsao = confiancas.get(linha.id)
+        confianca = (
+            f"[dim]{previsao.media_confianca:.2f}/{previsao.menor_confianca:.2f}[/dim]  "
+            if previsao is not None
+            else ""
+        )
+        achado = divergentes.get(linha.hash)
+        resto = f"  [yellow]{pares_abreviados(achado.pares)}[/yellow]" if achado else ""
+        console.print(f"  {confianca}{linha.endereco}{resto}")
+
+
+def _mostrar_mudancas(
+    numero: int,
+    total: int,
+    grupo: Sequence[Pendente],
+    gravacoes: Sequence[Gravacao],
+    *,
+    divergentes: Mapping[str, Divergencia],
+) -> None:
+    """O que a reetiquetação fez em cada divergente do lote.
+
+    As três etiquetas lado a lado — a do treino, a que o CRF previu e a que a
+    LLM acabou de dar — restritas aos tokens em que elas não batem.
+    """
+    respostas = {
+        id_linha: resposta for id_linha, resposta, sucesso in gravacoes if sucesso
+    }
+    blocos: list[tuple[str, str, list[Mudanca]]] = []
+    for linha in grupo:
+        achado = divergentes.get(linha.hash)
+        resposta = respostas.get(linha.id)
+        if achado is None or resposta is None:
+            continue
+        try:
+            segmentos = json.loads(resposta).get("segmentos", [])
+        except json.JSONDecodeError:
+            # O banco e escrito por `json.dumps`, mas uma linha editada a mao nao
+            # pode derrubar um lote inteiro so porque a tabela nao aparece.
+            console.print(f"[yellow]resposta inválida em {linha.endereco!r}[/yellow]")
+            continue
+        tokens, agora = mergear(linha.endereco, segmentos, tokenize)
+        mudancas, veredito = comparar(tokens, achado.rotulos, achado.previsto, agora)
+        if mudancas:
+            blocos.append((linha.endereco, veredito, mudancas))
+    if not blocos:
+        return
+
+    console.print(f"[dim]lote {numero}/{total} · o que a reetiquetação mudou[/dim]")
+    for endereco, veredito, mudancas in blocos:
+        console.print(
+            f"  [bold]{endereco}[/bold] [{ESTILO_VEREDITO[veredito]}]{veredito}[/]"
+        )
+        tabela = Table(
+            box=None, pad_edge=False, padding=(0, 1, 0, 0), header_style="dim"
+        )
+        tabela.add_column("token", style="bold")
+        tabela.add_column("original")
+        tabela.add_column("crf")
+        tabela.add_column("agora")
+        for mudanca in mudancas:
+            tabela.add_row(
+                mudanca.token,
+                Text(mudanca.antes, style="yellow"),
+                Text(mudanca.previsto, style=estilo_rotulo(mudanca.previsto)),
+                Text(mudanca.agora, style=estilo_rotulo(mudanca.agora)),
+            )
+        console.print(Padding(tabela, (0, 0, 0, 2), expand=False))
 
 
 def popular(

@@ -133,9 +133,9 @@ def test_recorte_por_busca_uniao_de_trechos():
     assert {
         linha.id for linha in pendentes(conn, Filtros(busca=["asa norte", "brasilia"]))
     } == {1, 2}
-    assert {linha.id for linha in pendentes(conn, Filtros(busca=["asa norte", "xx"]))} == {
-        1
-    }
+    assert {
+        linha.id for linha in pendentes(conn, Filtros(busca=["asa norte", "xx"]))
+    } == {1}
 
 
 def test_recorte_por_busca_trata_curinga_como_literal():

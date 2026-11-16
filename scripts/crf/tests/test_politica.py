@@ -39,10 +39,17 @@ def politica(**regras: tuple[Regra, ...]) -> Politica:
 def test_json_ida_e_volta_preserva_a_politica():
     regras = (
         Regra(
-            (Termo(Atomo.ANTES_TIPO, "numero"), Termo(Atomo.TEM, "logradouro", negado=True)),
+            (
+                Termo(Atomo.ANTES_TIPO, "numero"),
+                Termo(Atomo.TEM, "logradouro", negado=True),
+            ),
             LOCALIDADE,
         ),
-        Regra((Termo(Atomo.DONO_UNICO, "logradouro"),), LOGRADOURO, SePreenchido.SUBSTITUIR),
+        Regra(
+            (Termo(Atomo.DONO_UNICO, "logradouro"),),
+            LOGRADOURO,
+            SePreenchido.SUBSTITUIR,
+        ),
         Regra(),
     )
     assert regras_de_json(regras_para_json(regras)) == regras
@@ -67,7 +74,9 @@ def test_decision_list_primeira_regra_vence():
 
 def test_manter_e_substituir_decidem_quem_fica_no_campo():
     segs = [("logradouro", "rua a"), ("parcela", "lote 3")]
-    manter = politica(logradouro=(Regra((), LOGRADOURO),), parcela=(Regra((), LOGRADOURO),))
+    manter = politica(
+        logradouro=(Regra((), LOGRADOURO),), parcela=(Regra((), LOGRADOURO),)
+    )
     assert aplicar(manter, segs) == {LOGRADOURO: "rua a"}
     substituir = politica(
         logradouro=(Regra((), LOGRADOURO),),
@@ -109,23 +118,34 @@ def test_dono_unico_olha_os_tipos_que_disputam_o_campo():
     }
     # com um logradouro na linha, deixa de ser dono unico e cai para localidade
     assert aplicar(
-        pol, [("logradouro", "rua a"), ("nucleo_rural", "sitio mirador"), ("numero", "1")]
+        pol,
+        [("logradouro", "rua a"), ("nucleo_rural", "sitio mirador"), ("numero", "1")],
     ) == {LOGRADOURO: "rua a", LOCALIDADE: "sitio mirador", NUMERO: "1"}
 
 
 def test_vizinhos_andam_um_passo_e_nao_repetem_a_politica_atual():
-    atuais = (Regra((Termo(Atomo.ANTES_CAMPO, "numero"),), LOGRADOURO), Regra((), LOCALIDADE))
+    atuais = (
+        Regra((Termo(Atomo.ANTES_CAMPO, "numero"),), LOGRADOURO),
+        Regra((), LOCALIDADE),
+    )
     vizinhas_ = vizinhas(atuais)
     assert atuais not in vizinhas_
     assert len(vizinhas_) == len(set(vizinhas_))
     # remocao, reordenacao e troca de campo de cada regra estao presentes
     assert (Regra((), LOCALIDADE),) in vizinhas_
     assert (atuais[1], atuais[0]) in vizinhas_
-    assert (Regra((Termo(Atomo.ANTES_CAMPO, "numero"),), NUMERO), atuais[1]) in vizinhas_
+    assert (
+        Regra((Termo(Atomo.ANTES_CAMPO, "numero"),), NUMERO),
+        atuais[1],
+    ) in vizinhas_
     # negar o termo e trocar o valor dele
     com_numero = Termo(Atomo.ANTES_CAMPO, "numero")
-    negado = trocar_regra(atuais, 0, with_termo(atuais[0], 0, Termo(com_numero.atomo, "numero", True)))
-    trocado = trocar_regra(atuais, 0, with_termo(atuais[0], 0, Termo(com_numero.atomo, "localidade")))
+    negado = trocar_regra(
+        atuais, 0, with_termo(atuais[0], 0, Termo(com_numero.atomo, "numero", True))
+    )
+    trocado = trocar_regra(
+        atuais, 0, with_termo(atuais[0], 0, Termo(com_numero.atomo, "localidade"))
+    )
     assert negado in vizinhas_
     assert trocado in vizinhas_
 
@@ -169,4 +189,7 @@ def test_texto_da_politica_e_legivel():
     assert regras_para_texto(()) == "ignorar"
     assert regras_para_texto((Regra((), NUMERO),)) == "sempre => numero/manter"
     condicao = (Termo(Atomo.ANTES_TIPO, "numero"), Termo(Atomo.TEM, "cep", negado=True))
-    assert regras_para_texto((Regra(condicao, IGNORAR),)) == "antes.tipo=numero & !tem=cep => ignorar"
+    assert (
+        regras_para_texto((Regra(condicao, IGNORAR),))
+        == "antes.tipo=numero & !tem=cep => ignorar"
+    )

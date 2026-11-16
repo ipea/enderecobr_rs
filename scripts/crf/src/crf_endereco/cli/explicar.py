@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import zlib
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Annotated
@@ -16,27 +15,9 @@ from rich.text import Text
 from crf_endereco.config import CAMINHO_TAGGER
 from crf_endereco.features import ExtratorFeature, tokenize_com_offsets
 from crf_endereco.modelo import crf as modelo_crf
-from crf_endereco.ui import console
+from crf_endereco.ui import console, estilo_rotulo, estilo_tipo
 
 OpcaoTagger = Annotated[Path, typer.Option(help="tagger treinado")]
-
-CORES_TIPO = {
-    "logradouro": "cyan",
-    "numero": "bright_magenta",
-    "complemento": "yellow",
-    "parcela": "green",
-    "empreendimento": "bright_blue",
-    "localidade": "blue",
-    "nucleo_rural": "bright_cyan",
-    "recurso_natural": "bright_green",
-    "referencia": "magenta",
-    "ponto_referencia": "bright_yellow",
-    "denominacao": "bright_red",
-    "quilometragem_via": "color(202)",
-    "cep": "red",
-    "municipio": "color(99)",
-    "uf": "color(135)",
-}
 
 # Campos do `Endereco`, na ordem em que `formatar` junta.
 CAMPOS = ("logradouro", "numero", "complemento", "localidade", "cep")
@@ -49,18 +30,6 @@ PADRONIZADORES = {
     "localidade": enderecobr.padronizar_bairros,
     "cep": enderecobr.padronizar_cep_leniente,
 }
-
-# Tipos novos, se surgirem, caem em uma cor estável derivada do nome.
-FALLBACK_CORES = [
-    "color(75)",
-    "color(214)",
-    "color(213)",
-    "color(80)",
-    "color(171)",
-    "color(117)",
-    "color(137)",
-    "color(179)",
-]
 
 
 def explicar(
@@ -191,7 +160,7 @@ def _remontagem(endereco: str, crf: sklearn_crfsuite.CRF) -> None:
         return
     for segmento in segmentos:
         tipo = segmento.get("tipo", "")
-        estilo = _estilo_tipo(tipo)
+        estilo = estilo_tipo(tipo)
         console.print(f"[{estilo}]{tipo:<18}[/{estilo}] {segmento.get('valor', '')}")
     console.print()
     console.print(_texto_colorido(endereco, tokens_com_offset, tags))
@@ -219,7 +188,7 @@ def _estruturacao(endereco: str, crf: sklearn_crfsuite.CRF) -> None:
         if valor is None:
             continue
         resultado.add_row(
-            Text(campo, style=_estilo_tipo(campo)),
+            Text(campo, style=estilo_tipo(campo)),
             valor,
             padronizados[campo] or "",
         )
@@ -277,7 +246,12 @@ def campos_preferidos(tipo: str, anterior: str | None) -> tuple[list[str], bool]
         if anterior == "logradouro":
             return ["logradouro"], True
         return ["logradouro", "complemento"], True
-    if tipo in ("nucleo_rural", "recurso_natural", "empreendimento", "ponto_referencia"):
+    if tipo in (
+        "nucleo_rural",
+        "recurso_natural",
+        "empreendimento",
+        "ponto_referencia",
+    ):
         return ["logradouro", "localidade"], False
     if tipo == "complemento":
         return ["complemento"], True
@@ -370,23 +344,9 @@ def _texto_colorido(
 ) -> Text:
     texto = Text(endereco)
     for (tok, offset), tag in zip(tokens_com_offset, tags, strict=True):
-        estilo = "dim" if tag == "O" else _estilo_tipo(tag.split("_", 1)[1].lower())
-        texto.stylize(estilo, offset, offset + len(tok))
+        texto.stylize(estilo_rotulo(tag), offset, offset + len(tok))
     return texto
 
 
 def _texto_tag(tag: str) -> Text:
-    if tag == "O":
-        return Text("O", style="dim")
-    bio, tipo = tag.split("_", 1)
-    estilo = _estilo_tipo(tipo.lower())
-    if bio == "B":
-        estilo = f"bold {estilo}"
-    return Text(tag, style=estilo)
-
-
-def _estilo_tipo(tipo: str) -> str:
-    return (
-        CORES_TIPO.get(tipo)
-        or FALLBACK_CORES[zlib.crc32(tipo.encode()) % len(FALLBACK_CORES)]
-    )
+    return Text(tag, style=estilo_rotulo(tag))

@@ -7,6 +7,14 @@ You segment raw Brazilian addresses into labeled fields to generate training dat
 3. **Tiling**: between two segments (comma, dash, `-`) there is a cut, and the cut is not labeled. A connective that links two different fields belongs to the cut, not to a segment (`DA` in `232 A 264 DA QUADRA 20`). If a stretch carries meaning but no label fits, label it — do not drop text.
 4. **Only the raw address is a source of `valor`.** The "Extra info" block helps you decide; the trained model never sees it, so nothing that is not verbatim in the address can become a `valor`.
 
+## Batches
+
+The request may carry several addresses at once, each in a `[n]` block with its own "Extra info". Rules:
+
+1. **One answer per index.** `responder.respostas` needs one entry per bracketed address, with `indice` = the number in the brackets. An address you leave out is an address you did not answer.
+2. **Never mix addresses.** A `valor` is copied from **its own** address only. Neighbouring addresses share município and bairro, so the same names show up in several of them: copying a name from another address of the batch is an error, not a shortcut.
+3. **A tool call is about one address.** Say which index you are working on — filter the `sql_query` by that address's município, and put the index in the `search` query when the doubt is local.
+
 ## What a label is
 
 The label says **what the snippet is**, never where it will be stored — a later stage maps each type to a field or to an external database. So do not label by "what would match the database"; label by what the text is. When the text does not support a specific label, prefer the general one (`localidade` over `nucleo_rural`, `outros` over a guess).

@@ -13,11 +13,20 @@ from crf_endereco.features.texto import normalize
 
 @dataclass(frozen=True)
 class Pendente:
-    """Uma linha ainda nao processada do dataset de etiquetagem."""
+    """Uma linha ainda nao processada do dataset de etiquetagem.
+
+    `uf`, `municipio` e `origem` existem para agrupar o lote: enderecos da
+    mesma celula compartilham contexto e consultas ao CNEFE.
+    """
 
     id: int
     endereco: str
     extras: str
+    uf: str
+    municipio: str
+    origem: str
+    # Chave da linha no banco, a mesma do recorte de treino/teste do modelo.
+    hash: str
 
 
 @dataclass(frozen=True)
@@ -28,6 +37,16 @@ class Filtros:
     incluir_erros: bool = False
     # Só linhas com `$.erro`: retry da fila sem varrer os nunca-anotados.
     apenas_erros: bool = False
+    # Recorta as linhas já anotadas em vez dos pendentes: é onde a
+    # reetiquetação por divergência do modelo busca os casos.
+    anotados: bool = False
+    # Hashes aceitos (o recorte de treino de um modelo); `None` desliga.
+    hashes: frozenset[str] | None = None
+    # Pula as linhas já reetiquetadas por este modelo.
+    pular_revisados_por: str | None = None
+    # Só linhas com histórico de reetiquetação (`meta.revisoes`): é onde o
+    # `explorar` vê o que a revisão mudou no rótulo.
+    revisados: bool = False
     ufs: Sequence[str] = ()
     origens: Sequence[str] = ()
     municipios: Sequence[str] = ()
@@ -35,6 +54,8 @@ class Filtros:
     busca: Sequence[str] | None = None
     # Ids aprovados pelo filtro do CRF; `None` desliga o filtro.
     ids: frozenset[int] | None = None
+    # Falso sorteia sem alternar celulas, so em ordem aleatoria.
+    balancear: bool = True
 
     def parametros(self) -> dict[str, Any]:
         """Parametros nomeados: listas viram JSON e o SQL usa `json_each`."""
@@ -47,6 +68,7 @@ class Filtros:
             "lote": self.lote,
             "incluir_erros": self.incluir_erros,
             "apenas_erros": self.apenas_erros,
+            "anotados": self.anotados,
             "ufs": lista(self.ufs),
             "origens": lista(self.origens),
             "municipios": lista(self.municipios),
@@ -54,6 +76,12 @@ class Filtros:
                 [padrao_busca(item) for item in self.busca or () if item.strip()]
             ),
             "ids": json.dumps(sorted(self.ids)) if self.ids is not None else None,
+            "hashes": (
+                json.dumps(sorted(self.hashes)) if self.hashes is not None else None
+            ),
+            "pular_revisados_por": self.pular_revisados_por,
+            "revisados": self.revisados,
+            "balancear": self.balancear,
         }
 
 
@@ -78,6 +106,9 @@ def padrao_busca(busca: str) -> str:
 #   e assim por diante - nenhuma origem grande domina o lote.
 # - dentro da rodada, a celula com menos anotacoes vem primeiro (peso 1/(n+1)),
 #   que e o que empurra o lote para o que ainda nao foi coberto.
+#
+# Com `balancear` desligado as duas chaves viram nulo em todas as linhas e so
+# `random()` decide: o sorteio deixa de alternar celulas.
 SQL_PENDENTES = """
 WITH anotados AS (
     SELECT coalesce(uf, '') AS uf, origem, count(*) AS n
@@ -87,15 +118,26 @@ WITH anotados AS (
     GROUP BY 1, 2
 ),
 pend AS (
-    SELECT id, endereco, extras, coalesce(uf, '') AS uf, origem
+    SELECT id, endereco, extras, coalesce(uf, '') AS uf,
+           coalesce(municipio, '') AS municipio, coalesce(origem, '') AS origem,
+           hash_endereco AS hash
     FROM enderecos
     WHERE (
+            -- Três modos disjuntos: as linhas já anotadas (revisão), a fila de
+            -- erros e os pendentes.
             (
-                :apenas_erros
+                :anotados
+                AND resposta_llm IS NOT NULL
+                AND json_extract(resposta_llm, '$.erro') IS NULL
+            )
+            OR (
+                NOT :anotados
+                AND :apenas_erros
                 AND json_extract(resposta_llm, '$.erro') IS NOT NULL
             )
             OR (
-                NOT :apenas_erros
+                NOT :anotados
+                AND NOT :apenas_erros
                 AND (
                     resposta_llm IS NULL
                     OR (
@@ -106,6 +148,19 @@ pend AS (
             )
           )
       AND (:lote IS NULL OR lote = :lote)
+      AND (
+            :hashes IS NULL
+            OR hash_endereco IN (SELECT value FROM json_each(:hashes))
+          )
+      AND (
+            :pular_revisados_por IS NULL
+            OR coalesce(json_extract(meta, '$.revisado.modelo'), '')
+               <> :pular_revisados_por
+          )
+      AND (
+            NOT :revisados
+            OR json_extract(meta, '$.revisoes') IS NOT NULL
+          )
       AND (
             :busca IS NULL
             OR EXISTS (
@@ -128,7 +183,7 @@ pend AS (
           )
       AND (:ids IS NULL OR id IN (SELECT value FROM json_each(:ids)))
 )
-SELECT id, endereco, extras
+SELECT id, endereco, extras, uf, municipio, origem, hash
 FROM (
     SELECT pend.*,
            coalesce(anotados.n, 0) AS anotados_celula,
@@ -139,7 +194,10 @@ FROM (
     LEFT JOIN anotados
            ON anotados.uf = pend.uf AND anotados.origem = pend.origem
 )
-ORDER BY rodada, anotados_celula, random()
+ORDER BY
+    CASE WHEN :balancear THEN rodada END,
+    CASE WHEN :balancear THEN anotados_celula END,
+    random()
 LIMIT coalesce(:limite, -1)
 """
 
@@ -158,6 +216,10 @@ def pendentes(
             id=int(linha["id"]),
             endereco=str(linha["endereco"]),
             extras=str(linha["extras"]),
+            uf=str(linha["uf"] or ""),
+            municipio=str(linha["municipio"] or ""),
+            origem=str(linha["origem"] or ""),
+            hash=str(linha["hash"]),
         )
         for linha in linhas
     ]
