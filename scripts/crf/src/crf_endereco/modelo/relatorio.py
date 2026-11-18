@@ -470,8 +470,22 @@ def avaliar(
     else:
         console.print("[dim]Prevendo os recortes de treino e teste...[/dim]")
         desempenho_treino = medir(treino.y, _prever(crf, treino.x))
-    previsto = _prever(crf, teste.x)
+    avaliar_previsto(teste, _prever(crf, teste.x), desempenho_treino, nome)
 
+
+def avaliar_previsto(
+    teste: Exemplos,
+    previsto: Rotulos,
+    desempenho_treino: Desempenho | None = None,
+    nome: str | None = None,
+) -> None:
+    """Relatorio do recorte a partir de rotulos ja previstos.
+
+    Existe para a validacao cruzada: ali cada exemplo foi previsto por um modelo
+    diferente, entao nao ha um `crf` unico para consultar. Sem `desempenho_treino`
+    sai sem a coluna de treino (e sem a suspeita de vazamento, que so faz sentido
+    quando existe um treino unico).
+    """
     titulo = "Avaliacao do CRF" if nome is None else f"Avaliacao do CRF — {nome}"
     console.rule(f"[bold]{titulo}[/bold]")
     _cabecalho(desempenho_treino, medir(teste.y, previsto))

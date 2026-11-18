@@ -26,6 +26,7 @@ class Exemplo:
     resposta: str
     origem: str
     uf: str
+    municipio: str = ""
 
 
 @dataclass(frozen=True)
@@ -276,7 +277,8 @@ def carregar_anotados(caminho: Path = CAMINHO_DATASET) -> list[Exemplo]:
     try:
         linhas = conn.execute(
             """
-            SELECT endereco, resposta_llm, origem, uf
+            SELECT endereco, resposta_llm, origem, uf,
+                   coalesce(municipio, '') AS municipio
             FROM enderecos
             WHERE resposta_llm IS NOT NULL
               AND json_extract(resposta_llm, '$.erro') IS NULL
@@ -290,6 +292,7 @@ def carregar_anotados(caminho: Path = CAMINHO_DATASET) -> list[Exemplo]:
             resposta=str(linha["resposta_llm"]),
             origem=str(linha["origem"] or ""),
             uf=str(linha["uf"] or ""),
+            municipio=str(linha["municipio"]),
         )
         for linha in linhas
     ]

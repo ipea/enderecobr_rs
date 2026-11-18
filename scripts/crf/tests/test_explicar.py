@@ -1,12 +1,10 @@
 from crf_endereco.cli.explicar import (
     _concorrente,
     _estilo_peso,
-    _formatar,
     _texto_tag,
-    campos_preferidos,
-    estruturar_segmentos,
     features_com_pesos,
 )
+from crf_endereco.estruturacao import campos_preferidos, estruturar_segmentos, formatar
 from crf_endereco.ui import estilo_tipo
 
 
@@ -99,7 +97,7 @@ def test_estruturar_segmentos_concatena_complementos():
 
 def test_formatar_junta_os_campos_na_ordem_do_endereco():
     assert (
-        _formatar(
+        formatar(
             {
                 "logradouro": "RUA X",
                 "numero": None,

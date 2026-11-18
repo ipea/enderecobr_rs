@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from crf_endereco.cli import explicar, explorar, geocode, modelo, producao
+from crf_endereco.cli import explicar, explorar, geocode, modelo, producao, visualizar
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -26,5 +26,6 @@ for comando in (
     modelo.inspecionar,
     explicar.explicar,
     explorar.explorar,
+    visualizar.visualizar,
 ):
     app.command(help=comando.__doc__)(comando)

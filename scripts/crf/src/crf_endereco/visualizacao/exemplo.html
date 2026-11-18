@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Como o CRF lê um endereço</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0d11;
+    --panel: #10151c;
+    --panel-2: #141a22;
+    --linha: #1e2833;
+    --linha-forte: #2b3946;
+    --texto: #e6edf3;
+    --texto-2: #9fb0c0;
+    --fraco: #6d7d8c;
+    --erro: #f87171;
+    --ok: #4ade80;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--texto);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.5;
+    display: grid;
+    grid-template-columns: 19rem 1fr;
+    grid-template-rows: auto 1fr;
+    grid-template-areas: "topo topo" "lado principal";
+    overflow: hidden;
+  }
+
+  /* ---------- topo ---------- */
+  header {
+    grid-area: topo;
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    padding: 1.1rem 1.6rem 1rem;
+    border-bottom: 1px solid var(--linha);
+    background: linear-gradient(180deg, #0d1218, var(--bg));
+    flex-wrap: wrap;
+  }
+  .marca { display: flex; flex-direction: column; gap: 0.12rem; }
+  header h1 {
+    margin: 0;
+    font-size: 1.28rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .marca .sub {
+    margin: 0;
+    font-size: 0.76rem;
+    color: var(--fraco);
+    letter-spacing: 0.01em;
+  }
+  .stats { display: flex; gap: 2rem; margin-left: auto; }
+  .stat b {
+    display: block;
+    font-family: var(--mono);
+    font-size: 1.25rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .stat span { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.09em; color: var(--fraco); }
+  .dica { font-size: 0.74rem; color: var(--fraco); font-family: var(--mono); }
+  .dica kbd {
+    border: 1px solid var(--linha-forte);
+    border-radius: 3px;
+    padding: 0 0.35em;
+    font-size: 0.9em;
+    color: var(--texto-2);
+  }
+
+  /* ---------- lado ---------- */
+  aside {
+    grid-area: lado;
+    border-right: 1px solid var(--linha);
+    overflow-y: auto;
+    background: var(--panel);
+    padding-bottom: 3rem;
+  }
+  aside .filtro {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    gap: 0.4rem;
+    padding: 0.7rem 0.9rem;
+    background: var(--panel);
+    border-bottom: 1px solid var(--linha);
+  }
+  aside .filtro button {
+    flex: 1;
+    font: inherit;
+    font-size: 0.74rem;
+    color: var(--texto-2);
+    background: transparent;
+    border: 1px solid var(--linha-forte);
+    border-radius: 3px;
+    padding: 0.3rem 0.4rem;
+    cursor: pointer;
+  }
+  aside .filtro button[aria-pressed="true"] { background: var(--linha-forte); color: var(--texto); }
+  aside h2 {
+    margin: 0;
+    padding: 1.1rem 0.9rem 0.35rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: var(--fraco);
+  }
+  aside li {
+    display: grid;
+    grid-template-columns: 0.55rem 1fr;
+    gap: 0.55rem;
+    align-items: start;
+    padding: 0.42rem 0.9rem;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+  }
+  aside li:hover { background: var(--panel-2); }
+  aside li[aria-current="true"] { background: var(--panel-2); border-left-color: #60a5fa; }
+  aside li .ponto { width: 0.45rem; height: 0.45rem; border-radius: 50%; margin-top: 0.45rem; }
+  aside li .ponto.ok { background: var(--ok); }
+  aside li .ponto.err { background: var(--erro); }
+  aside li .txt {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    color: var(--texto-2);
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  aside li[aria-current="true"] .txt { color: var(--texto); }
+  aside ul { margin: 0; padding: 0; list-style: none; }
+  aside .vazio { padding: 1rem 0.9rem; font-size: 0.8rem; color: var(--fraco); }
+
+  /* ---------- principal ---------- */
+  main {
+    grid-area: principal;
+    overflow-y: auto;
+    padding: 2rem 2.4rem 5rem;
+  }
+  .interior { max-width: 62rem; }
+  .rotulo {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: var(--fraco);
+    margin-bottom: 0.5rem;
+    display: flex;
+    gap: 0.8rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .rotulo .tag {
+    border: 1px solid var(--linha-forte);
+    border-radius: 999px;
+    padding: 0.1rem 0.55rem;
+    letter-spacing: 0.06em;
+    color: var(--texto-2);
+  }
+  h2.titulo-secao {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: var(--fraco);
+    margin: 2.2rem 0 0.7rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--linha);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+  }
+  h2.titulo-secao em { font-style: normal; font-weight: 400; letter-spacing: 0; text-transform: none; }
+
+  .endereco {
+    font-family: var(--mono);
+    font-size: clamp(1.15rem, 1.7vw, 1.75rem);
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    margin: 0;
+    word-break: break-word;
+    color: #fff;
+  }
+
+  /* faixa de tokens */
+  .faixa { display: flex; flex-wrap: wrap; gap: 0.3rem 0.32rem; align-items: flex-end; }
+  .chip {
+    font: inherit;
+    font-family: var(--mono);
+    font-size: 1.12rem;
+    color: var(--texto);
+    border: 0;
+    border-radius: 3px 3px 0 0;
+    border-bottom: 3px solid var(--g);
+    padding: 0.3rem 0.5rem 0.24rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.3rem;
+    transition: outline-color .12s;
+    outline: 1px solid transparent;
+  }
+  .chip .p { font-size: 0.68rem; color: var(--fraco); font-variant-numeric: tabular-nums; }
+  .chip:hover { outline-color: var(--linha-forte); }
+  .chip[aria-pressed="true"] { outline: 1px solid var(--texto-2); }
+  .chip.erro { box-shadow: inset 0 0 0 1px var(--erro); }
+  .chip.dim { color: var(--fraco); }
+
+  .chave-faixa { display: flex; gap: 1.2rem; margin-top: 0.55rem; font-size: 0.72rem; color: var(--fraco); flex-wrap: wrap; }
+  .chave-faixa b { font-weight: 500; color: var(--texto-2); font-family: var(--mono); }
+
+  /* detalhe do token */
+  .detalhe {
+    margin-top: 1rem;
+    border: 1px solid var(--linha);
+    border-radius: 4px;
+    background: var(--panel);
+    padding: 0.9rem 1rem;
+  }
+  .detalhe header {
+    all: unset;
+    display: flex;
+    gap: 0.8rem;
+    align-items: baseline;
+    flex-wrap: wrap;
+    font-size: 0.78rem;
+    color: var(--texto-2);
+    margin-bottom: 0.7rem;
+  }
+  .detalhe .tok { font-family: var(--mono); font-size: 1rem; color: var(--texto); font-weight: 600; }
+  .detalhe .par { font-family: var(--mono); }
+  .detalhe .par b { font-weight: 600; }
+  .pesos { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0.1rem 1.6rem; }
+  .peso {
+    display: grid;
+    grid-template-columns: 1fr 3.2rem;
+    gap: 0.6rem;
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    padding: 0.12rem 0;
+    color: var(--texto-2);
+    border-bottom: 1px dotted #1a222b;
+  }
+  .peso span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .peso.pos span:last-child { color: var(--ok); }
+  .peso.neg span:last-child { color: var(--erro); }
+  .peso.sem span:last-child { color: var(--fraco); }
+
+  /* segmentos */
+  .colunas { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem; }
+  .colunas h3 {
+    margin: 0 0 0.5rem;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--fraco);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .segs { display: flex; flex-direction: column; gap: 0.16rem; }
+  .seg {
+    display: grid;
+    grid-template-columns: 9.5rem 1fr;
+    gap: 0.7rem;
+    align-items: baseline;
+    padding: 0.3rem 0.55rem;
+    border-radius: 3px;
+    background: var(--panel);
+    border-left: 2px solid var(--c);
+  }
+  .seg .tipo { font-family: var(--mono); font-size: 0.7rem; color: var(--c); letter-spacing: 0.02em; }
+  .seg .valor { font-family: var(--mono); font-size: 0.95rem; word-break: break-word; }
+  .seg.igual { background: transparent; border-left-color: transparent; }
+  .seg.igual .tipo { color: var(--fraco); }
+  .seg.igual .valor { color: var(--texto-2); }
+  .seg.difere { background: color-mix(in srgb, var(--erro) 9%, var(--panel)); }
+
+  /* campos */
+  table.campos { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  table.campos th {
+    text-align: left;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--fraco);
+    font-weight: 500;
+    padding: 0 0.7rem 0.4rem 0;
+    border-bottom: 1px solid var(--linha);
+  }
+  table.campos td {
+    padding: 0.4rem 0.7rem 0.4rem 0;
+    border-bottom: 1px solid #141b23;
+    font-family: var(--mono);
+    vertical-align: baseline;
+  }
+  table.campos td.campo { font-size: 0.74rem; color: var(--c); width: 1%; white-space: nowrap; }
+  table.campos td.pad { color: var(--texto-2); }
+  .final {
+    margin-top: 1rem;
+    font-family: var(--mono);
+    font-size: 0.95rem;
+    padding: 0.7rem 0.9rem;
+    border-left: 2px solid #60a5fa;
+    background: var(--panel);
+    border-radius: 0 3px 3px 0;
+  }
+  .final b { display: block; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fraco); font-weight: 500; margin-bottom: 0.3rem; }
+
+  .legenda {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+    gap: 0.12rem 1.8rem;
+  }
+  .legenda div {
+    display: grid;
+    grid-template-columns: 0.7rem 9.5rem 1fr;
+    gap: 0.6rem;
+    align-items: baseline;
+    font-size: 0.74rem;
+    color: var(--texto-2);
+    padding: 0.15rem 0;
+  }
+  .legenda i { width: 0.7rem; height: 0.7rem; border-radius: 2px; }
+  .legenda b { font-family: var(--mono); font-weight: 500; font-size: 0.72rem; }
+  .legenda span { color: var(--fraco); }
+
+  .rodape {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--linha);
+    font-size: 0.72rem;
+    color: var(--fraco);
+    max-width: 46rem;
+  }
+  .rodape code { font-family: var(--mono); color: var(--texto-2); }
+</style>
+</head>
+<body>
+<header>
+  <div class="marca">
+    <h1>Como o CRF lê um endereço</h1>
+    <p class="sub" id="sub"></p>
+  </div>
+  <p class="dica"><kbd>←</kbd> <kbd>→</kbd> exemplos · <kbd>+</kbd> <kbd>−</kbd> zoom · clique num token</p>
+  <div class="stats">
+    <div class="stat"><b id="s-token"></b><span>tokens certos (fora do treino)</span></div>
+    <div class="stat"><b id="s-end"></b><span>endereços com tudo certo</span></div>
+    <div class="stat"><b id="s-amostra"></b><span>nesta amostra</span></div>
+  </div>
+</header>
+
+<aside>
+  <div class="filtro">
+    <button id="f-todos" aria-pressed="true">todos</button>
+    <button id="f-erros" aria-pressed="false">só erros</button>
+  </div>
+  <div id="lista"></div>
+</aside>
+
+<main>
+  <div class="interior" id="palco"></div>
+</main>
+
+<script id="dados" type="application/json">__DADOS__</script>
+<script>
+const DADOS = JSON.parse(document.getElementById("dados").textContent);
+const CORES = DADOS.cores;
+const cor = (tipo) => CORES[tipo] || CORES.__outro;
+const el = (tag, classe, texto) => {
+  const n = document.createElement(tag);
+  if (classe) n.className = classe;
+  if (texto !== undefined) n.textContent = texto;
+  return n;
+};
+const rgba = (hex, a) => {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+};
+const curto = (t) => (t === "O" || !t ? "fora" : t.replace(/^[BI]_/, "").toLowerCase());
+
+let lista = DADOS.exemplos;
+let atual = 0;
+let soErros = false;
+let tokenAtual = null;
+
+document.getElementById("sub").textContent = DADOS.resumo;
+document.getElementById("s-token").textContent = DADOS.metricas.token;
+document.getElementById("s-end").textContent = DADOS.metricas.endereco;
+document.getElementById("s-amostra").textContent =
+  DADOS.exemplos.filter(e => e.ok).length + "/" + DADOS.exemplos.length;
+
+const visiveis = () => (soErros ? lista.filter(e => !e.ok) : lista);
+
+function montarLista() {
+  const alvo = document.getElementById("lista");
+  const itens = visiveis();
+  alvo.replaceChildren();
+  if (!itens.length) { alvo.append(el("p", "vazio", "nenhum exemplo.")); return; }
+  const grupos = new Map();
+  for (const ex of itens) {
+    if (!grupos.has(ex.categoria)) grupos.set(ex.categoria, []);
+    grupos.get(ex.categoria).push(ex);
+  }
+  for (const [categoria, exemplos] of grupos) {
+    alvo.append(el("h2", null, categoria));
+    const ul = el("ul");
+    for (const ex of exemplos) {
+      const li = el("li");
+      li.dataset.id = ex.i;
+      li.setAttribute("aria-current", String(ex.i === lista[atual].i));
+      li.append(el("span", "ponto " + (ex.ok ? "ok" : "err")), el("span", "txt", ex.endereco));
+      li.addEventListener("click", () => mostrar(lista.findIndex(e => e.i === ex.i)));
+      ul.append(li);
+    }
+    alvo.append(ul);
+  }
+}
+
+function chip(tk, i) {
+  const b = el("button", "chip" + (tk.gold !== tk.pred ? " erro" : "") + (tk.punct ? " dim" : ""));
+  b.style.setProperty("--g", cor(curto(tk.gold)));
+  b.style.background = rgba(cor(curto(tk.pred)), 0.17);
+  b.title = `previsto: ${tk.pred} · anotação: ${tk.gold}`;
+  b.setAttribute("aria-pressed", String(i === tokenAtual));
+  b.append(el("span", "tk", tk.t), el("span", "p", tk.p.toFixed(2).slice(1)));
+  b.addEventListener("click", () => mostrar(atual, i));
+  return b;
+}
+
+function detalhe(ex, i) {
+  const tk = ex.tokens[i];
+  if (!tk) return null;
+  const caixa = el("div", "detalhe");
+  const cab = el("header");
+  const previsto = el("span", "par");
+  const destaque = el("b", null, tk.pred);
+  destaque.style.color = cor(curto(tk.pred));
+  previsto.append(el("span", null, "previsto "), destaque, el("span", null, " · " + tk.p.toFixed(3)));
+  cab.append(
+    el("span", "tok", tk.t),
+    previsto,
+    el("span", "par", "2º lugar " + tk.rival + " · " + tk.prival.toFixed(3)),
+  );
+  caixa.append(cab);
+  const grade = el("div", "pesos");
+  for (const [nome, peso] of tk.top) {
+    const d = el("div", "peso " + (peso === null ? "sem" : peso >= 0 ? "pos" : "neg"));
+    d.append(el("span", null, nome),
+             el("span", null, peso === null ? "—" : (peso >= 0 ? "+" : "") + peso.toFixed(1)));
+    grade.append(d);
+  }
+  caixa.append(grade);
+  return caixa;
+}
+
+function segs(ex, quais) {
+  const caixa = el("div", "segs");
+  const outro = quais === "previsto" ? ex.gold : ex.previsto;
+  if (!ex[quais].length) {
+    const vazio = el("div", "seg igual");
+    vazio.append(el("span", "tipo", "—"), el("span", "valor", "nenhum segmento"));
+    caixa.append(vazio);
+  }
+  for (const s of ex[quais]) {
+    const igual = outro.some(o => o.tipo === s.tipo && o.valor === s.valor);
+    const d = el("div", "seg " + (igual ? "igual" : "difere"));
+    d.style.setProperty("--c", cor(s.tipo));
+    d.append(el("span", "tipo", s.tipo), el("span", "valor", s.valor));
+    caixa.append(d);
+  }
+  return caixa;
+}
+
+function titulo(texto, nota) {
+  const h = el("h2", "titulo-secao");
+  h.append(el("span", null, texto), el("em", null, nota || ""));
+  return h;
+}
+
+function mostrar(indice, token) {
+  atual = indice;
+  const ex = lista[indice];
+  tokenAtual = token === undefined
+    ? ex.tokens.reduce((melhor, tk, i) => (tk.p < ex.tokens[melhor].p ? i : melhor), 0)
+    : token;
+
+  const palco = document.getElementById("palco");
+  palco.replaceChildren();
+
+  const rotulo = el("div", "rotulo");
+  const estado = el("span", null, ex.ok ? "todos os rótulos certos" : ex.diferencas + " token(s) fora do lugar");
+  estado.style.color = ex.ok ? "var(--ok)" : "var(--erro)";
+  rotulo.append(el("span", "tag", ex.categoria));
+  const lugar = [ex.municipio, ex.uf].filter(Boolean).join(" / ");
+  if (lugar) rotulo.append(el("span", "mun", lugar));
+  rotulo.append(
+    el("span", null, "origem " + ex.origem),
+    el("span", null, ex.tokens.length + " tokens"),
+    estado,
+  );
+  palco.append(rotulo);
+  palco.append(el("p", "endereco", ex.endereco));
+
+  palco.append(titulo("Token a token",
+    "cor = tipo previsto · traço inferior = tipo anotado · número = probabilidade"));
+  const faixa = el("div", "faixa");
+  ex.tokens.forEach((tk, i) => faixa.append(chip(tk, i)));
+  palco.append(faixa);
+
+  const chave = el("div", "chave-faixa");
+  const k1 = el("span");
+  k1.append(el("b", null, "—"), el("span", null, " previsto e anotação iguais"));
+  const k2 = el("span");
+  k2.append(el("b", null, "□"), el("span", null, " borda vermelha: divergem"));
+  const k3 = el("span");
+  k3.append(el("b", null, "S/N"), el("span", null, " volta verbatim, não vira S / N"));
+  chave.append(k1, k2, k3);
+  palco.append(chave);
+
+  const det = detalhe(ex, tokenAtual);
+  if (det) palco.append(det);
+
+  palco.append(titulo("Segmentos remontados", ex.diferencas ? "as duas colunas divergem" : "iguais"));
+  const cols = el("div", "colunas");
+  const c1 = el("div");
+  c1.append(el("h3", null, "previsto pelo modelo"), segs(ex, "previsto"));
+  const c2 = el("div");
+  c2.append(el("h3", null, "anotação de referência"), segs(ex, "gold"));
+  cols.append(c1, c2);
+  palco.append(cols);
+
+  palco.append(titulo("O que sai para o geocodebr",
+    "cada trecho no primeiro campo livre da sua preferência"));
+  const tabela = el("table", "campos");
+  const thead = el("thead");
+  const linhaTitulo = el("tr");
+  for (const nome of ["campo", "valor", "padronizado"]) linhaTitulo.append(el("th", null, nome));
+  thead.append(linhaTitulo);
+  const corpo = el("tbody");
+  for (const [campo, bruto, pad] of ex.campos) {
+    const tr = el("tr");
+    const celula = el("td", "campo");
+    celula.style.setProperty("--c", cor(campo));
+    celula.textContent = campo;
+    tr.append(celula, el("td", null, bruto), el("td", "pad", pad || "—"));
+    corpo.append(tr);
+  }
+  tabela.append(thead, corpo);
+  palco.append(tabela);
+
+  const fin = el("div", "final");
+  fin.append(el("b", null, "endereço estruturado"), document.createTextNode(ex.final));
+  palco.append(fin);
+
+  palco.append(titulo("Tipos de trecho", "a cor de cada token na faixa"));
+  const legenda = el("div", "legenda");
+  for (const [tipo, descricao] of DADOS.legenda) {
+    const item = el("div");
+    const marca = el("i");
+    marca.style.background = cor(tipo);
+    item.append(marca, el("b", null, tipo), el("span", null, descricao));
+    legenda.append(item);
+  }
+  palco.append(legenda);
+
+  for (const li of document.querySelectorAll("aside li"))
+    li.setAttribute("aria-current", String(Number(li.dataset.id) === ex.i));
+  document.querySelector("aside li[aria-current='true']")?.scrollIntoView({ block: "nearest" });
+  palco.parentElement.scrollTop = 0;
+}
+
+document.getElementById("f-todos").addEventListener("click", () => alternar(false));
+document.getElementById("f-erros").addEventListener("click", () => alternar(true));
+
+function alternar(erros) {
+  soErros = erros;
+  document.getElementById("f-todos").setAttribute("aria-pressed", String(!erros));
+  document.getElementById("f-erros").setAttribute("aria-pressed", String(erros));
+  montarLista();
+  const itens = visiveis();
+  const pos = itens.findIndex(e => e.i === lista[atual].i);
+  mostrar(lista.findIndex(e => e.i === (pos >= 0 ? itens[pos].i : itens[0].i)));
+}
+
+document.addEventListener("keydown", (ev) => {
+  const itens = visiveis();
+  const pos = itens.findIndex(e => e.i === lista[atual].i);
+  if (ev.key === "ArrowRight" || ev.key === "ArrowDown") {
+    mostrar(lista.findIndex(e => e.i === itens[(Math.max(pos, 0) + 1) % itens.length].i));
+    ev.preventDefault();
+  } else if (ev.key === "ArrowLeft" || ev.key === "ArrowUp") {
+    mostrar(lista.findIndex(e => e.i === itens[(pos <= 0 ? itens.length : pos) - 1].i));
+    ev.preventDefault();
+  } else if (ev.key === "+" || ev.key === "=" || ev.key === "-") {
+    const raiz = document.documentElement;
+    const px = parseFloat(getComputedStyle(raiz).fontSize);
+    raiz.style.fontSize = Math.min(30, Math.max(12, px + (ev.key === "-" ? -1.5 : 1.5))) + "px";
+    ev.preventDefault();
+  }
+});
+
+montarLista();
+mostrar(0);
+</script>
+</body>
+</html>

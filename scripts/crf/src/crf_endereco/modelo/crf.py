@@ -10,7 +10,12 @@ from pathlib import Path
 import sklearn_crfsuite
 import typer
 from sklearn.metrics import make_scorer
-from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.model_selection import (
+    GridSearchCV,
+    KFold,
+    StratifiedKFold,
+    train_test_split,
+)
 from sklearn_crfsuite.metrics import flat_accuracy_score
 
 from crf_endereco.config import CAMINHO_DATASET, CAMINHO_TAGGER
@@ -29,7 +34,7 @@ from crf_endereco.features import (
     tokenize_com_offsets,
 )
 from crf_endereco.modelo import relatorio
-from crf_endereco.rotulos import mergear
+from crf_endereco.rotulos import alinhamento
 from crf_endereco.ui import console
 
 # `str.isspace()` e mais amplo que o `u8::is_ascii_whitespace` usado pelo Rust
@@ -62,6 +67,11 @@ VERBOSE_TREINO = True
 # seja comparavel ao do modelo final.
 SEMENTE_SPLIT = 42
 
+# Folds do `avaliar --kfold`. Com ~9 mil exemplos, tres folds ja poem o
+# erro-padrao do endereco perfeito perto de meio ponto percentual (com os 10% de
+# teste do split fixo fica em ~1,5pp, maior do que as melhorias que interessam).
+FOLDS_VALIDACAO = 3
+
 
 @dataclass(frozen=True)
 class Exemplos:
@@ -78,6 +88,17 @@ class Exemplos:
     hashes: list[str]
 
 
+def alvo_vazio(labels: Sequence[str]) -> bool:
+    """Endereco cujo alvo ficou todo `O`: nada que o modelo possa aprender.
+
+    Acontece com resposta sem segmento nenhum (falha de anotacao) e com o
+    endereco que so tem trecho descartado (`ruido`, `outros`, `cadastro`). No
+    treino nao ensina nada e no teste cobra o acerto de uma linha que nao tem
+    resposta: fica de fora dos dois lados.
+    """
+    return all(label == "O" for label in labels)
+
+
 def carregar_exemplos(caminho: Path = CAMINHO_DATASET) -> Exemplos:
     """Le o dataset etiquetado e monta features/rotulos.
 
@@ -90,16 +111,36 @@ def carregar_exemplos(caminho: Path = CAMINHO_DATASET) -> Exemplos:
     tokens: list[list[str]] = []
     categorias: list[list[str]] = []
     hashes: list[str] = []
+    descartados_sem_alvo = 0
+    descartados_desalinhados = 0
 
     console.print("[dim]Preprocessando dados...[/dim]")
     for exemplo in carregar_anotados(caminho):
-        toks, labels = mergear(exemplo.endereco, segmentos_de(exemplo), tokenize)
+        toks, labels, residuo = alinhamento(
+            exemplo.endereco, segmentos_de(exemplo), tokenize
+        )
+        if alvo_vazio(labels):
+            descartados_sem_alvo += 1
+            continue
+        if residuo:
+            descartados_desalinhados += 1
+            continue
         x.append(extrator.tokens2features(toks))
         y.append(labels)
         tokens.append(toks)
         categorias.append([exemplo.origem, exemplo.uf])
         hashes.append(calcular_hash(exemplo.endereco))
 
+    if descartados_sem_alvo:
+        console.print(
+            f"[dim]Descartados {descartados_sem_alvo} enderecos sem alvo "
+            + "(resposta vazia ou so com trecho descartado)[/dim]"
+        )
+    if descartados_desalinhados:
+        console.print(
+            f"[dim]Descartados {descartados_desalinhados} enderecos com trecho que "
+            + "nao casa com token (palavra colada na base de origem)[/dim]"
+        )
     return Exemplos(x=x, y=y, tokens=tokens, categorias=categorias, hashes=hashes)
 
 
@@ -112,6 +153,25 @@ def _chaves_estratificacao(exemplos: Exemplos, por: str) -> list[str] | None:
     if por == "origem_uf":
         return [f"{categoria[0]}|{categoria[1]}" for categoria in exemplos.categorias]
     return [categoria[0] for categoria in exemplos.categorias]
+
+
+def _indices_folds(
+    exemplos: Exemplos, folds: int, semente: int, estratificar_por: str
+) -> list[tuple[list[int], list[int]]]:
+    """Folds estratificados: cada exemplo fica de fora do modelo que o preve."""
+    if folds < 2:
+        raise typer.BadParameter(f"kfold precisa de pelo menos 2 folds (pedido: {folds})")
+    chaves = _chaves_estratificacao(exemplos, estratificar_por)
+    indices = list(range(len(exemplos.y)))
+    if chaves is None:
+        # `StratifiedKFold` exige as chaves: sem estrato, o sorteio e o simples.
+        simples = KFold(n_splits=folds, shuffle=True, random_state=semente)
+        return [(list(treino), list(teste)) for treino, teste in simples.split(indices)]
+    estratificado = StratifiedKFold(n_splits=folds, shuffle=True, random_state=semente)
+    return [
+        (list(treino), list(teste))
+        for treino, teste in estratificado.split(indices, chaves)
+    ]
 
 
 def _recortar(exemplos: Exemplos, indices: Sequence[int]) -> Exemplos:
@@ -312,21 +372,60 @@ def treinar(
 
     console.print(f"[dim]Treinando (n={len(treino.y)})...[/dim]")
     saida.parent.mkdir(parents=True, exist_ok=True)
-    crf = sklearn_crfsuite.CRF(
+    crf = _novo_crf(c1, c2, max_iteracoes, min_freq, verboso, saida)
+    modelo = crf.fit(treino.x, treino.y)
+    # O treino acabou de ver estes exemplos: o relatorio aqui so mede o teste,
+    # e a comparacao treino x teste fica para o `crf avaliar`.
+    relatorio.avaliar(teste, modelo, nome=saida.name)
+
+
+def _novo_crf(
+    c1: float = C1_TREINO,
+    c2: float = C2_TREINO,
+    max_iteracoes: int = MAX_ITERACOES_TREINO,
+    min_freq: int = MIN_FREQ_TREINO,
+    verboso: bool = VERBOSE_TREINO,
+    modelo: Path | None = None,
+) -> sklearn_crfsuite.CRF:
+    """CRF com os hiperparametros do tagger, com ou sem arquivo de saida."""
+    return sklearn_crfsuite.CRF(
         algorithm="lbfgs",
         c1=c1,
         c2=c2,
         verbose=verboso,
         max_iterations=max_iteracoes,
         all_possible_transitions=False,
-        all_possible_states=True,
+        all_possible_states=False,
         min_freq=min_freq,
-        model_filename=str(saida),
+        model_filename=None if modelo is None else str(modelo),
     )
-    modelo = crf.fit(treino.x, treino.y)
-    # O treino acabou de ver estes exemplos: o relatorio aqui so mede o teste,
-    # e a comparacao treino x teste fica para o `crf avaliar`.
-    relatorio.avaliar(teste, modelo, nome=saida.name)
+
+
+def validacao_cruzada(
+    exemplos: Exemplos,
+    folds: int = FOLDS_VALIDACAO,
+    semente: int = SEMENTE_SPLIT,
+    estratificar_por: str = "origem",
+) -> list[list[str]]:
+    """Rotulos de cada exemplo previstos por um modelo que nao o viu.
+
+    Cada endereco e previsto pelo fold inteiro que o excluiu do treino, entao o
+    recorte de avaliacao deixa de ser uma amostra de 10%: a media passa a usar
+    o dataset inteiro e o erro-padrao desaba junto. O preco e treinar `folds`
+    modelos em vez de carregar um tagger pronto.
+    """
+    previsto: list[list[str]] = [[] for _ in exemplos.y]
+    for numero, (treino, teste) in enumerate(
+        _indices_folds(exemplos, folds, semente, estratificar_por), start=1
+    ):
+        console.print(f"[dim]Fold {numero}/{folds}: treinando com {len(treino)}...[/dim]")
+        crf = _novo_crf(verboso=False)
+        crf.fit([exemplos.x[i] for i in treino], [exemplos.y[i] for i in treino])
+        for i, tags in zip(
+            teste, crf.predict([exemplos.x[i] for i in teste]), strict=True
+        ):
+            previsto[i] = [str(tag) for tag in tags]
+    return previsto
 
 
 def tunar(

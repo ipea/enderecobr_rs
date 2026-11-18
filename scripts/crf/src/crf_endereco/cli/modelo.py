@@ -139,8 +139,27 @@ def avaliar(
             "--estresse", help="mede tambem as perturbacoes fixas (typo, abreviacao)."
         ),
     ] = False,
+    kfold: Annotated[
+        int,
+        typer.Option(
+            "--kfold",
+            min=0,
+            help="Avalia por validacao cruzada com K folds: retreina K modelos e "
+            + "ignora --tagger e o recorte gravado (0 = recorte gravado).",
+        ),
+    ] = 0,
 ) -> None:
-    """Avalia o CRF no recorte gravado pelo treino, nunca no dataset inteiro."""
+    """Avalia o CRF no recorte gravado pelo treino (ou fora do fold, com --kfold)."""
+    if kfold:
+        if estresse:
+            raise typer.BadParameter(
+                "--estresse perturba o teste de um tagger: rode sem --kfold."
+            )
+        exemplos = modelo_crf.carregar_exemplos(dataset)
+        previsto = modelo_crf.validacao_cruzada(exemplos, kfold)
+        relatorio.avaliar_previsto(exemplos, previsto, nome=f"{kfold} folds")
+        return
+
     treino, teste = modelo_crf.recorte_gravado(tagger, dataset)
     crf = modelo_crf.carregar_tagger(tagger)
     relatorio.avaliar(teste, crf, treino, tagger.name)

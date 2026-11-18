@@ -3,6 +3,8 @@
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from crf_endereco.features import is_pontuacao
+
 # Tradução tipo da anotação -> rótulo do treino. Ausente do mapa = treina com o
 # próprio tipo; `None` = não treina (o token vira `O`).
 mapa_tipo_segmento: dict[str, str | None] = {
@@ -59,19 +61,33 @@ def comparar(
     return mudancas, ROTULO_NOVO
 
 
-def mergear(
+def alinhamento(
     endereco: str,
     segmentos: list[dict[str, str]],
     tokenizer: Callable[[str], list[str]],
-) -> tuple[list[str], list[str]]:
-    """Converte os segmentos verbatim em rotulos BIO alinhados aos tokens."""
+) -> tuple[list[str], list[str], list[str]]:
+    """Tokens, rotulos BIO e o que sobrou de segmento sem token correspondente.
+
+    O terceiro item denuncia palavra colada na base de origem (`CARAMURUANTIGA`):
+    o segmento e verbatim como texto, mas nao existe como token, entao o
+    ponteiro trava e o resto do endereco vira `O` em silencio. Quem treina
+    prefere descartar a linha inteira a ensinar que esse resto e fundo.
+
+    A pontuacao que abre um segmento marca o corte e nao pertence ao trecho: sai
+    da linha e cai em `O`, que e o rotulo dela quando esta entre dois trechos. O
+    mesmo nao vale no fim, onde ela pode ser da propria abreviacao (`AP.`) ou do
+    marcador (`C/`).
+    """
     toks_segmentos: list[tuple[str, str]] = []
 
     for segmento in segmentos:
         texto_segmento = segmento.get("valor", "")
         tipo_segmento = segmento.get("tipo", "")
         rotulo = mapa_tipo_segmento.get(tipo_segmento, tipo_segmento)
-        for i, tok in enumerate(tokenizer(texto_segmento)):
+        toks_segmento = tokenizer(texto_segmento)
+        while toks_segmento and is_pontuacao(toks_segmento[0]):
+            toks_segmento.pop(0)
+        for i, tok in enumerate(toks_segmento):
             if rotulo is None:
                 toks_segmentos.append((tok, "O"))
             else:
@@ -95,4 +111,15 @@ def mergear(
             toks_labels.append("O")
 
     assert len(toks_labels) == len(toks_endereco)
+    residuo = [tok for tok, _ in toks_segmentos[pos_segmento:]]
+    return toks_endereco, toks_labels, residuo
+
+
+def mergear(
+    endereco: str,
+    segmentos: list[dict[str, str]],
+    tokenizer: Callable[[str], list[str]],
+) -> tuple[list[str], list[str]]:
+    """Converte os segmentos verbatim em rotulos BIO alinhados aos tokens."""
+    toks_endereco, toks_labels, _ = alinhamento(endereco, segmentos, tokenizer)
     return toks_endereco, toks_labels

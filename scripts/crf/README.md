@@ -37,8 +37,11 @@ crf explorar data/anotado/dataset.sqlite --revisados -l 10 --busca "quadra 4"
 crf treinar
 crf avaliar
 crf avaliar --estresse
+crf avaliar --kfold 3        # validação cruzada: retreina 3 modelos, ignora o tagger
 crf segmentar
 crf explicar "RUA DAS FLORES 123 APTO 45 - CENTRO"
+crf visualizar --alvo 100                     # página HTML com exemplos reais
+crf visualizar --modelo data/modelos/tagger_v15.crf --alvo 100
 crf diferencial
 crf geocode comparar data/brutos/rais_test/ --estado uf --municipio municipio
 crf geocode comparar data/anotado/dataset.sqlite --estado uf --municipio municipio \
@@ -60,9 +63,31 @@ Modelo sem recorte gravado (treinado antes desta coluna existir) faz a avaliaç�
 parar com um erro pedindo retreino. Treinar de novo com o mesmo nome sobrescreve
 o recorte daquele modelo.
 
+Endpoint com alvo degenerado (resposta sem segmento, ou só com trecho que não
+vira rótulo: `ruido`, `outros`, `cadastro`) fica fora do treino **e** do teste:
+o alvo é todo `O`, então a linha não ensina nada e cobra um acerto que não tem
+gabarito. `carregar_exemplos` descarta e imprime quantas linhas caíram.
+
 O relatório sempre compara treino e teste. Quando o teste acerta tanto quanto o
 treino (queda menor que `QUEDA_MINIMA_TOKEN`), o comando avisa que o tagger
 provavelmente treinou com os endereços avaliados.
+
+## Quando 10% de teste não mede nada
+
+Com ~9,4 mil endereços etiquetados, o recorte de teste tem ~930 linhas, e o
+erro-padrão do **endereço perfeito** ali é de ±1,5 pp: uma melhoria de 1 pp é
+indistinguível de sorteio. `crf avaliar --kfold K` responde a isso do jeito
+caro: treina K modelos e prevê cada endereço pelo fold que o excluiu (previsão
+fora do fold, `modelo/crf.py::validacao_cruzada`). O relatório é o mesmo, sem a
+coluna de treino — ali não existe um modelo único para comparar.
+
+```bash
+crf avaliar --kfold 3      # ~3 min por fold; erro-padrão do endereço perfeito ~0,5 pp
+```
+
+Ele ignora `--tagger` e o recorte gravado (o dataset inteiro entra na conta) e
+usa os mesmos hiperparâmetros de `treinar`. Custa K treinos: use para decidir se
+uma mudança de feature, de rótulo ou de dados vale, não no ciclo do dia a dia.
 
 ## O que o relatório mostra
 
@@ -166,6 +191,32 @@ lote 3/174 · o que a reetiquetação mudou
   novo (o erro entra na contagem do resumo).
 - Compõe com os demais filtros: `--uf`, `--origem`, `--busca`, `-l`, `-b` e até
   `--incertos`/`--apenas-tipos` (que passam a recortar os divergentes).
+
+## Como apresentar o segmentador
+
+`crf visualizar` (`make exemplos`) gera uma página standalone
+(`data/visualizacoes/exemplos.html`, abre no navegador) com endereços reais: a
+faixa de tokens com o tipo previsto, a probabilidade e os pesos que a sustentam,
+os segmentos remontados lado a lado com a anotação e os campos que saem para o
+geocodebr. Cada exemplo vem com município/UF e origem no cabeçalho.
+
+Sem `--modelo`, os exemplos vêm do fold 0 da validação cruzada, então o modelo
+que os previu nunca os viu; o modelo do fold é cacheado em
+`data/modelos/tagger_oof_fold0.crf` e refeito sozinho quando o dataset muda — o
+dataset cresce entre execuções, e `--retreinar` ignora o cache. Com
+`--modelo data/modelos/tagger_v15.crf`, a página usa esse tagger sobre o recorte
+de teste que o `treinar` gravou no banco, e a saída vira
+`data/visualizacoes/exemplos_tagger_v15.html` (um arquivo por modelo).
+
+A escolha é por diversidade de estrutura (rural, parcelamento, referência, ruído,
+erro), não por acerto, e a página mostra a taxa real do recorte no topo.
+`--alvo N` muda o tamanho da amostra: as cotas de cada seção crescem junto e o
+que as categorias estruturais não cobrem é completado em "Outros exemplos",
+sempre puxando a origem menos representada.
+
+O template é `src/crf_endereco/visualizacao/exemplo.html` (CSS e JS, sem CDN): o
+comando só injeta o JSON dos exemplos, então dá para mexer no visual sem tocar no
+Python.
 
 ## Como explorar o dataset
 
