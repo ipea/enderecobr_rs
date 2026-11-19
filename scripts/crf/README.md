@@ -89,6 +89,28 @@ Ele ignora `--tagger` e o recorte gravado (o dataset inteiro entra na conta) e
 usa os mesmos hiperparâmetros de `treinar`. Custa K treinos: use para decidir se
 uma mudança de feature, de rótulo ou de dados vale, não no ciclo do dia a dia.
 
+## O que o aumento de dataset ensina
+
+`crf treinar --com-aumento` e `crf avaliar --kfold K --com-aumento` acrescentam
+ao **treino** até três variantes de cada exemplo, todas com o alvo original, para
+o modelo não aprender o que não é pista:
+
+- **sem a pontuação dispensável**: o mesmo endereço chega com e sem ela no uso
+  real (`S/N`, `AP.`), então treinar com as duas formas tira a pontuação de
+  fronteira de trecho;
+- **sem o código `O` que abre o texto**: no DF a base grava `Q SQN 404 BLOCO G
+  101`; no mundo real o texto começa no `SQN`. O token inicial em `O` aparece em
+  476 endereços (4,3%), 109 deles o `Q` — e o `tagger_v15` acerta 70,4% de
+  endereço exato nesse subconjunto com o token contra 78,4% sem ele: a cabeça
+  atrapalha;
+- **com os dígitos trocados**: o valor do número não define o tipo do trecho
+  (`302` de parcela, `101` de número, `69049-992` de CEP). A troca mantém
+  tamanho, hífen e letra colada, então a forma — o sinal legítimo — sobrevive e
+  o valor exato deixa de ser memorizável.
+
+A variante herda o hash do original: ela nunca cai no teste do recorte gravado
+nem no fold que prevê aquele endereço, porque só o treino aumenta.
+
 ## O que o relatório mostra
 
 `crf avaliar` e `crf treinar` imprimem o mesmo relatório (`modelo/relatorio.py`),
@@ -100,7 +122,12 @@ em blocos:
    token trocado já estraga o endereço inteiro. Token certo por endereço é a
    média, por endereço, da fração de tokens certos: um endereço de 30 tokens
    não pesa 15× mais que um de 2 (o agregado de token pesa), mas um endereço
-   quase certo ainda soma.
+   quase certo ainda soma. **Endereço perfeito por trecho** é a mesma régua
+   ignorando ruído de fronteira: abrir trecho novo do mesmo tipo no meio
+   (`B_X I_X B_X`) ou largar a pontuação de corte em `O` não muda o campo, então
+   não deveria custar o endereço inteiro. Palavra que cai em `O` continua sendo
+   erro (o texto encurta), e a linha abaixo do bloco diz quantos dos endereços
+   que falham erram *só* a fronteira.
 2. **Por rótulo** — precisão, revocação, F1 e erros por etiqueta, ordenado pelo
    que mais erra.
 3. **Por categoria** — o mesmo resumo por origem e por UF, ordenado pelo
