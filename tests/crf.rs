@@ -321,6 +321,7 @@ fn rotulagem_de_casos_conhecidos_nao_muda() {
                 ("rodovia br 116", TipoSegmento::Logradouro),
                 ("km 12", TipoSegmento::QuilometragemVia),
                 ("sitio sao jose", TipoSegmento::NucleoRural),
+                ("01000-000", TipoSegmento::Cep),
             ],
         ),
         (
