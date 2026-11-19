@@ -1,4 +1,10 @@
-from crf_endereco.visualizacao import CATEGORIAS, SECAO_ERROS, SECAO_SOBRA, escolher
+from crf_endereco.visualizacao import (
+    CATEGORIAS,
+    SECAO_ERROS,
+    SECAO_SOBRA,
+    escolher,
+    probabilidades_por_trecho,
+)
 
 ORIGENS = ("siase", "cafir", "cadunico", "cneas", "aneel_uc_pj")
 TIPOS = ("logradouro", "parcela", "complemento", "nucleo_rural", "localidade")
@@ -59,3 +65,21 @@ def test_escolher_erros_nao_repetem_a_mesma_assinatura():
 
     erros = [e for e in escolhidos if e["categoria"] == SECAO_ERROS]
     assert len(erros) == 1
+
+
+def test_probabilidades_por_trecho_produto_das_marginais_do_trecho():
+    tags = ["B_LOGRADOURO", "I_LOGRADOURO", "B_NUMERO"]
+
+    # o trecho de logradouro e o produto dos dois tokens, nao a media
+    assert probabilidades_por_trecho(tags, [0.9, 0.5, 0.8]) == [0.9 * 0.5, 0.8]
+
+
+def test_probabilidades_por_trecho_ignora_i_sem_abertura_do_mesmo_tipo():
+    # mesma regra de `montar_segmentos`: o token nao entra no segmento nem na conta
+    tags = ["B_LOGRADOURO", "I_NUMERO", "B_NUMERO"]
+
+    assert probabilidades_por_trecho(tags, [0.9, 0.1, 0.8]) == [0.9, 0.8]
+
+
+def test_probabilidades_por_trecho_sem_segmento_fica_vazio():
+    assert probabilidades_por_trecho(["O", "O"], [0.7, 0.9]) == []

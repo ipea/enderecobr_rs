@@ -275,7 +275,7 @@
   .segs { display: flex; flex-direction: column; gap: 0.16rem; }
   .seg {
     display: grid;
-    grid-template-columns: 9.5rem 1fr;
+    grid-template-columns: 9.5rem 1fr auto;
     gap: 0.7rem;
     align-items: baseline;
     padding: 0.3rem 0.55rem;
@@ -283,12 +283,58 @@
     background: var(--panel);
     border-left: 2px solid var(--c);
   }
+  .seg .p {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--fraco);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
   .seg .tipo { font-family: var(--mono); font-size: 0.7rem; color: var(--c); letter-spacing: 0.02em; }
   .seg .valor { font-family: var(--mono); font-size: 0.95rem; word-break: break-word; }
   .seg.igual { background: transparent; border-left-color: transparent; }
   .seg.igual .tipo { color: var(--fraco); }
   .seg.igual .valor { color: var(--texto-2); }
   .seg.difere { background: color-mix(in srgb, var(--erro) 9%, var(--panel)); }
+
+  /* probabilidades e comentario */
+  .probs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.8rem;
+    margin: 0.35rem 0 0.2rem;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+  }
+  .probs em {
+    font-style: normal;
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--fraco);
+    margin-right: 0.4rem;
+  }
+  .probs b { font-weight: 500; font-variant-numeric: tabular-nums; }
+  .comentario {
+    margin: 0.9rem 0 0;
+    padding: 0.55rem 0.85rem;
+    border-left: 2px solid #64748b;
+    background: var(--panel);
+    border-radius: 0 3px 3px 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--texto-2);
+  }
+  .comentario b {
+    display: block;
+    font-size: 0.66rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--fraco);
+    margin-bottom: 0.3rem;
+  }
+  .comentario span { font-style: italic; }
 
   /* campos */
   table.campos { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
@@ -481,8 +527,34 @@ function segs(ex, quais) {
     const d = el("div", "seg " + (igual ? "igual" : "difere"));
     d.style.setProperty("--c", cor(s.tipo));
     d.append(el("span", "tipo", s.tipo), el("span", "valor", s.valor));
+    if (s.p !== undefined) {
+      const p = el("span", "p", numero(s.p));
+      p.title = "produto das marginais dos tokens deste trecho";
+      d.append(p);
+    }
     caixa.append(d);
   }
+  return caixa;
+}
+
+function numero(valor) {
+  return valor >= 0.001 ? valor.toFixed(3) : valor.toExponential(1);
+}
+
+function probabilidades(ex) {
+  const caixa = el("div", "probs");
+  const item = (rotulo, valor, dica) => {
+    const d = el("div");
+    d.title = dica;
+    d.append(el("em", null, rotulo), el("b", null, numero(valor)));
+    return d;
+  };
+  caixa.append(
+    item("sequência", ex.probabilidade,
+      "produto das marginais dos tokens previstos: cai com o tamanho do endereço"),
+    item("média geométrica", ex.confianca,
+      "produto^1/n: a confiança do modelo no endereço, sem o efeito do tamanho"),
+  );
   return caixa;
 }
 
@@ -515,6 +587,11 @@ function mostrar(indice, token) {
   );
   palco.append(rotulo);
   palco.append(el("p", "endereco", ex.endereco));
+  if (ex.comentario) {
+    const nota = el("div", "comentario");
+    nota.append(el("b", null, "comentário da LLM"), el("span", null, ex.comentario));
+    palco.append(nota);
+  }
 
   palco.append(titulo("Token a token",
     "cor = tipo previsto · traço inferior = tipo anotado · número = probabilidade"));
@@ -531,6 +608,7 @@ function mostrar(indice, token) {
   k3.append(el("b", null, "S/N"), el("span", null, " volta verbatim, não vira S / N"));
   chave.append(k1, k2, k3);
   palco.append(chave);
+  palco.append(probabilidades(ex));
 
   const det = detalhe(ex, tokenAtual);
   if (det) palco.append(det);

@@ -227,6 +227,13 @@ faixa de tokens com o tipo previsto, a probabilidade e os pesos que a sustentam,
 os segmentos remontados lado a lado com a anotação e os campos que saem para o
 geocodebr. Cada exemplo vem com município/UF e origem no cabeçalho.
 
+A probabilidade aparece em três escalas: por token, por trecho (produto das
+marginais dos tokens dele, ao lado do segmento previsto) e a da sequência
+inteira, acompanhada da média geométrica — a mesma `confianca` do Rust, que não
+cai com o tamanho do endereço. Quando a LLM deixou um `comentario` na anotação,
+ele aparece sob o endereço; é onde ficam as dúvidas de rotulagem e as linhas
+`LEXICO:` que justificam uma abreviação.
+
 Sem `--modelo`, os exemplos vêm do fold 0 da validação cruzada, então o modelo
 que os previu nunca os viu; o modelo do fold é cacheado em
 `data/modelos/tagger_oof_fold0.crf` e refeito sozinho quando o dataset muda — o

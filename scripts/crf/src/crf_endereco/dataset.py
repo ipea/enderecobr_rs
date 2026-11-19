@@ -405,3 +405,9 @@ def segmentos_de(exemplo: Exemplo) -> list[dict[str, str]]:
             f"Resposta inválida no endereço {exemplo.endereco!r}: {erro}"
         ) from erro
     return list(resposta.get("segmentos", []))
+
+
+def ler_comentario(exemplo: Exemplo) -> str | None:
+    """Comentario que a LLM gravou junto da resposta (`None` quando nao houve)."""
+    comentario = _decodificar(exemplo.resposta, "resposta").get("comentario")
+    return comentario if isinstance(comentario, str) else None

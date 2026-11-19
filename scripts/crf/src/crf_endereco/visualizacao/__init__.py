@@ -10,6 +10,7 @@ referencia, erro...), nao por acerto: a pagina mostra o resultado como ele e.
 from __future__ import annotations
 
 import json
+import math
 import webbrowser
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -20,10 +21,12 @@ from typing import Any, cast
 import sklearn_crfsuite
 import typer
 
+from crf_endereco.anotacao.filtro_crf import confianca_media
 from crf_endereco.config import CAMINHO_DATASET, DIR_DADOS
 from crf_endereco.dataset import (
     abrir_banco,
     carregar_anotados,
+    ler_comentario,
     ler_recorte,
     segmentos_de,
 )
@@ -280,6 +283,7 @@ def carregar_linhas(dataset: Path = CAMINHO_DATASET) -> list[dict[str, Any]]:
                 "municipio": exemplo.municipio,
                 "tokens": tokens,
                 "labels": labels,
+                "comentario": ler_comentario(exemplo),
             }
         )
     return linhas
@@ -355,6 +359,28 @@ def modelo_fold0(
     return crf
 
 
+def probabilidades_por_trecho(
+    tags: Sequence[str], probabilidades: Sequence[float]
+) -> list[float]:
+    """Produto das marginais dos tokens de cada trecho, na ordem de `montar_segmentos`.
+
+    Segue a mesma regra do BIO que a montagem: um `I` sem trecho aberto do mesmo
+    tipo fica fora da conta, do mesmo jeito que o token fica fora do segmento.
+    Um trecho de 12 tokens em 0,95 cada da 0,54; a sequencia inteira, o produto de
+    todos eles, e por isso que a media geometrica acompanha o numero.
+    """
+    trechos: list[float] = []
+    tipos: list[str] = []
+    for tag, probabilidade in zip(tags, probabilidades, strict=True):
+        bio, _, tipo = tag.partition("_")
+        if bio == "B":
+            tipos.append(tipo)
+            trechos.append(probabilidade)
+        elif bio == "I" and tipos and tipos[-1] == tipo:
+            trechos[-1] *= probabilidade
+    return trechos
+
+
 def descrever(
     indice: int,
     linha: dict[str, Any],
@@ -373,6 +399,16 @@ def descrever(
     ]
     segmentos = montar_segmentos(linha["endereco"], offsets, tags)
     campos = padronizar(estruturar_segmentos(segmentos))
+    probabilidades = [
+        float(marginal.get(tag, 0.0))
+        for tag, marginal in zip(tags, marginais, strict=True)
+    ]
+    previsto = [
+        {**segmento, "p": round(probabilidade, 6)}
+        for segmento, probabilidade in zip(
+            segmentos, probabilidades_por_trecho(tags, probabilidades), strict=True
+        )
+    ]
 
     detalhes = []
     for i, tok in enumerate(tokens):
@@ -403,11 +439,12 @@ def descrever(
     return {
         "i": int(indice),
         "endereco": linha["endereco"],
+        "comentario": linha["comentario"],
         "origem": linha["origem"] or "?",
         "uf": linha["uf"],
         "municipio": linha["municipio"],
         "tokens": detalhes,
-        "previsto": segmentos,
+        "previsto": previsto,
         "gold": montar_segmentos(linha["endereco"], offsets, linha["labels"]),
         "campos": [
             [campo, valor or "", campos[campo] or ""]
@@ -416,6 +453,8 @@ def descrever(
         ],
         "final": formatar(campos),
         "erros": erros,
+        "probabilidade": round(math.prod(probabilidades), 6),
+        "confianca": round(confianca_media(tags, marginais), 4),
         "ok": not erros,
         "diferencas": len(erros),
         "tipos": sorted({tag.split("_", 1)[1].lower() for tag in linha["labels"] if tag != "O"}),
