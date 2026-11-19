@@ -110,7 +110,7 @@ def tunar(
         bool,
         typer.Option(
             "--com-aumento",
-            help="Tuna tambem com as variantes sem pontuacao (vazam entre os folds).",
+            help="Aumenta o treino da busca (a validacao fica com os originais).",
         ),
     ] = False,
     estratificar_por: OpcaoEstratificar = "origem",
@@ -148,6 +148,22 @@ def avaliar(
             + "ignora --tagger e o recorte gravado (0 = recorte gravado).",
         ),
     ] = 0,
+    com_aumento: Annotated[
+        bool,
+        typer.Option(
+            "--com-aumento",
+            help="Com --kfold, aumenta so o treino de cada fold (variantes do mesmo "
+            "exemplo no teste vazariam a resposta).",
+        ),
+    ] = False,
+    c1: Annotated[
+        float,
+        typer.Option("--c1", help="Regularizacao L1 do fold (so com --kfold)."),
+    ] = modelo_crf.C1_TREINO,
+    c2: Annotated[
+        float,
+        typer.Option("--c2", help="Regularizacao L2 do fold (so com --kfold)."),
+    ] = modelo_crf.C2_TREINO,
 ) -> None:
     """Avalia o CRF no recorte gravado pelo treino (ou fora do fold, com --kfold)."""
     if kfold:
@@ -156,11 +172,17 @@ def avaliar(
                 "--estresse perturba o teste de um tagger: rode sem --kfold."
             )
         exemplos = modelo_crf.carregar_exemplos(dataset)
-        previsto = modelo_crf.validacao_cruzada(exemplos, kfold)
+        previsto = modelo_crf.validacao_cruzada(
+            exemplos, kfold, com_aumento=com_aumento, c1=c1, c2=c2
+        )
         relatorio.avaliar_previsto(exemplos, previsto, nome=f"{kfold} folds")
         return
 
     treino, teste = modelo_crf.recorte_gravado(tagger, dataset)
+    if com_aumento:
+        raise typer.BadParameter(
+            "--com-aumento so vale com --kfold: o recorte gravado usa o tagger pronto."
+        )
     crf = modelo_crf.carregar_tagger(tagger)
     relatorio.avaliar(teste, crf, treino, tagger.name)
     if estresse:

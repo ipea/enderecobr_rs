@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -16,7 +17,6 @@ from sklearn.model_selection import (
     StratifiedKFold,
     train_test_split,
 )
-from sklearn_crfsuite.metrics import flat_accuracy_score
 
 from crf_endereco.config import CAMINHO_DATASET, CAMINHO_TAGGER
 from crf_endereco.dataset import (
@@ -66,6 +66,9 @@ VERBOSE_TREINO = True
 # Semente do split treino/teste: o `tunar` usa a mesma para que o score da busca
 # seja comparavel ao do modelo final.
 SEMENTE_SPLIT = 42
+# Semente das variantes de `aumentar`: o mesmo dataset gera o mesmo treino.
+SEMENTE_AUMENTO = 7
+DIGITOS = "0123456789"
 
 # Folds do `avaliar --kfold`. Com ~9 mil exemplos, tres folds ja poem o
 # erro-padrao do endereco perfeito perto de meio ponto percentual (com os 10% de
@@ -255,13 +258,68 @@ def _sem_pontuacao(
     return None if toks_sem == list(toks) else (toks_sem, labels_sem)
 
 
-def aumentar(exemplos: Exemplos) -> Exemplos:
-    """Acrescenta a cada exemplo a versão sem pontuação dispensável.
+def _sem_cabeca(
+    toks: Sequence[str], labels: Sequence[str]
+) -> tuple[list[str], list[str]] | None:
+    """Exemplo sem o trecho `O` que abre o texto (`Q SQN 404 BLOCO G 101`).
 
-    O mesmo endereço chega com e sem pontuação no uso real; treinar com as duas
-    formas evita que o modelo use a pontuação como fronteira de trecho.
+    O `Q` nao e do endereco: e codigo da base de origem, e no uso real o texto
+    comeca no `SQN`. O rotulo do trecho e `O` justamente por nao pertencer a
+    segmento nenhum, entao tira-lo nao mexe no alvo (o resto e que define a
+    segmentacao); o original continua no treino, porque o `Q` quando aparece
+    tem que sair como `O` tambem.
+    """
+    inicio = 0
+    while inicio < len(toks) and labels[inicio] == "O":
+        inicio += 1
+    if inicio == 0 or inicio == len(toks):
+        return None
+    return list(toks[inicio:]), list(labels[inicio:])
+
+
+def _numeros_trocados(
+    toks: Sequence[str], labels: Sequence[str], rng: random.Random
+) -> tuple[list[str], list[str]] | None:
+    """Exemplo com cada digito trocado por outro, mantendo tamano e separadores.
+
+    O valor de um numero nao define o tipo do trecho: sem variar, o modelo pode
+    usar o `404` de `SQN 404` como pista e memorizar o numero (`BLOCO G` com
+    `101` de numero, `302` de parcela). Trocados os digitos, sobra a forma
+    (grupos, hifen, letra colada), que e o sinal legitimo.
+    """
+    trocados = [
+        "".join(rng.choice(DIGITOS) if c.isdigit() else c for c in tok) for tok in toks
+    ]
+    if trocados == list(toks):
+        return None
+    return trocados, list(labels)
+
+
+def _variantes(
+    toks: Sequence[str], labels: Sequence[str], rng: random.Random
+) -> list[tuple[list[str], list[str]]]:
+    """Formas alternativas do mesmo exemplo, todas com o alvo original."""
+    variantes = []
+    for variante in (
+        _sem_pontuacao(toks, labels),
+        _sem_cabeca(toks, labels),
+        _numeros_trocados(toks, labels, rng),
+    ):
+        if variante is not None:
+            variantes.append(variante)
+    return variantes
+
+
+def aumentar(exemplos: Exemplos) -> Exemplos:
+    """Acrescenta as variantes de cada exemplo (sem pontuacao, sem cabeca, numeros).
+
+    O objetivo e o que *nao* e pista: a pontuacao vai e volta no uso real, o
+    codigo `O` que abre o texto da base nao aparece, e o valor do numero nao
+    muda o tipo do trecho. A variante herda o hash do original, entao ela nunca
+    vira um exemplo do teste — so o treino aumenta.
     """
     extrator = ExtratorFeature()
+    rng = random.Random(SEMENTE_AUMENTO)
     x = list(exemplos.x)
     y = list(exemplos.y)
     tokens = list(exemplos.tokens)
@@ -271,15 +329,12 @@ def aumentar(exemplos: Exemplos) -> Exemplos:
     for toks, labels, categoria, hash_ in zip(
         exemplos.tokens, exemplos.y, exemplos.categorias, exemplos.hashes, strict=True
     ):
-        sem_pontuacao = _sem_pontuacao(toks, labels)
-        if sem_pontuacao is None:
-            continue
-        toks_sem, labels_sem = sem_pontuacao
-        x.append(extrator.tokens2features(toks_sem))
-        y.append(labels_sem)
-        tokens.append(toks_sem)
-        categorias.append(categoria)
-        hashes.append(hash_)
+        for toks_novos, labels_novos in _variantes(toks, labels, rng):
+            x.append(extrator.tokens2features(toks_novos))
+            y.append(labels_novos)
+            tokens.append(toks_novos)
+            categorias.append(categoria)
+            hashes.append(hash_)
 
     return Exemplos(x=x, y=y, tokens=tokens, categorias=categorias, hashes=hashes)
 
@@ -360,8 +415,8 @@ def treinar(
         original = len(treino.y)
         treino = aumentar(treino)
         console.print(
-            f"[dim]Aumento: {len(treino.y) - original} exemplos com pontuacao "
-            + "removida[/dim]"
+            f"[dim]Aumento: {len(treino.y) - original} variantes "
+            + "(sem pontuacao, sem cabeca, numeros trocados)[/dim]"
         )
     composicao = Counter(categoria[0] for categoria in teste.categorias)
     console.print(
@@ -406,6 +461,9 @@ def validacao_cruzada(
     folds: int = FOLDS_VALIDACAO,
     semente: int = SEMENTE_SPLIT,
     estratificar_por: str = "origem",
+    com_aumento: bool = False,
+    c1: float = C1_TREINO,
+    c2: float = C2_TREINO,
 ) -> list[list[str]]:
     """Rotulos de cada exemplo previstos por um modelo que nao o viu.
 
@@ -413,19 +471,40 @@ def validacao_cruzada(
     recorte de avaliacao deixa de ser uma amostra de 10%: a media passa a usar
     o dataset inteiro e o erro-padrao desaba junto. O preco e treinar `folds`
     modelos em vez de carregar um tagger pronto.
+
+    `com_aumento` aumenta so o treino de cada fold: as variantes de um exemplo
+    do teste caíriam dentro do treino e o modelo veria a resposta dele.
     """
     previsto: list[list[str]] = [[] for _ in exemplos.y]
     for numero, (treino, teste) in enumerate(
         _indices_folds(exemplos, folds, semente, estratificar_por), start=1
     ):
         console.print(f"[dim]Fold {numero}/{folds}: treinando com {len(treino)}...[/dim]")
-        crf = _novo_crf(verboso=False)
-        crf.fit([exemplos.x[i] for i in treino], [exemplos.y[i] for i in treino])
+        conjunto = _recortar(exemplos, treino)
+        if com_aumento:
+            conjunto = aumentar(conjunto)
+            console.print(f"[dim]  aumento: {len(conjunto.y)} exemplos[/dim]")
+        crf = _novo_crf(c1=c1, c2=c2, verboso=False)
+        crf.fit(conjunto.x, conjunto.y)
         for i, tags in zip(
             teste, crf.predict([exemplos.x[i] for i in teste]), strict=True
         ):
             previsto[i] = [str(tag) for tag in tags]
     return previsto
+
+
+def enderecos_exatos(y_verdadeiro: list[list[str]], y_previsto: list[list[str]]) -> float:
+    """Fracao de enderecos com todos os rotulos certos: a metrica do uso real.
+
+    A busca de hiperparametros usava acerto de token (`flat_accuracy_score`),
+    que premia acertar tokens faceis e nao ve o endereco que sai errado por um
+    unico token — o alvo do ajuste e o endereco inteiro.
+    """
+    return sum(
+        1
+        for real, previsto in zip(y_verdadeiro, y_previsto, strict=True)
+        if list(real) == list(previsto)
+    ) / len(y_verdadeiro)
 
 
 def tunar(
@@ -444,17 +523,28 @@ def tunar(
 
     A validacao usa o mesmo split de `treinar`/`avaliar` (fracao, semente e
     estratificacao), entao o score da busca e comparavel ao do modelo final.
-    `com_aumento` desligado por padrao: as variantes de um exemplo cairiam dos
+    ``com_aumento`` desligado por padrao: as variantes de um exemplo cairiam dos
     dois lados dos folds da validacao cruzada.
     """
     exemplos = carregar_exemplos()
     treino_idx, validacao_idx = _indices_split(
         exemplos, fracao_validacao, semente, estratificar_por
     )
+    treino = _recortar(exemplos, treino_idx)
+    validacao = _recortar(exemplos, validacao_idx)
     if com_aumento:
-        original = len(exemplos.y)
-        exemplos = aumentar(exemplos)
-        print(f"Aumento: {len(exemplos.y) - original} exemplos com pontuacao removida")
+        original = len(treino.y)
+        treino = aumentar(treino)
+        console.print(
+            f"[dim]Aumento: {len(treino.y) - original} variantes "
+            + "(sem pontuacao, sem cabeca, numeros trocados)[/dim]"
+        )
+    # A validacao sao os exemplos originais: variante de um deles no treino
+    # vazaria a resposta para a busca.
+    x = treino.x + validacao.x
+    y = treino.y + validacao.y
+    corte = len(treino.y)
+    folds = [(list(range(corte)), list(range(corte, len(y))))]
     crf = sklearn_crfsuite.CRF(
         algorithm="lbfgs",
         max_iterations=max_iteracoes,
@@ -466,18 +556,35 @@ def tunar(
     busca = GridSearchCV(
         crf,
         param_grid={"c1": list(c1), "c2": list(c2)},
-        cv=[(treino_idx, validacao_idx)],
+        cv=folds,
         verbose=verboso,
         n_jobs=n_jobs,
-        scoring=make_scorer(flat_accuracy_score),
+        scoring=make_scorer(enderecos_exatos),
         refit=True,
     )
-    _ = busca.fit(exemplos.x, exemplos.y)
+    _ = busca.fit(x, y)
 
-    tamanho = busca.best_estimator_.size_ / 1_000_000
+    tamanho = (busca.best_estimator_.size_ or 0) / 1_000_000
     console.print(f"melhores parametros: {busca.best_params_}")
-    console.print(f"[dim]score da busca: {busca.best_score_}[/dim]")
+    console.print(f"[dim]endereco perfeito na validacao: {busca.best_score_:.4f}[/dim]")
     console.print(f"[dim]tamanho do modelo: {tamanho:0.2f}M[/dim]")
+    # O ranking inteiro: a validacao tem ~1.100 enderecos, entao o topo da lista
+    # pode ser sorteio — ver o vizinho de parametro que pontua igual e o que
+    # permite escolher por tamanho sem perder qualidade.
+    resultados = busca.cv_results_
+    ranking: list[tuple[float, dict[str, float]]] = sorted(
+        zip(
+            (float(nota) for nota in resultados["mean_test_score"]),
+            resultados["params"],
+            strict=True,
+        ),
+        key=lambda par: par[0],
+        reverse=True,
+    )
+    ordenados = ranking
+    console.print("[dim]ranking (c1, c2, endereco perfeito):[/dim]")
+    for score, params in ordenados:
+        console.print(f"[dim]  {params['c1']:>5} {params['c2']:>5} {score:.4f}[/dim]")
 
 
 def carregar_tagger(caminho: Path = CAMINHO_TAGGER) -> sklearn_crfsuite.CRF:

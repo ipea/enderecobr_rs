@@ -1,9 +1,13 @@
+import random
+
 import pytest
 import typer
 
 from crf_endereco.features import tokenize
 from crf_endereco.modelo.crf import (
     Exemplos,
+    _numeros_trocados,
+    _sem_cabeca,
     _sem_pontuacao,
     alvo_vazio,
     validacao_cruzada,
@@ -143,6 +147,51 @@ def test_sem_pontuacao_nao_gera_variante_sem_pontuacao_dispensavel():
     labels = ["B_LOGRADOURO", "I_LOGRADOURO"]
 
     assert _sem_pontuacao(toks, labels) is None
+
+
+def test_sem_cabeca_tira_o_codigo_o_que_abre_o_endereco():
+    # `Q SQN 404 BLOCO G 101`: o Q e codigo da base, nao parte do endereco.
+    toks = ["Q", "SQN", "404", "BLOCO", "G", "101"]
+    labels = ["O", "B_LOGRADOURO", "I_LOGRADOURO", "I_LOGRADOURO", "I_LOGRADOURO", "B_NUMERO"]
+
+    assert _sem_cabeca(toks, labels) == (toks[1:], labels[1:])
+
+
+def test_sem_cabeca_nao_gera_variante_sem_codigo_inicial():
+    toks = ["RUA", "A", "10"]
+    labels = ["B_LOGRADOURO", "I_LOGRADOURO", "B_NUMERO"]
+
+    assert _sem_cabeca(toks, labels) is None
+    # endereco inteiro em `O` nao tem cabeca a tirar, so alvo vazio
+    assert _sem_cabeca(["X"], ["O"]) is None
+
+
+def test_numeros_trocados_mantem_tamanho_e_separadores():
+    toks = ["AV", "BRASIL", "69049-992", "KM", "2,5"]
+    labels = [
+        "B_LOGRADOURO",
+        "I_LOGRADOURO",
+        "B_CEP",
+        "B_QUILOMETRAGEM_VIA",
+        "I_QUILOMETRAGEM_VIA",
+    ]
+
+    trocados, labels_novos = _numeros_trocados(toks, labels, random.Random(1)) or ([], [])
+
+    assert labels_novos == labels
+    # so os digitos mudam: forma de cada token (tamanho, hifen, virgula) fica
+    for novo, original in zip(trocados, toks, strict=True):
+        assert len(novo) == len(original)
+        assert [c.isdigit() for c in novo] == [c.isdigit() for c in original]
+    assert trocados[:2] == ["AV", "BRASIL"]
+
+
+def test_numeros_trocados_sem_digito_nao_gera_variante():
+    sem_numero = _numeros_trocados(
+        ["RUA", "A"], ["B_LOGRADOURO", "I_LOGRADOURO"], random.Random(1)
+    )
+
+    assert sem_numero is None
 
 
 def test_alvo_vazio_pega_endereco_sem_rotulo_aprendivel():
