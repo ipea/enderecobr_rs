@@ -17,6 +17,7 @@ import sklearn_crfsuite
 from rich.table import Table
 from rich.text import Text
 
+from crf_endereco.features import is_pontuacao
 from crf_endereco.ui import console, estilo_rotulo
 
 if TYPE_CHECKING:
@@ -45,35 +46,80 @@ class Desempenho:
     perfeitos: int
     enderecos: int
     proporcional: float
+    estrutura: int
 
     @property
     def fracao_perfeita(self) -> float:
         return self.perfeitos / self.enderecos if self.enderecos else 0.0
 
+    @property
+    def fracao_estrutura(self) -> float:
+        return self.estrutura / self.enderecos if self.enderecos else 0.0
 
-def medir(y: Rotulos, previsto: Rotulos) -> Desempenho:
+    @property
+    def so_fronteira(self) -> int:
+        """Enderecos que erram so a fronteira: os trechos e o texto batem."""
+        return self.estrutura - self.perfeitos
+
+
+def mesma_estrutura(
+    tokens: Sequence[str], y: Sequence[str], previsto: Sequence[str]
+) -> bool:
+    """Se os dois lados marcam os mesmos trechos, ignorando ruido de fronteira.
+
+    Fronteira e o que nao muda o que o endereco quer dizer: abrir trecho novo do
+    mesmo tipo no meio (`B_X I_X B_X`) e a pontuacao de corte que qualquer lado
+    jogue em `O` (`B_X , I_X`) — em ambos os casos o trecho e o mesmo. Palavra
+    em `O` **nao** e fronteira: ela sai do campo e encurta o texto, entao segue
+    contando como erro.
+    """
+    # O mesmo token so entra na conta se ele nao for pontuacao largada em `O`
+    # por nenhum dos lados: a mascara tem que ser igual para os dois.
+    conta = [
+        i
+        for i, (token, real, visto) in enumerate(zip(tokens, y, previsto, strict=True))
+        if not (is_pontuacao(token) and "O" in (real, visto))
+    ]
+    return _tipos(y, conta) == _tipos(previsto, conta)
+
+
+def _tipos(rotulos: Sequence[str], conta: Sequence[int]) -> list[str | None]:
+    """Tipo de cada token da conta, sem B/I (`None` para `O`)."""
+    return [
+        None if rotulos[i] == "O" else rotulos[i].partition("_")[2] for i in conta
+    ]
+
+
+def medir(y: Rotulos, previsto: Rotulos, tokens: Rotulos) -> Desempenho:
     """Acerto de token, de endereco inteiro e a media por endereco.
 
     `perfeitos` conta o endereco em que **todos** os rotulos sairam certos: e a
     metrica que o uso real cobra, porque um endereco com um token trocado sai
-    errado do segmentador tanto quanto um errado por inteiro.
+    errado do segmentador tanto quanto um errado por inteiro. `estrutura` conta
+    o endereco cujos trechos batem quando a fronteira e ignorada — a diferenca
+    entre os dois e o ruido de fronteira, que nao muda o campo de destino.
     """
     if not y:
-        return Desempenho(0.0, 0, 0, 0.0)
+        return Desempenho(0.0, 0, 0, 0.0, 0)
 
     acertos = [
         sum(1 for t, p in zip(linha, prev, strict=True) if t == p)
         for linha, prev in zip(y, previsto, strict=True)
     ]
-    tokens = sum(len(linha) for linha in y)
+    tokens_total = sum(len(linha) for linha in y)
     return Desempenho(
-        token=sum(acertos) / tokens if tokens else 0.0,
+        token=sum(acertos) / tokens_total if tokens_total else 0.0,
         perfeitos=sum(
             1 for linha, n in zip(y, acertos, strict=True) if n == len(linha)
         ),
         enderecos=len(y),
         proporcional=sum(n / len(linha) for linha, n in zip(y, acertos, strict=True))
         / len(y),
+        estrutura=sum(
+            1
+            for toks, linha, prev in zip(tokens, y, previsto, strict=True)
+            if mesma_estrutura(toks, linha, prev)
+        ),
     )
 
 
@@ -128,6 +174,13 @@ def _cabecalho(treino: Desempenho | None, teste: Desempenho) -> None:
             teste.fracao_perfeita,
         ),
         (
+            # Mesma regua sem cobrar a fronteira: abrir trecho do mesmo tipo de
+            # novo ou largar a pontuacao de corte em `O` nao muda o campo.
+            "endereco perfeito por trecho",
+            None if treino is None else treino.fracao_estrutura,
+            teste.fracao_estrutura,
+        ),
+        (
             # Media, por endereco, da fracao de tokens certos: um endereco
             # de 30 tokens nao pesa 15x mais que um de 2, e um endereco
             # quase certo ainda soma.
@@ -149,6 +202,12 @@ def _cabecalho(treino: Desempenho | None, teste: Desempenho) -> None:
     if treino is not None:
         perfeitos += f" e {treino.perfeitos}/{treino.enderecos} no treino"
     console.print(f"[dim]Enderecos com todos os rotulos certos: {perfeitos}.[/dim]")
+    if teste.so_fronteira:
+        console.print(
+            f"[dim]{teste.so_fronteira} dos {teste.enderecos - teste.perfeitos} que "
+            + "erram o rotulo acertam os trechos e o texto: so a fronteira ficou "
+            + "trocada (ou um trecho do mesmo tipo foi partido).[/dim]"
+        )
 
     if treino is not None and 100 * (treino.token - teste.token) < QUEDA_MINIMA_TOKEN:
         console.print(
@@ -256,12 +315,17 @@ def _por_categoria(teste: Exemplos, previsto: Rotulos) -> None:
         tabela.add_column(nome)
         tabela.add_column("enderecos", justify="right", style="dim")
         tabela.add_column("endereco perfeito", justify="right")
+        tabela.add_column("por trecho", justify="right")
         tabela.add_column("token", justify="right")
 
         desempenhos = [
             (
                 valor,
-                medir([teste.y[i] for i in indices], [previsto[i] for i in indices]),
+                medir(
+                    [teste.y[i] for i in indices],
+                    [previsto[i] for i in indices],
+                    [teste.tokens[i] for i in indices],
+                ),
             )
             for valor, indices in grupos.items()
         ]
@@ -274,6 +338,10 @@ def _por_categoria(teste: Exemplos, previsto: Rotulos) -> None:
                 Text(
                     pct(desempenho.fracao_perfeita),
                     style=estilo_fracao(desempenho.fracao_perfeita),
+                ),
+                Text(
+                    pct(desempenho.fracao_estrutura),
+                    style=estilo_fracao(desempenho.fracao_estrutura),
                 ),
                 Text(pct(desempenho.token), style=estilo_fracao(desempenho.token)),
             )
@@ -469,7 +537,7 @@ def avaliar(
         console.print("[dim]Prevendo o recorte de teste...[/dim]")
     else:
         console.print("[dim]Prevendo os recortes de treino e teste...[/dim]")
-        desempenho_treino = medir(treino.y, _prever(crf, treino.x))
+        desempenho_treino = medir(treino.y, _prever(crf, treino.x), treino.tokens)
     avaliar_previsto(teste, _prever(crf, teste.x), desempenho_treino, nome)
 
 
@@ -488,7 +556,7 @@ def avaliar_previsto(
     """
     titulo = "Avaliacao do CRF" if nome is None else f"Avaliacao do CRF — {nome}"
     console.rule(f"[bold]{titulo}[/bold]")
-    _cabecalho(desempenho_treino, medir(teste.y, previsto))
+    _cabecalho(desempenho_treino, medir(teste.y, previsto, teste.tokens))
 
     _por_rotulo(teste.y, previsto)
     _por_categoria(teste, previsto)
