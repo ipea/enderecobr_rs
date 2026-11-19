@@ -9,6 +9,20 @@ versionamento é o [SemVer](https://semver.org/lang/pt-BR/). O que é anterior �
 
 ## [Não publicado]
 
+## [0.8.0] - 2026-11-19
+
+- Modelo novo: `modelo-crf-v0.3.0` (1,4 MB contra 0,7 MB do `modelo-crf-v0.2.1`).
+  Treinado com o aumento de dados do pipeline: cada exemplo ganha até três
+  variantes com o alvo original — sem a pontuação dispensável, sem o código `O`
+  que abre o texto da base e com os dígitos trocados por outros de mesmo
+  tamanho — para o modelo parar de usar pontuação e valor de número como pista.
+- Na validação cruzada de 3 folds (11.007 endereços) o aumento levou o endereço
+  perfeito de 66,7% para 67,6% e, no DF, de 47,8% para 51,5%. No recorte de teste
+  gravado (1.147 endereços) o modelo novo acerta 90,4% dos tokens e 68,3% dos
+  endereços inteiros (70,6% ignorando ruído de fronteira).
+- Passa a reconhecer o CEP depois da cabeça `CEP` (`cep 01000-000`), que todas
+  as versões anteriores jogavam em `O`.
+
 ## [0.7.4] - 2026-11-13
 
 - **Breaking**: Simplificando mais ainda as dependências do pacote: agora serde só
