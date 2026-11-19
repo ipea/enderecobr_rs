@@ -81,6 +81,17 @@ def test_recorte_e_por_modelo():
     assert ler_recorte(conn, "outro") == {"treino": set(), "teste": set()}
 
 
+def test_recorte_de_outro_modelo_nao_e_apagado():
+    # A coluna `recorte` guarda um modelo so: treinar o v16 apagava o recorte do
+    # v15 e nao dava mais para compara-los no teste de cada um.
+    conn = banco_com(["h1", "h2", "h3", "h4"])
+    gravar_recorte(conn, "v15", treino=["h1"], teste=["h2"])
+    gravar_recorte(conn, "v16", treino=["h3"], teste=["h4"])
+
+    assert ler_recorte(conn, "v15") == {"treino": {"h1"}, "teste": {"h2"}}
+    assert ler_recorte(conn, "v16") == {"treino": {"h3"}, "teste": {"h4"}}
+
+
 def test_separar_por_recorte_preserva_a_ordem_do_banco():
     exemplos = exemplos_com(["h1", "h2", "h3"])
 

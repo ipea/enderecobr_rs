@@ -236,6 +236,21 @@ def gravar_resposta(
     conn.commit()
 
 
+def garantir_recortes(conn: sqlite3.Connection) -> None:
+    """Tabela de recorte por modelo: a coluna `recorte` guarda so o ultimo treino."""
+    _ = conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS recortes (
+            modelo TEXT NOT NULL,
+            hash_endereco TEXT NOT NULL,
+            papel TEXT NOT NULL,
+            PRIMARY KEY (modelo, hash_endereco)
+        )
+        """
+    )
+    conn.commit()
+
+
 def gravar_recorte(
     conn: sqlite3.Connection,
     modelo: str,
@@ -245,13 +260,23 @@ def gravar_recorte(
     """Marca no banco o papel de cada endereco no recorte de um modelo.
 
     E o que permite `avaliar` medir no que o modelo nunca viu: o split deixa de
-    ser presumido a partir das opcoes de linha de comando.
+    ser presumido a partir das opcoes de linha de comando. Cada modelo tem o seu
+    recorte guardado (treinar outro modelo nao apaga o anterior); a coluna
+    `recorte` continua sendo o espelho do ultimo treino, que e o que
+    `explorar --recorte` le.
     """
     garantir_recorte(conn)
+    garantir_recortes(conn)
+    _ = conn.execute("DELETE FROM recortes WHERE modelo = ?", (modelo,))
     for papel, hashes in (("treino", treino), ("teste", teste)):
+        lista = list(hashes)
+        _ = conn.executemany(
+            "INSERT INTO recortes (modelo, hash_endereco, papel) VALUES (?, ?, ?)",
+            [(modelo, hash_, papel) for hash_ in lista],
+        )
         _ = conn.executemany(
             "UPDATE enderecos SET recorte = ? WHERE hash_endereco = ?",
-            [(f"{modelo}/{papel}", hash_) for hash_ in hashes],
+            [(f"{modelo}/{papel}", hash_) for hash_ in lista],
         )
     conn.commit()
 
@@ -259,8 +284,20 @@ def gravar_recorte(
 def ler_recorte(conn: sqlite3.Connection, modelo: str) -> dict[str, set[str]]:
     """Hashes de treino e teste gravados para o modelo (vazios se nao houver)."""
     garantir_recorte(conn)
+    garantir_recortes(conn)
     recorte: dict[str, set[str]] = {}
     for papel in ("treino", "teste"):
+        recorte[papel] = {
+            str(linha[0])
+            for linha in conn.execute(
+                "SELECT hash_endereco FROM recortes WHERE modelo = ? AND papel = ?",
+                (modelo, papel),
+            )
+        }
+        if recorte[papel]:
+            continue
+        # Modelo treinado antes da tabela existir: so resta a coluna, que
+        # guarda o ultimo treino feito no banco.
         recorte[papel] = {
             str(linha[0])
             for linha in conn.execute(
